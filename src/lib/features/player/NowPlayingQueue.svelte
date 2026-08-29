@@ -23,11 +23,14 @@
     const current = $derived(playerStore.current);
     const currentIndex = $derived(current ? queue.findIndex((tr) => tr.id === current.id) : -1);
 
-    // Album tracks for the current track, from the library grouping.
+    // The current track's album, already in running order from the library
+    // grouping. Matched on album artist, which is how albums are keyed — on a
+    // compilation the track's own artist is not the album's.
     const albumTracks = $derived.by<Track[]>(() => {
         if (!current) return [];
+        const artist = current.albumArtist ?? current.artist;
         const group = libraryStore.albums.find(
-            (a) => a.album === current.album && a.artist === current.artist,
+            (a) => a.album === current.album && a.artist === artist,
         );
         return group?.tracks ?? [current];
     });
@@ -44,7 +47,9 @@
         if (view === 'album') {
             return albumTracks.map((track, i) => ({
                 track,
-                display: i + 1,
+                // The album's own numbering, so a partially-ripped album shows
+                // the positions the sleeve does.
+                display: track.trackNumber ?? i + 1,
                 list: albumTracks,
                 listIndex: i,
                 isCurrent: track.id === current?.id,

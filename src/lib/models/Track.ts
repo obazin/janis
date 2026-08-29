@@ -16,6 +16,15 @@ export interface Track {
     channels: number | null;
     lossless: boolean;
     addedAt: number;
+    /** Position within the album — tagged, or recovered from the filename. */
+    trackNumber: number | null;
+    trackTotal: number | null;
+    discNumber: number | null;
+    discTotal: number | null;
+    year: number | null;
+    genre: string | null;
+    /** The album's own artist, which on a compilation is not the track's. */
+    albumArtist: string | null;
 }
 
 export interface WatchedFolder {

@@ -1,6 +1,7 @@
 <script lang="ts">
-    import { libraryStore } from '$lib/features/library/LibraryStore.svelte';
+    import { libraryStore, type AlbumGroup } from '$lib/features/library/LibraryStore.svelte';
     import { playerStore } from '$lib/features/player/PlayerStore.svelte';
+    import { fmtTime } from '$lib/features/player/format';
     import { searchQuery } from '$lib/stores/SearchStore';
     import type { Track } from '$lib/models/Track';
     import AlbumCard from '$lib/features/library/AlbumCard.svelte';
@@ -26,7 +27,14 @@
     let tab = $state<Tab>('albums');
 
     function matches(track: Track, query: string): boolean {
-        return [track.title, track.artist, track.album, track.composer]
+        return [
+            track.title,
+            track.artist,
+            track.album,
+            track.composer,
+            track.albumArtist,
+            track.genre,
+        ]
             .filter((v): v is string => v != null)
             .some((v) => v.toLowerCase().includes(query));
     }
@@ -35,6 +43,17 @@
     const filteredTracks = $derived(
         query ? libraryStore.tracks.filter((tr) => matches(tr, query)) : [...libraryStore.tracks],
     );
+    // Year · track count · runtime, dropping whatever the tags did not say.
+    function albumDetail(album: AlbumGroup): string {
+        return [
+            album.year ? String(album.year) : null,
+            t('library.tracks', { count: album.tracks.length }),
+            fmtTime(album.durationSecs),
+        ]
+            .filter(Boolean)
+            .join(' · ');
+    }
+
     const filteredAlbums = $derived(
         libraryStore.albums.filter((a) => a.tracks.some((tr) => filteredTracks.includes(tr))),
     );
@@ -96,6 +115,8 @@
                         title={album.album ?? t('common.unknownAlbum')}
                         subtitle={album.artist ?? t('common.unknownArtist')}
                         seed="{album.artist ?? ''}-{album.album ?? ''}"
+                        coverTrackId={album.tracks[0]?.id ?? null}
+                        detail={albumDetail(album)}
                         onclick={() => playerStore.playQueue(album.tracks, 0)}
                     />
                 {/each}
@@ -107,6 +128,7 @@
                         title={artist.artist}
                         subtitle={t('library.tracks', { count: artist.tracks.length })}
                         seed={artist.artist}
+                        coverTrackId={artist.tracks[0]?.id ?? null}
                         onclick={() => playerStore.playQueue(artist.tracks, 0)}
                     />
                 {/each}
