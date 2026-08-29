@@ -84,6 +84,9 @@ crossbeam-channel = "0.5"
 # flake.nix. `symphonia-common` is not re-exported by the `symphonia` facade
 # but carries the OpusHead parser, and is pinned to the same version so the
 # two cannot drift apart.
+# EBU R128 loudness, for files whose tags carry no ReplayGain. Pure Rust, so
+# it adds nothing to the build the way libopus does.
+ebur128 = "0.1"
 opus = "0.4"
 symphonia-common = "0.6.1"
 # Web radio. Buffers an HTTP stream into something `Read + Seek`, which is

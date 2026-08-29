@@ -48,6 +48,7 @@ The canonical description of user-facing behavior. Every new feature lands here 
 
 ## Playback engine
 
+- **Volume normalization** evens out loudness across the library. A track's gain comes from its ReplayGain tags where it has them; otherwise the engine measures the track against EBU R128 while it plays, and remembers the answer for next time — so the library fills itself in as it is listened to. Only a track heard start to finish is recorded; a seek abandons the measurement rather than storing a partial one. The gain is capped so a boost can never clip, and takes effect exactly as each track reaches the speakers, which matters at a gapless join where two tracks are in flight at once.
 - Decoding, the 10-band EQ, the analyser and output all run in Rust. One signal path for every source: file **or web radio stream** → symphonia decode → resample (bypassed when the source already matches the device rate) → ten peaking filters → analyser tap → volume → device.
 - Web radio is buffered over HTTP into the same decoder a file uses, so a station gets the EQ and a real visualiser.
 - **What a station is playing** comes from one of two sources. Stations whose operator publishes a now-playing endpoint (SomaFM, the FIP webradios, Radio Paradise — 54 of the curated list) are polled for artist, title, album and cover art; Radio France and Radio Paradise supply the artwork, and Radio France says when the track ends so the next poll lands just after it. Everything else falls back to the ICY metadata carried in the stream, parsed into artist and title where its shape allows. A station with a provider ignores ICY: two feeds disagreeing about timing reads worse than either alone.
@@ -69,7 +70,7 @@ The canonical description of user-facing behavior. Every new feature lands here 
 ## Settings (`/settings`)
 
 - Violet eyebrow. **Equalizer presets** chips (apply immediately + persist) and a "fine-tune" link opening the EQ sheet.
-- **Playback** toggles: gapless, crossfade, normalization, exclusive output. Persisted preferences; the engine wires them up progressively (they do not all alter playback yet — descriptions stay factual).
+- **Playback** toggles: gapless and normalization are live in the engine; crossfade and exclusive output are persisted preferences the engine does not act on yet (descriptions stay factual). Toggling normalization is heard immediately, mid-track.
 - **Audio output** cards: the output device the engine opened and its sample rate (both populate once something has played; "System default" / "—" until then).
 - **Language** chips: English / Français. Persisted; `lang` attribute + localStorage FOUC mirror update immediately.
 - Open-source banner (GPL-3.0).

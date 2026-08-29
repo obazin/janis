@@ -25,6 +25,12 @@ export interface Track {
     genre: string | null;
     /** The album's own artist, which on a compilation is not the track's. */
     albumArtist: string | null;
+    /**
+     * Playback gain in dB, already resolved by the library from the file's
+     * ReplayGain tags or its measured loudness. Zero when neither is known.
+     * The engine decides whether to apply it — see the normalization setting.
+     */
+    gainDb: number;
 }
 
 export interface WatchedFolder {

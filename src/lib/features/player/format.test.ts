@@ -25,6 +25,7 @@ function track(overrides: Partial<Track>): Track {
         year: null,
         genre: null,
         albumArtist: null,
+        gainDb: 0,
         ...overrides,
     };
 }

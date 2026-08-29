@@ -63,7 +63,7 @@ CREATE INDEX IF NOT EXISTS idx_tracks_added ON tracks(added_at DESC);
 /// `SCHEMA` above is frozen at version 1 — it only ever creates a fresh file.
 /// Every change since is a migration, so a new database and an existing one
 /// converge on the same shape.
-const SCHEMA_VERSION: i64 = 2;
+const SCHEMA_VERSION: i64 = 3;
 
 /// Index `i` upgrades to version `i + 2`. Append only: editing a shipped entry
 /// would skip the change for anyone who already ran it.
@@ -77,6 +77,17 @@ const MIGRATIONS: &[&str] = &[
      ALTER TABLE tracks ADD COLUMN year INTEGER;
      ALTER TABLE tracks ADD COLUMN genre TEXT;
      ALTER TABLE tracks ADD COLUMN album_artist TEXT;",
+    // → 3: what each track's playback gain is worked out from. ReplayGain
+    //      columns come from the file's tags; the loudness pair is measured
+    //      when a track without tags is played end to end. NULL throughout
+    //      means "not known", which is what keeps an unmeasured track
+    //      distinguishable from one that genuinely needs no adjustment.
+    "ALTER TABLE tracks ADD COLUMN rg_track_gain_db REAL;
+     ALTER TABLE tracks ADD COLUMN rg_track_peak REAL;
+     ALTER TABLE tracks ADD COLUMN rg_album_gain_db REAL;
+     ALTER TABLE tracks ADD COLUMN rg_album_peak REAL;
+     ALTER TABLE tracks ADD COLUMN loudness_lufs REAL;
+     ALTER TABLE tracks ADD COLUMN loudness_peak REAL;",
 ];
 
 /// Opens (creating if needed) `janis.db` under the app-data directory and
@@ -326,6 +337,8 @@ mod tests {
         let cols = columns(&conn, "tracks");
         assert!(cols.contains(&"track_number".to_string()));
         assert!(cols.contains(&"album_artist".to_string()));
+        assert!(cols.contains(&"rg_track_gain_db".to_string()));
+        assert!(cols.contains(&"loudness_lufs".to_string()));
 
         // The row that was already there survives, with the new column empty.
         let (title, track_number): (String, Option<u32>) = conn

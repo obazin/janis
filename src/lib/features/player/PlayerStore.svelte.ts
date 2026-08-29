@@ -192,7 +192,7 @@ class PlayerStore {
                 trackId: track.id,
                 path: track.path,
                 durationSecs: track.durationSecs,
-                gainDb: 0,
+                gainDb: track.gainDb,
             })),
             this.#index,
         );

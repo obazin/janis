@@ -28,6 +28,7 @@ pub mod dsp;
 pub mod engine;
 pub mod events;
 pub mod icy;
+pub mod loudness;
 pub mod nowplaying;
 pub mod opus;
 pub mod output;
@@ -133,13 +134,14 @@ impl AudioEngine {
 
 /// Starts the engine thread. The output device is opened lazily, on first
 /// play, so a machine with no sound card still boots.
-pub fn init(device_id: Option<String>) -> AudioEngine {
+pub fn init(loudness_store: Arc<dyn loudness::Store>, device_id: Option<String>) -> AudioEngine {
     let (tx, rx) = crossbeam_channel::unbounded();
     let params = Arc::new(Params::default());
     let subscribers = Arc::new(Subscribers::default());
 
     let station_epoch = Arc::new(AtomicU64::new(0));
     let engine = Engine::new(
+        loudness_store,
         rx,
         Arc::clone(&params),
         Arc::clone(&subscribers),

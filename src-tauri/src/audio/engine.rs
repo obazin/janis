@@ -18,6 +18,7 @@ use super::decode::Decoder;
 use super::dsp::remap_channels;
 use super::events::{EngineEvent, Mode};
 use super::icy;
+use super::loudness::{self, Loudness, Store};
 use super::nowplaying::Update;
 use super::output::{self, Output};
 use super::params::Params;
@@ -61,6 +62,7 @@ pub enum EngineCommand {
     Seek(f64),
     SetShuffle(bool),
     SetRepeat(bool),
+    SetNormalize(bool),
     SetDevice(Option<String>),
     /// A now-playing poller reporting what a station is playing. Carries the
     /// epoch it started under so a late answer about a station the listener
@@ -84,9 +86,15 @@ struct Boundary {
     frame: u64,
     index: usize,
     duration_secs: f64,
+    /// The gain this track wants, in dB. Applied when the boundary reaches
+    /// the device rather than when the decoder crossed it — at a gapless
+    /// join the two are up to a ring-buffer apart, and applying it early
+    /// would play the tail of the outgoing track at the next track's volume.
+    gain_db: f64,
 }
 
 pub struct Engine {
+    loudness_store: Arc<dyn Store>,
     commands: Receiver<EngineCommand>,
     params: Arc<Params>,
     subscribers: Arc<Subscribers>,
@@ -107,6 +115,16 @@ pub struct Engine {
     /// Written by the ICY reader as the station announces tracks.
     now_playing: Option<NowPlaying>,
     reported_title: Option<String>,
+    /// Whether the normalization gain is applied at all. Consulted at the
+    /// moment a gain is set, so the Settings toggle takes effect mid-track
+    /// rather than at the next track.
+    normalize: bool,
+    /// The gain of the track currently being decoded, in dB.
+    current_gain_db: f64,
+    /// Loudness being measured for the playing track, when it has no gain of
+    /// its own. Abandoned on a seek — a partial listen measures the wrong
+    /// thing.
+    measuring: Option<(i64, Loudness)>,
     /// Set when the station has a now-playing provider. The provider is then
     /// the only source: merging it with ICY, which often disagrees about
     /// timing, produces worse answers than either feed alone.
@@ -131,6 +149,7 @@ pub struct Engine {
 
 impl Engine {
     pub fn new(
+        loudness_store: Arc<dyn Store>,
         commands: Receiver<EngineCommand>,
         params: Arc<Params>,
         subscribers: Arc<Subscribers>,
@@ -138,6 +157,7 @@ impl Engine {
         device_id: Option<String>,
     ) -> Self {
         Self {
+            loudness_store,
             commands,
             params,
             subscribers,
@@ -153,6 +173,9 @@ impl Engine {
             preloaded: None,
             now_playing: None,
             reported_title: None,
+            normalize: true,
+            current_gain_db: 0.0,
+            measuring: None,
             has_provider: false,
             station_epoch,
             resampler: None,
@@ -199,6 +222,7 @@ impl Engine {
     fn handle(&mut self, command: EngineCommand) {
         match command {
             EngineCommand::LoadQueue { entries, index } => {
+                self.finish_measuring(false);
                 self.station_id = None;
                 self.now_playing = None;
                 self.reported_title = None;
@@ -262,6 +286,13 @@ impl Engine {
                 self.refresh_preload();
                 self.emit_state();
             }
+            EngineCommand::SetNormalize(enabled) => {
+                self.normalize = enabled;
+                // Re-apply what is playing so the switch is heard now rather
+                // than at the next track.
+                let gain = self.current_gain_db;
+                self.apply_gain(gain);
+            }
             EngineCommand::SetDevice(id) => {
                 self.device_id = id;
                 // Rebuilding the stream is the only way to change device, and
@@ -276,6 +307,58 @@ impl Engine {
             EngineCommand::Describe => self.describe(),
             EngineCommand::Shutdown => {}
         }
+    }
+
+    /// Begins measuring the playing track's loudness, when it is a local
+    /// track that nothing has measured and no tag describes.
+    ///
+    /// Free: the engine is decoding these samples anyway. A track listened to
+    /// end to end fills in its own gain for next time.
+    fn start_measuring(&mut self, format: &super::decode::SourceFormat) {
+        self.measuring = None;
+        if self.mode != Mode::Local {
+            return;
+        }
+        let Some(entry) = self.queue.current() else {
+            return;
+        };
+        let track_id = entry.track_id;
+        if !self.loudness_store.needs_measurement(track_id) {
+            return;
+        }
+        if let Some(meter) = Loudness::new(format.sample_rate, format.channels) {
+            self.measuring = Some((track_id, meter));
+        }
+    }
+
+    /// Stores the measurement if the track was heard all the way through.
+    ///
+    /// Anything that skipped audio — a seek, a manual skip — abandons it
+    /// instead: a partial listen measures the wrong thing, and a wrong gain
+    /// is worse than none.
+    fn finish_measuring(&mut self, complete: bool) {
+        let Some((track_id, meter)) = self.measuring.take() else {
+            return;
+        };
+        if !complete {
+            return;
+        }
+        if let Some(measured) = meter.finish() {
+            self.loudness_store.record(track_id, measured);
+        }
+    }
+
+    /// Sets the mixer's gain for the track now audible, honouring the
+    /// normalization switch. The clamp caps a boost at +12 dB so a broken tag
+    /// cannot blow the output up.
+    fn apply_gain(&mut self, gain_db: f64) {
+        self.current_gain_db = gain_db;
+        let linear = if self.normalize {
+            loudness::db_to_linear(gain_db).clamp(0.0, 4.0)
+        } else {
+            1.0
+        };
+        self.params.set_track_gain(linear);
     }
 
     /// Replays current state onto a freshly attached subscriber.
@@ -317,6 +400,7 @@ impl Engine {
     }
 
     fn stop(&mut self) {
+        self.finish_measuring(false);
         self.playing = false;
         self.mode = Mode::Idle;
         self.station_id = None;
@@ -342,6 +426,9 @@ impl Engine {
         let Some(decoder) = self.decoder.as_mut() else {
             return;
         };
+        // Whatever has been measured so far no longer describes a full
+        // listen.
+        self.measuring = None;
         match decoder.seek(secs) {
             Ok(landed) => {
                 // Drop everything already decoded past the old position, and
@@ -357,6 +444,7 @@ impl Engine {
                     frame: self.frames_written,
                     index: self.queue.index(),
                     duration_secs: self.current_duration,
+                    gain_db: self.current_gain_db,
                 });
                 self.emit_progress_now();
             }
@@ -420,10 +508,10 @@ impl Engine {
 
     /// Swaps in a freshly opened decoder and resets everything derived from
     /// the old one.
-    fn install_decoder(&mut self, decoder: Decoder, gain_db: f32) {
+    fn install_decoder(&mut self, decoder: Decoder, gain_db: f64) {
         let format = decoder.format().clone();
-        self.params
-            .set_track_gain(10f32.powf(gain_db / 20.0).clamp(0.0, 4.0));
+        self.start_measuring(&format);
+        self.apply_gain(gain_db);
         self.rebuild_resampler(format.sample_rate);
         self.decoder = Some(decoder);
         self.preloaded = None;
@@ -438,6 +526,7 @@ impl Engine {
             frame: 0,
             index: self.queue.index(),
             duration_secs: self.current_duration,
+            gain_db: self.current_gain_db,
         });
 
         self.emit(EngineEvent::Format {
@@ -512,6 +601,13 @@ impl Engine {
         };
 
         if read > 0 {
+            // Measured at the source's own rate and channel count: the answer
+            // should describe the file, not whatever device it happens to be
+            // playing through.
+            if let Some((_, meter)) = self.measuring.as_mut() {
+                meter.feed(&self.decode_buf[..read]);
+            }
+
             self.mapped_buf.clear();
             remap_channels(
                 &self.decode_buf[..read],
@@ -577,6 +673,11 @@ impl Engine {
     /// End of a track: hand over to the preloaded decoder without flushing —
     /// that continuity is what makes the join gapless.
     fn advance_or_stop(&mut self) {
+        // Reaching here from an exhausted decoder means the whole track was
+        // decoded, which is the only case worth recording.
+        let complete = self.decoder.as_ref().is_some_and(|d| d.is_exhausted());
+        self.finish_measuring(complete);
+
         if self.mode != Mode::Local {
             self.stop();
             return;
@@ -607,8 +708,9 @@ impl Engine {
 
         let format = decoder.format().clone();
         self.current_duration = format.duration_secs.unwrap_or(next.duration_secs);
-        self.params
-            .set_track_gain(10f32.powf(next.gain_db / 20.0).clamp(0.0, 4.0));
+        // Deliberately *not* applied here: the outgoing track is still in the
+        // ring. The boundary below carries it, and it lands when the join
+        // actually reaches the device.
         self.rebuild_resampler(format.sample_rate);
         self.decoder = Some(decoder);
         self.preloaded = None;
@@ -620,6 +722,7 @@ impl Engine {
             frame: self.frames_written,
             index: self.queue.index(),
             duration_secs: self.current_duration,
+            gain_db: next.gain_db,
         });
 
         self.emit(EngineEvent::Format {
@@ -734,10 +837,15 @@ impl Engine {
         }
 
         if let Some(boundary) = self.boundaries.front().filter(|b| b.frame <= played) {
-            let (index, duration) = (boundary.index, boundary.duration_secs);
+            let (index, duration, gain_db) =
+                (boundary.index, boundary.duration_secs, boundary.gain_db);
             self.current_duration = duration;
             if self.reported_index != Some(index) {
                 self.reported_index = Some(index);
+                // The new track is only now reaching the speakers, so this is
+                // the moment its gain becomes the right one. `Gain` ramps
+                // across the buffer, so the change is inaudible.
+                self.apply_gain(gain_db);
                 self.emit(EngineEvent::TrackChanged { index });
             }
         }
@@ -824,6 +932,12 @@ mod tests {
     use super::*;
     use std::io::Write;
 
+    /// These tests are about audio reaching the device, not about remembering
+    /// how loud it was.
+    fn no_store() -> Arc<dyn Store> {
+        Arc::new(super::super::loudness::NoStore)
+    }
+
     /// End-to-end through a real output device: decode a generated file,
     /// resample it, push it through the ring, and confirm the callback
     /// consumed frames.
@@ -868,7 +982,7 @@ mod tests {
             .and_then(|mut f| f.write_all(&wav))
             .expect("write test tone");
 
-        let engine = crate::audio::init(None);
+        let engine = crate::audio::init(no_store(), None);
         // Silent: the callback still runs and counts frames, and nobody in
         // the room has to listen to a test tone.
         engine.params().set_volume(0.0);
@@ -916,7 +1030,7 @@ mod tests {
             .expect("station should connect");
         let now_playing = Arc::clone(&stream.now_playing);
 
-        let engine = crate::audio::init(None);
+        let engine = crate::audio::init(no_store(), None);
         engine.params().set_volume(0.0);
         engine
             .send(EngineCommand::PlayStream {

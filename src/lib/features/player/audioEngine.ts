@@ -159,6 +159,11 @@ class AudioEngine {
         return invoke('audio_set_repeat', { enabled });
     }
 
+    /** Whether per-track normalization gain is applied. Takes effect at once. */
+    setNormalize(enabled: boolean) {
+        return invoke('audio_set_normalize', { enabled });
+    }
+
     devices() {
         return invoke<AudioDevice[]>('audio_devices');
     }
