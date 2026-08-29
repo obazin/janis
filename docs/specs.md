@@ -33,7 +33,8 @@ The canonical description of user-facing behavior. Every new feature lands here 
 
 ## Web Radio (`/radio`)
 
-- Ember eyebrow. Genre chips (All + genres present in the curated list). Station cards: gradient tile, name, genre · kbps, red LIVE dot. Click streams the station (plain audio element — EQ/analyser do not apply to radio; visualisers go synthetic). Active station gets an ember border. Search filters by name.
+- Ember eyebrow. Genre chips ("All" first, then every genre present in the curated list sorted by label in the active language). Station cards: gradient tile, name, genre · kbps, red LIVE dot. Click streams the station (plain audio element — EQ/analyser do not apply to radio; visualisers go synthetic). Active station gets an ember border. Search filters by station name **and** genre label.
+- The curated list ships ~100 probe-verified HTTPS streams across ~35 genres: the SomaFM channels, the Radio France webradios (FIP, France Musique, Mouv'), Radio Paradise mixes, Radio Swiss, French independents (TSF Jazz, Nova, Meuh, Jazz Radio, FG, OÜI FM, Latina), US public/independent stations (KEXP, KCRW, WFMU, KUSC, WQXR, The Jazz Groove, SmoothJazz.com), international independents (NTS, Rinse FM, dublab, Venice Classic) and electronic specialists (Nightwave Plaza, Nightride FM, Ambient Sleeping Pill, Hirschmilch, Sunshine Live, Bassdrive).
 
 ## Local Files (`/local`)
 

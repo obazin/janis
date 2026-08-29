@@ -10,12 +10,20 @@
 
     let genre = $state<TranslationKey>('radio.genre.all');
 
+    // "All" first, then genres by their label in the active language.
+    const genreChips = $derived([
+        GENRE_FILTERS[0],
+        ...GENRE_FILTERS.slice(1).sort((a, b) => t(a).localeCompare(t(b))),
+    ]);
+
     const query = $derived($searchQuery.trim().toLowerCase());
     const stations = $derived(
         STATIONS.filter(
             (s) =>
                 (genre === 'radio.genre.all' || s.genreKey === genre) &&
-                (!query || s.name.toLowerCase().includes(query)),
+                (!query ||
+                    s.name.toLowerCase().includes(query) ||
+                    t(s.genreKey).toLowerCase().includes(query)),
         ),
     );
 </script>
@@ -26,7 +34,7 @@
         {t('radio.title')}
     </h1>
     <div class="flex gap-2 flex-wrap mb-6.5">
-        {#each GENRE_FILTERS as key (key)}
+        {#each genreChips as key (key)}
             <Chip label={t(key)} active={genre === key} onclick={() => (genre = key)} />
         {/each}
     </div>
