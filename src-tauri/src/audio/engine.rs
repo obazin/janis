@@ -496,6 +496,15 @@ impl Engine {
         if self.mode == Mode::Idle || self.playing == playing {
             return;
         }
+        if playing && self.mode == Mode::Local && self.decoder.is_none() {
+            // The queue played out earlier: the decoder is gone but the mode
+            // was kept so the UI still shows the last track. Play means play
+            // that track again — flipping the flag alone would report
+            // `playing` over a pump with nothing to decode, a state with no
+            // way out.
+            self.start_current();
+            return;
+        }
         self.playing = playing;
         if let Some(output) = self.output.as_ref() {
             let result = if playing {
@@ -571,32 +580,40 @@ impl Engine {
     // ── track lifecycle ─────────────────────────────────────────────────
 
     fn start_current(&mut self) {
-        let Some(entry) = self.queue.current().cloned() else {
-            self.stop();
-            return;
-        };
         if let Err(message) = self.ensure_output() {
             self.emit(EngineEvent::Error { message });
             return;
         }
 
-        match Decoder::open_file(&entry.path) {
-            Ok(decoder) => {
-                self.current_duration = decoder
-                    .format()
-                    .duration_secs
-                    .unwrap_or(entry.duration_secs);
-                self.install_decoder(decoder, entry.gain_db);
-                self.mode = Mode::Local;
-                self.begin_playback();
-            }
-            Err(message) => {
-                self.emit(EngineEvent::Error { message });
-                // A missing or corrupt file should not strand the queue.
-                if self.queue.advance().is_some() {
-                    self.start_current();
-                } else {
-                    self.stop();
+        // A missing or corrupt file should not strand the queue — but with
+        // repeat on the cursor wraps forever, so each entry is tried at most
+        // once and then playback stops. (This used to recurse, which on a
+        // queue of unopenable files — an unplugged drive, say — overflowed
+        // the engine thread's stack and aborted the whole process.)
+        let mut attempts = self.queue.len();
+        loop {
+            let Some(entry) = self.queue.current().cloned() else {
+                self.stop();
+                return;
+            };
+            match Decoder::open_file(&entry.path) {
+                Ok(decoder) => {
+                    self.current_duration = decoder
+                        .format()
+                        .duration_secs
+                        .unwrap_or(entry.duration_secs);
+                    self.install_decoder(decoder, entry.gain_db);
+                    self.mode = Mode::Local;
+                    self.begin_playback();
+                    return;
+                }
+                Err(message) => {
+                    self.emit(EngineEvent::Error { message });
+                    attempts = attempts.saturating_sub(1);
+                    if attempts == 0 || self.queue.advance().is_none() {
+                        self.stop();
+                        return;
+                    }
                 }
             }
         }
@@ -812,28 +829,42 @@ impl Engine {
             self.stop();
             return;
         }
-        let Some(next) = self.queue.peek_next().cloned() else {
-            self.decoder = None;
-            self.playing = false;
-            self.emit_state();
-            return;
-        };
-        self.queue.advance();
 
-        let decoder = match self.preloaded.take() {
-            Some(decoder) => Some(decoder),
-            None => match Decoder::open_file(&next.path) {
-                Ok(decoder) => Some(decoder),
-                Err(message) => {
-                    self.emit(EngineEvent::Error { message });
-                    None
-                }
-            },
-        };
+        // Same retry bound as `start_current`: with repeat on, `peek_next`
+        // never runs dry, so a queue where nothing opens must stop after one
+        // pass rather than recurse until the stack runs out.
+        let mut attempts = self.queue.len();
+        let (next, decoder) = loop {
+            let Some(next) = self.queue.peek_next().cloned() else {
+                // The queue ran its course. The mode stays Local so the UI
+                // keeps showing the finished track; `set_playing` knows how
+                // to start it again.
+                self.decoder = None;
+                self.playing = false;
+                self.emit_state();
+                return;
+            };
+            self.queue.advance();
 
-        let Some(decoder) = decoder else {
-            self.advance_or_stop();
-            return;
+            let decoder = match self.preloaded.take() {
+                Some(decoder) => Some(decoder),
+                None => match Decoder::open_file(&next.path) {
+                    Ok(decoder) => Some(decoder),
+                    Err(message) => {
+                        self.emit(EngineEvent::Error { message });
+                        None
+                    }
+                },
+            };
+
+            if let Some(decoder) = decoder {
+                break (next, decoder);
+            }
+            attempts = attempts.saturating_sub(1);
+            if attempts == 0 {
+                self.stop();
+                return;
+            }
         };
 
         let format = decoder.format().clone();
@@ -1112,6 +1143,103 @@ mod tests {
             "the track's origin in the rebased timeline is frame 0 — anything \
              else makes position_secs read `played - base = 0` for the rest \
              of the track"
+        );
+    }
+
+    fn missing_entries(count: usize) -> Vec<QueueEntry> {
+        (0..count)
+            .map(|i| QueueEntry {
+                track_id: i as i64,
+                path: std::path::PathBuf::from(format!("/nonexistent/janis-test-{i}.flac")),
+                duration_secs: 1.0,
+                gain_db: 0.0,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_repeating_queue_of_unopenable_files_stops_instead_of_recursing() {
+        let mut engine = bare_engine();
+        engine.queue.load(missing_entries(30), 0);
+        engine.queue.set_repeat(true);
+        engine.mode = Mode::Local;
+        engine.playing = true;
+
+        // Repeat wraps the cursor forever, so before the retry bound this
+        // recursed per failed entry until the engine thread blew its stack
+        // and aborted the whole process.
+        engine.advance_or_stop();
+
+        assert!(engine.decoder.is_none());
+        assert!(!engine.playing, "nothing playable means not playing");
+        assert_eq!(engine.mode, Mode::Idle, "a full failed pass stops playback");
+    }
+
+    #[test]
+    fn play_after_the_queue_ends_never_reports_ghost_playback() {
+        let mut engine = bare_engine();
+        engine.queue.load(missing_entries(1), 0);
+        engine.mode = Mode::Local;
+
+        // The last track just finished: the decoder is gone but the mode
+        // stays Local so the UI keeps showing it.
+        engine.advance_or_stop();
+        assert!(!engine.playing);
+
+        // Play must either start a track or leave the transport stopped —
+        // reporting `playing` with nothing to decode is a state with no way
+        // out (pump returns immediately forever).
+        engine.set_playing(true);
+        assert!(
+            !engine.playing || engine.decoder.is_some(),
+            "playing with no decoder must be unreachable"
+        );
+    }
+
+    #[test]
+    fn a_boundary_is_announced_only_when_the_device_reaches_it() {
+        let mut engine = bare_engine();
+        engine.mode = Mode::Local;
+        engine.current_duration = 10.0;
+        engine.reported_index = Some(0);
+        engine.boundaries.push_back(Boundary {
+            frame: 0,
+            index: 0,
+            duration_secs: 10.0,
+            gain_db: 0.0,
+        });
+        engine.boundaries.push_back(Boundary {
+            frame: 1000,
+            index: 1,
+            duration_secs: 20.0,
+            gain_db: -3.0,
+        });
+
+        engine.params.reset_frames(999);
+        engine.emit_progress_now();
+        assert_eq!(
+            engine.reported_index,
+            Some(0),
+            "the join is still in the ring, not yet audible"
+        );
+        assert_eq!(engine.boundaries.len(), 2);
+
+        engine.params.reset_frames(1000);
+        engine.emit_progress_now();
+        assert_eq!(
+            engine.reported_index,
+            Some(1),
+            "the join reached the device"
+        );
+        assert_eq!(engine.current_duration, 20.0);
+        assert_eq!(
+            engine.boundaries.len(),
+            1,
+            "the crossed boundary becomes the position origin"
+        );
+        assert!(
+            (engine.current_gain_db - -3.0).abs() < f64::EPSILON,
+            "the incoming track's gain lands with its first audible frame"
         );
     }
 
