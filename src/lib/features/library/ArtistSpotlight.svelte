@@ -1,7 +1,7 @@
 <script lang="ts">
     import { libraryStore } from './LibraryStore.svelte';
     import { playerStore } from '$lib/features/player/PlayerStore.svelte';
-    import ArtTile from '$lib/design-system/atoms/ArtTile.svelte';
+    import CoverArt from './CoverArt.svelte';
     import SectionLabel from '$lib/design-system/atoms/SectionLabel.svelte';
     import { ICONS } from '$lib/icons/paths';
     import { t } from '$lib/i18n/LanguageStore.svelte';
@@ -75,7 +75,8 @@
                             class="cursor-pointer text-left"
                             onclick={() => playerStore.playQueue(album.tracks, 0)}
                         >
-                            <ArtTile
+                            <CoverArt
+                                trackId={album.tracks[0]?.id ?? null}
                                 seed="{album.artist ?? ''}-{album.album ?? ''}"
                                 class="aspect-square rounded-xl mb-1.5 shadow-tile"
                             />

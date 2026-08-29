@@ -1,6 +1,6 @@
 <script lang="ts">
     import type { Track } from '$lib/models/Track';
-    import ArtTile from '$lib/design-system/atoms/ArtTile.svelte';
+    import CoverArt from './CoverArt.svelte';
     import { fmtTime } from '$lib/features/player/format';
     import { t } from '$lib/i18n/LanguageStore.svelte';
 
@@ -31,7 +31,8 @@
     <div class="w-6.5 text-center font-mono text-body text-text-faint">
         {String(number).padStart(2, '0')}
     </div>
-    <ArtTile
+    <CoverArt
+        trackId={track.id}
         seed="{track.artist ?? ''}-{track.album ?? track.title}"
         class="size-9.5 rounded-lg flex-none"
     />

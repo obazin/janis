@@ -3,7 +3,7 @@
     import { libraryStore } from '$lib/features/library/LibraryStore.svelte';
     import { eqOpen } from '$lib/stores/EqOverlayStore';
     import { fmtTime } from './format';
-    import ArtTile from '$lib/design-system/atoms/ArtTile.svelte';
+    import CoverArt from '$lib/features/library/CoverArt.svelte';
     import SectionLabel from '$lib/design-system/atoms/SectionLabel.svelte';
     import { ICONS } from '$lib/icons/paths';
     import { t } from '$lib/i18n/LanguageStore.svelte';
@@ -158,7 +158,8 @@
                             </span>
                         {/if}
                     </div>
-                    <ArtTile
+                    <CoverArt
+                        trackId={row.track.id}
                         seed="{row.track.artist ?? ''}-{row.track.album ?? row.track.title}"
                         class="size-8.5 rounded-lg flex-none"
                     />
