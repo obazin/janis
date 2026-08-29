@@ -33,7 +33,7 @@
     }
 
     function draw(now: number) {
-        visualizer.tick(now, playerStore.analyser, playerStore.playing, eqStore.gains);
+        visualizer.tick(now, playerStore.visualFrame, playerStore.playing, eqStore.gains);
         if (!canvas) return;
         const f = fit(canvas);
         if (!f) return;

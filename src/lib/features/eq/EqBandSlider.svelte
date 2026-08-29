@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { EQ_GAIN_RANGE } from '$lib/features/player/audioGraph';
+    import { EQ_GAIN_RANGE } from './bands';
 
     // One vertical EQ band: value readout, draggable column, frequency
     // label. Controlled — caller owns the value and receives drags.

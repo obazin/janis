@@ -9,16 +9,15 @@
     "nav.local": "Local Files",
     "nav.spotify": "Spotify",
     "nav.settings": "Settings",
-
     "titlebar.search": "Search songs, artists, stations…",
     "titlebar.openSource": "Open source",
-
     "now.eyebrow": "Now playing · From {album}",
     "now.eyebrowNoAlbum": "Now playing",
     "now.eyebrowRadio": "Live radio · {station}",
     "now.artist": "Artist",
     "now.composer": "Composer",
     "now.album": "Album",
+    "now.station": "Station",
     "now.waveform": "Waveform",
     "now.tabUpNext": "Up Next",
     "now.tabPlaylist": "Playlist",
@@ -33,7 +32,6 @@
     "now.empty.title": "Nothing playing yet",
     "now.empty.desc": "Add music to your library, or drop audio files anywhere in the window.",
     "now.empty.cta": "Add music",
-
     "library.eyebrow": "Your collection",
     "library.title": "Library",
     "library.addMusic": "Add music",
@@ -47,7 +45,6 @@
     "library.playlistsSoon.desc": "Creating and editing playlists lands in a future release. Browse your albums, artists and songs meanwhile.",
     "library.empty.title": "Your library is empty",
     "library.empty.desc": "Add a folder to scan, or drop audio files anywhere in the window.",
-
     "discover.eyebrow": "From your library",
     "discover.title": "Discover",
     "discover.recentAlbums": "Recently added albums",
@@ -55,10 +52,10 @@
     "discover.rediscover": "Rediscover",
     "discover.empty.title": "Nothing to discover yet",
     "discover.empty.desc": "Discover fills up as your library grows — album and artist shelves built from your own music.",
-
     "radio.eyebrow": "Streaming worldwide",
     "radio.title": "Web Radio",
     "radio.live": "Live",
+    "radio.connecting": "Connecting…",
     "radio.kbps": "{kbps} kbps",
     "radio.genre.all": "All",
     "radio.genre.ambient": "Ambient",
@@ -96,7 +93,6 @@
     "radio.genre.trance": "Trance",
     "radio.genre.vaporwave": "Vaporwave",
     "radio.genre.world": "World",
-
     "local.eyebrow": "From this computer",
     "local.title": "Local Files",
     "local.drop.title": "Drop audio files here",
@@ -116,7 +112,6 @@
     "local.removeFolder": "Remove folder",
     "local.empty.title": "No local files yet",
     "local.empty.desc": "Add a folder to watch, or drop files here.",
-
     "spotify.title": "Connect Spotify",
     "spotify.desc": "Bring your Spotify playlists, saved songs and Discover Weekly into Janis — mixed alongside your local library and web radio in one place.",
     "spotify.cta": "Connect Account",
@@ -124,7 +119,6 @@
     "spotify.feature.playlists": "Your playlists",
     "spotify.feature.search": "Unified search",
     "spotify.feature.eq": "EQ on everything",
-
     "settings.eyebrow": "Preferences",
     "settings.title": "Settings",
     "settings.eqPresets": "Equalizer presets",
@@ -146,7 +140,6 @@
     "settings.language.desc": "Interface language",
     "settings.banner.title": "Janis is free and open source",
     "settings.banner.desc": "GPL-3.0 · Built with Tauri & the Web Audio API",
-
     "eq.title": "10-Band Equalizer",
     "eq.subtitle": "Graphic EQ · applied live to playback",
     "eq.reset": "Reset",
@@ -160,7 +153,6 @@
     "eq.preset.vocal": "Vocal",
     "eq.preset.electronic": "Electronic",
     "eq.preset.custom": "Custom",
-
     "player.eq": "EQ",
     "player.play": "Play",
     "player.pause": "Pause",
@@ -170,7 +162,6 @@
     "player.repeat": "Repeat",
     "player.volume": "Volume",
     "player.seek": "Seek",
-
     "common.unknownArtist": "Unknown artist",
     "common.unknownAlbum": "Unknown album",
     "common.localFile": "Local file"

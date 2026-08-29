@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { EQ_PRESETS, PRESET_ORDER, PRESET_LABEL_KEYS } from './presets';
-import { EQ_BAND_COUNT, EQ_GAIN_RANGE } from '$lib/features/player/audioGraph';
+import { EQ_BAND_COUNT, EQ_GAIN_RANGE } from './bands';
 
 describe('EQ presets', () => {
     it('every preset covers all bands within the gain range', () => {

@@ -2,7 +2,7 @@
     import { eqStore } from '$lib/features/eq/EqStore.svelte';
     import { PRESET_ORDER, PRESET_LABEL_KEYS, type EqPresetName } from '$lib/features/eq/presets';
     import { preferencesStore } from '$lib/features/settings/PreferencesStore.svelte';
-    import { audioGraph } from '$lib/features/player/audioGraph';
+    import { playerStore } from '$lib/features/player/PlayerStore.svelte';
     import { eqOpen } from '$lib/stores/EqOverlayStore';
     import { languageStore, LANGUAGES, t, type Language } from '$lib/i18n/LanguageStore.svelte';
     import type { PlaybackOption } from '$lib/models/Preferences';
@@ -23,8 +23,10 @@
 
     const LANGUAGE_LABELS: Record<Language, string> = { en: 'English', fr: 'Français' };
 
+    // Both read from the engine, which reports what the output device
+    // actually opened at — populated once something has played.
     const sampleRateLabel = $derived(
-        audioGraph.sampleRate ? `${(audioGraph.sampleRate / 1000).toFixed(1)} kHz` : '—',
+        playerStore.sampleRate ? `${(playerStore.sampleRate / 1000).toFixed(1)} kHz` : '—',
     );
 </script>
 
@@ -76,7 +78,7 @@
     <div class="flex gap-3.5 flex-wrap mb-8">
         <div class="flex-1 min-w-50 bg-panel border border-border rounded-xl px-4 py-3.5">
             <div class="text-caption text-text-muted mb-1">{t('settings.device')}</div>
-            <div class="font-semibold">{t('settings.deviceValue')}</div>
+            <div class="font-semibold">{playerStore.deviceName ?? t('settings.deviceValue')}</div>
         </div>
         <div class="flex-1 min-w-50 bg-panel border border-border rounded-xl px-4 py-3.5">
             <div class="text-caption text-text-muted mb-1">{t('settings.sampleRate')}</div>

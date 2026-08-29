@@ -43,6 +43,7 @@
             <StationCard
                 {station}
                 active={playerStore.station?.id === station.id}
+                connecting={playerStore.connecting && playerStore.station?.id === station.id}
                 onclick={() => playerStore.playStation(station)}
             />
         {/each}

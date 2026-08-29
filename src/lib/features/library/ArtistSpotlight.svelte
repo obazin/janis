@@ -17,7 +17,9 @@
     }
     let { artist }: Props = $props();
 
-    const group = $derived(artist ? libraryStore.artists.find((a) => a.artist === artist) : undefined);
+    const group = $derived(
+        artist ? libraryStore.artists.find((a) => a.artist === artist) : undefined,
+    );
     const moreTracks = $derived((group?.tracks ?? []).slice(0, 4));
     const albums = $derived(
         artist ? libraryStore.albums.filter((a) => a.artist === artist).slice(0, 4) : [],
@@ -42,7 +44,9 @@
                         class="flex gap-2.5 items-center px-2.5 py-2 rounded-card cursor-pointer w-full text-left transition-colors duration-fast hover:bg-accent/8"
                         onclick={() => playTrack(track)}
                     >
-                        <div class="w-5.5 font-display font-black text-heading-sm text-accent flex-none">
+                        <div
+                            class="w-5.5 font-display font-black text-heading-sm text-accent flex-none"
+                        >
                             {i + 1}
                         </div>
                         <div class="flex-1 min-w-0">
@@ -51,7 +55,11 @@
                                 {track.album ?? t('common.unknownAlbum')}
                             </div>
                         </div>
-                        <svg class="size-3.5 text-text-muted flex-none" viewBox="0 0 24 24" fill="currentColor">
+                        <svg
+                            class="size-3.5 text-text-muted flex-none"
+                            viewBox="0 0 24 24"
+                            fill="currentColor"
+                        >
                             <path d={ICONS.play} />
                         </svg>
                     </button>
