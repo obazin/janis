@@ -552,8 +552,12 @@ impl Engine {
                 let rate = self.device_rate().max(1) as f64;
                 self.frames_written = (landed * rate) as u64;
                 self.params.reset_frames(self.frames_written);
+                // The counter was rebased to the landing point, so the
+                // track's origin in that timeline is frame 0 — reusing
+                // `frames_written` here would make `position_secs` read
+                // `played - base = 0` for the rest of the track.
                 self.boundaries.push_back(Boundary {
-                    frame: self.frames_written,
+                    frame: 0,
                     index: self.queue.index(),
                     duration_secs: self.current_duration,
                     gain_db: self.current_gain_db,
@@ -685,6 +689,14 @@ impl Engine {
     /// progress, so the caller knows whether to sleep.
     fn pump(&mut self) -> bool {
         if !self.playing || self.decoder.is_none() {
+            return false;
+        }
+        // The flush handshake: while a flush is pending the callback is about
+        // to drain the ring, so anything written now would be swept away with
+        // the stale audio (and desync `frames_written` from `frames_played`
+        // for the rest of the track). Hold off until the callback lowers the
+        // flag; it does so within one device period.
+        if self.params.flush_pending() {
             return false;
         }
         let channels = self.device_channels() as usize;
@@ -1055,6 +1067,52 @@ mod tests {
     /// how loud it was.
     fn no_store() -> Arc<dyn Store> {
         Arc::new(super::super::loudness::NoStore)
+    }
+
+    /// An engine with no output device, no subscribers and no thread — the
+    /// transport logic (queue advance, seek bookkeeping, boundary crossing)
+    /// needs none of them, so it can be exercised directly.
+    fn bare_engine() -> Engine {
+        let (tx, rx) = crossbeam_channel::unbounded();
+        Engine::new(
+            no_store(),
+            rx,
+            tx,
+            Arc::new(Params::default()),
+            Arc::new(Subscribers::default()),
+            Arc::new(AtomicU64::new(0)),
+            None,
+        )
+    }
+
+    #[test]
+    fn seek_rebases_the_playhead_and_keeps_the_boundary_at_the_origin() {
+        let mut engine = bare_engine();
+        engine.mode = Mode::Local;
+        let wav = fixtures::wav_bytes(44_100, 2, &fixtures::tone(44_100, 2, 3 * 44_100, 440.0));
+        let mut hint = symphonia::core::formats::probe::Hint::new();
+        hint.with_extension("wav");
+        engine.decoder =
+            Some(Decoder::open(Box::new(std::io::Cursor::new(wav)), hint).expect("wav decodes"));
+
+        engine.seek(2.0);
+
+        // With no device open the rate falls back to 1 frame per second, so
+        // the rebased counter lands on the seek target (give or take the
+        // packet boundary the accurate seek snapped to).
+        assert!(engine.frames_written >= 1, "the counter was rebased");
+        assert_eq!(
+            engine.params.frames_played(),
+            engine.frames_written,
+            "the playhead counter is rebased together with frames_written"
+        );
+        assert_eq!(
+            engine.boundaries.front().map(|b| b.frame),
+            Some(0),
+            "the track's origin in the rebased timeline is frame 0 — anything \
+             else makes position_secs read `played - base = 0` for the rest \
+             of the track"
+        );
     }
 
     /// End-to-end through a real output device: decode a generated file,

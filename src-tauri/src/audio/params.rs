@@ -6,8 +6,11 @@
 //! read, which is more machinery than ten floats deserve.
 //!
 //! Writers are the IPC command handlers and the engine thread; the reader is
-//! the audio callback. `Relaxed` ordering is enough — no value here guards
-//! access to other memory, and a gain that lands one buffer late is inaudible.
+//! the audio callback. Plain values (volume, track gain, the frame counter)
+//! use `Relaxed` — each is read on its own, and one that lands a buffer late
+//! is inaudible. Two values are publish flags for *other* memory and use
+//! release/acquire pairs instead: `eq_epoch` publishes the ten gain slots,
+//! and `flush` orders the engine's ring writes against the callback's drain.
 
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 
@@ -37,8 +40,11 @@ pub struct Params {
     volume: AtomicU32,
     /// Per-track normalization gain, already clamped against clipping.
     track_gain: AtomicU32,
-    /// Set by the engine on seek or track jump. The callback fades out, drops
-    /// what is left in the ring, then clears the flag.
+    /// Set by the engine on seek or track jump; a handshake, not just a flag.
+    /// The engine stops feeding the ring while it is up ([`Self::flush_pending`]),
+    /// the callback fades out, drops what is left in the ring, and only then
+    /// lowers it ([`Self::finish_flush`]) — so audio decoded for the new
+    /// position can never be swept away with the stale audio.
     flush: AtomicBool,
     /// Frames the callback has actually handed to the device — the single
     /// source of truth for playback position, so what the UI shows is what
@@ -60,8 +66,12 @@ impl Default for Params {
 }
 
 impl Params {
+    /// `Acquire` pairs with the `Release` bump in [`Self::set_eq_gains`]: a
+    /// callback that observes a new epoch is guaranteed to observe the gains
+    /// written before it. With `Relaxed` on a weakly-ordered target the epoch
+    /// could arrive first and the callback would latch stale gains for good.
     pub fn eq_epoch(&self) -> u64 {
-        self.eq_epoch.load(Ordering::Relaxed)
+        self.eq_epoch.load(Ordering::Acquire)
     }
 
     /// Reads the ten band gains in dB into `out`, avoiding the allocation a
@@ -79,7 +89,8 @@ impl Params {
             let clamped = gain.clamp(-EQ_GAIN_RANGE_DB, EQ_GAIN_RANGE_DB);
             slot.store(clamped.to_bits(), Ordering::Relaxed);
         }
-        self.eq_epoch.fetch_add(1, Ordering::Relaxed);
+        // The epoch is the publish flag for the ten stores above.
+        self.eq_epoch.fetch_add(1, Ordering::Release);
     }
 
     pub fn volume(&self) -> f32 {
@@ -101,12 +112,21 @@ impl Params {
     }
 
     pub fn request_flush(&self) {
-        self.flush.store(true, Ordering::Relaxed);
+        self.flush.store(true, Ordering::Release);
     }
 
-    /// Consumes the flush request, returning whether one was pending.
-    pub fn take_flush(&self) -> bool {
-        self.flush.swap(false, Ordering::Relaxed)
+    /// Whether a flush is still waiting on the callback. The engine checks
+    /// this before every pump and writes nothing into the ring while it is
+    /// true — that pause is what makes the callback's drain safe.
+    pub fn flush_pending(&self) -> bool {
+        self.flush.load(Ordering::Acquire)
+    }
+
+    /// Lowers the flag once the ring has been drained. `Release` so an engine
+    /// that observes the cleared flag also observes the drain: everything it
+    /// pushes afterwards will be played, not discarded.
+    pub fn finish_flush(&self) {
+        self.flush.store(false, Ordering::Release);
     }
 
     pub fn frames_played(&self) -> u64 {
@@ -151,12 +171,20 @@ mod tests {
     }
 
     #[test]
-    fn flush_is_consumed_exactly_once() {
+    fn flush_stays_pending_until_finished() {
         let params = Params::default();
-        assert!(!params.take_flush());
+        assert!(!params.flush_pending());
         params.request_flush();
-        assert!(params.take_flush(), "first take sees the request");
-        assert!(!params.take_flush(), "second take does not repeat it");
+        assert!(
+            params.flush_pending(),
+            "the engine must see it and hold off"
+        );
+        assert!(
+            params.flush_pending(),
+            "observing the flag must not consume it — only the drain does"
+        );
+        params.finish_flush();
+        assert!(!params.flush_pending(), "the engine may pump again");
     }
 
     #[test]

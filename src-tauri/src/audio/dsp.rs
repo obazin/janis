@@ -1,8 +1,9 @@
 //! The realtime signal chain: ten peaking filters per channel, then gain.
 //!
-//! This is deliberately the same topology as the Web Audio graph it replaces —
-//! source → 10 × peaking biquad → tap → gain → device — so the EQ sounds the
-//! same as it did in the webview and the analyser still sees post-EQ signal.
+//! The chain is source → 10 × peaking biquad → gain → analyser tap → device:
+//! the EQ topology matches the Web Audio graph it replaced, and the analyser
+//! taps the final signal — post-EQ *and* post-gain, so the meters show what
+//! actually reaches the device and scale with the volume slider.
 //!
 //! Everything here runs inside the cpal callback. Nothing in `process` may
 //! allocate: the filter banks are sized once in `new`, and `sync` rewrites
