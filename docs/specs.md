@@ -17,7 +17,8 @@ The canonical description of user-facing behavior. Every new feature lands here 
 - Right column: pink eyebrow ("NOW PLAYING · FROM {ALBUM}" / "LIVE RADIO · {STATION}"), hero title, artist / composer (teal, only when tagged) / album columns.
 - **Waveform** — live time-domain oscilloscope over the playing signal (synthetic animation when no analyser: radio, paused). Progress wash + playhead dot; click seeks (local tracks only). Time row shows elapsed / total ("Live" for radio).
 - **Transport** — shuffle (accent when on), prev, gradient pulse play/pause, next, repeat (accent when on); volume rail with pink→teal fill, persisted debounced.
-- **Spectrum** — 10 live bars (32 Hz–16 kHz labels) + "Open Equalizer" pill.
+- **Queue card** — three-way segmented toggle: **Up Next** (remaining queue after the current track, wrapping once), **Playlist** (the full play queue, current track highlighted), **Album** (the current track's album from the library grouping). Rows show art, title/artist and duration; clicking a row plays from it. An "EQ" pill in the card header opens the equalizer overlay.
+- **Artist spotlight** (local tracks with library matches) — two columns under the queue card: up to 4 more tracks by the current artist (click plays within the artist's tracks) and up to 4 of their albums (click plays the album).
 
 ## Library (`/library`)
 

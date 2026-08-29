@@ -3,7 +3,8 @@
     import { libraryStore } from '$lib/features/library/LibraryStore.svelte';
     import { qualityLabel, artInitials, fmtTime } from '$lib/features/player/format';
     import WaveformCanvas from '$lib/features/player/WaveformCanvas.svelte';
-    import SpectrumPanel from '$lib/features/player/SpectrumPanel.svelte';
+    import NowPlayingQueue from '$lib/features/player/NowPlayingQueue.svelte';
+    import ArtistSpotlight from '$lib/features/library/ArtistSpotlight.svelte';
     import TransportControls from '$lib/features/player/TransportControls.svelte';
     import ArtTile from '$lib/design-system/atoms/ArtTile.svelte';
     import Badge from '$lib/design-system/atoms/Badge.svelte';
@@ -112,9 +113,7 @@
 
             <div>
                 <SectionLabel class="mb-2">{t('now.waveform')}</SectionLabel>
-                <div
-                    class="relative h-30 bg-well rounded-card border border-border overflow-hidden"
-                >
+                <div class="relative h-30 bg-well rounded-card border border-border overflow-hidden">
                     <WaveformCanvas variant="big" />
                 </div>
                 <div class="flex justify-between mt-2 font-mono text-caption text-text-muted">
@@ -125,7 +124,11 @@
 
             <TransportControls />
 
-            <SpectrumPanel />
+            <NowPlayingQueue />
+
+            {#if track}
+                <ArtistSpotlight artist={track.artist} />
+            {/if}
         </div>
     </div>
 {/if}
