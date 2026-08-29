@@ -18,6 +18,13 @@ function track(overrides: Partial<Track>): Track {
         channels: null,
         lossless: true,
         addedAt: 0,
+        trackNumber: null,
+        trackTotal: null,
+        discNumber: null,
+        discTotal: null,
+        year: null,
+        genre: null,
+        albumArtist: null,
         ...overrides,
     };
 }

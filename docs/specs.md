@@ -36,6 +36,14 @@ The canonical description of user-facing behavior. Every new feature lands here 
 - Ember eyebrow. Genre chips ("All" first, then every genre present in the curated list sorted by label in the active language). Station cards: gradient tile, name, genre · kbps, red LIVE dot. Click streams the station through the engine, so the EQ and the live visualiser apply exactly as they do to a local file. The card shows "Connecting…" while the stream buffers, then "Live". Active station gets an ember border. Search filters by station name **and** genre label.
 - The curated list ships ~100 probe-verified HTTPS streams across ~35 genres: the SomaFM channels, the Radio France webradios (FIP, France Musique, Mouv'), Radio Paradise mixes, Radio Swiss, French independents (TSF Jazz, Nova, Meuh, Jazz Radio, FG, OÜI FM, Latina), US public/independent stations (KEXP, KCRW, WFMU, KUSC, WQXR, The Jazz Groove, SmoothJazz.com), international independents (NTS, Rinse FM, dublab, Venice Classic) and electronic specialists (Nightwave Plaza, Nightride FM, Ambient Sleeping Pill, Hirschmilch, Sunshine Live, Bassdrive).
 
+## Library metadata
+
+- The scanner reads tags through `lofty`, which normalises every container onto the same keys — ID3v2.2/2.3/2.4 and ID3v1 in MP3, Vorbis comments in FLAC and OGG, MP4 atoms in M4A, APE — so no format needs special handling. Title, artist, album, album artist, composer, genre, year, track and disc numbers (with totals) and embedded cover art all come from there.
+- **A missing track number is recovered from the filename**: `07 - Alive.flac`, `2-11 Reprise.mp3`, `104 Title.m4a`. Only leading digits count and only when a separator follows them, so `1984 - Track.mp3` is not read as track 198 and `99Luftballons.mp3` is not read as track 99. A leading `N-` or `N_` is taken as the disc.
+- Albums group by album + **album artist**, so a compilation stays one album instead of splintering per featured artist, and their tracks are ordered by disc, then track, then title. Tracks with no position sort last rather than to the front.
+- Album cards show real embedded cover art, fetched only once the tile scrolls into view and cached per track — art crosses IPC as base64, so a large library cannot afford to load it all at once.
+- Now Playing shows the track's position on the record ("Track 4 of 9"), disc when there is more than one, year and genre. Titlebar search matches album artist and genre alongside title, artist, album and composer.
+
 ## Playback engine
 
 - Decoding, the 10-band EQ, the analyser and output all run in Rust. One signal path for every source: file **or web radio stream** → symphonia decode → resample (bypassed when the source already matches the device rate) → ten peaking filters → analyser tap → volume → device.
@@ -71,5 +79,6 @@ The canonical description of user-facing behavior. Every new feature lands here 
 ## Persistence (`janis.db`, app-data dir)
 
 - `user_preferences` (single row): volume, EQ gains + preset, four playback switches, language.
-- `watched_folders`: path, added_at. `tracks`: path (unique), folder_id (NULL = ad-hoc import), tags (title/artist/album/composer), duration, format, sample rate, bit depth, channels, lossless, added_at. Upsert by path — rescans never duplicate.
+- `watched_folders`: path, added_at. `tracks`: path (unique), folder_id (NULL = ad-hoc import), tags (title/artist/album/composer/album artist/genre/year, track and disc numbers with their totals), duration, format, sample rate, bit depth, channels, lossless, added_at. Upsert by path — rescans never duplicate.
+- Schema changes are migrations stamped in SQLite's `user_version`, so an existing library gains new columns instead of silently missing them.
 - The webview has no filesystem access at all: the engine reads audio files directly and cover art crosses IPC as base64, so Tauri's asset protocol is not enabled.

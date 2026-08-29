@@ -50,6 +50,16 @@ pub struct Track {
     pub channels: Option<u8>,
     pub lossless: bool,
     pub added_at: i64,
+    /// Position within the album. From the tags, or recovered from the
+    /// filename when the tags are silent.
+    pub track_number: Option<u32>,
+    pub track_total: Option<u32>,
+    pub disc_number: Option<u32>,
+    pub disc_total: Option<u32>,
+    pub year: Option<u32>,
+    pub genre: Option<String>,
+    /// The album's own artist, which on a compilation is not the track's.
+    pub album_artist: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -87,6 +97,13 @@ struct ScannedFile {
     bit_depth: Option<u8>,
     channels: Option<u8>,
     lossless: bool,
+    track_number: Option<u32>,
+    track_total: Option<u32>,
+    disc_number: Option<u32>,
+    disc_total: Option<u32>,
+    year: Option<u32>,
+    genre: Option<String>,
+    album_artist: Option<String>,
 }
 
 fn audio_extension(path: &Path) -> Option<String> {
@@ -123,6 +140,28 @@ fn read_metadata(path: &Path) -> Result<ScannedFile, String> {
         None => (stem_title(), None, None, None),
     };
 
+    // `get_string` reaches the same item whatever the underlying format wrote
+    // it as — ID3v2.2/2.3/2.4 frames, Vorbis comments, MP4 atoms or APE keys
+    // all normalise onto these keys, so this needs no per-format branching.
+    let number = |key: ItemKey| -> Option<u32> {
+        tag.and_then(|t| t.get_string(&key))
+            // ID3 writes "3/12" into a single frame; lofty usually splits it,
+            // but a tagger that wrote the pair verbatim must not parse to None.
+            .and_then(|raw| {
+                raw.split('/')
+                    .next()
+                    .map(str::trim)
+                    .and_then(|n| n.parse().ok())
+            })
+    };
+    let text = |key: ItemKey| non_empty(tag.and_then(|t| t.get_string(&key)).map(str::to_string));
+
+    // A file with no track number still belongs somewhere in the album, and
+    // the position is usually sitting in its filename.
+    let from_name = track_number_from_filename(path);
+    let track_number = number(ItemKey::TrackNumber).or(from_name.track);
+    let disc_number = number(ItemKey::DiscNumber).or(from_name.disc);
+
     Ok(ScannedFile {
         title,
         artist,
@@ -134,7 +173,78 @@ fn read_metadata(path: &Path) -> Result<ScannedFile, String> {
         bit_depth: props.bit_depth(),
         channels: props.channels(),
         lossless: LOSSLESS_EXTENSIONS.contains(&ext.as_str()),
+        track_number,
+        track_total: number(ItemKey::TrackTotal),
+        disc_number,
+        disc_total: number(ItemKey::DiscTotal),
+        year: number(ItemKey::Year).or_else(|| {
+            // Vorbis and MP4 usually carry a full date; the leading four
+            // digits are the year.
+            text(ItemKey::RecordingDate).and_then(|d| d.get(..4).and_then(|y| y.parse().ok()))
+        }),
+        genre: text(ItemKey::Genre),
+        album_artist: text(ItemKey::AlbumArtist),
     })
+}
+
+/// A disc and track position read out of a filename.
+#[derive(Debug, Default, PartialEq, Eq)]
+struct FilenamePosition {
+    disc: Option<u32>,
+    track: Option<u32>,
+}
+
+/// Recovers a track's position from its filename when the tags do not carry
+/// one — `07 - Alive.flac`, `2-03 Reprise.mp3`, `104 Title.m4a`.
+///
+/// Only leading digits count, and only when something separates them from the
+/// title. That is what keeps `1984 - Track.mp3` from reading as track 198 and
+/// `2001 A Space Odyssey.mp3` from reading as a track at all.
+fn track_number_from_filename(path: &Path) -> FilenamePosition {
+    let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
+        return FilenamePosition::default();
+    };
+    let stem = stem.trim();
+
+    let digits: String = stem.chars().take_while(|c| c.is_ascii_digit()).collect();
+    if digits.is_empty() || digits.len() > 3 {
+        return FilenamePosition::default();
+    }
+    let rest = &stem[digits.len()..];
+
+    // `2-03 Title` / `2_03 Title`: a single leading digit, a separator, then
+    // the real track number. Checked before the plain form so the disc is not
+    // mistaken for the track.
+    if digits.len() == 1 {
+        if let Some(after) = rest.strip_prefix(['-', '_']) {
+            let track_digits: String = after.chars().take_while(|c| c.is_ascii_digit()).collect();
+            let tail = &after[track_digits.len()..];
+            if (1..=3).contains(&track_digits.len()) && starts_with_separator(tail) {
+                return FilenamePosition {
+                    disc: digits.parse().ok().filter(|d| *d > 0),
+                    track: track_digits.parse().ok().filter(|t| *t > 0),
+                };
+            }
+        }
+    }
+
+    if !starts_with_separator(rest) {
+        return FilenamePosition::default();
+    }
+    FilenamePosition {
+        disc: None,
+        track: digits.parse().ok().filter(|t| *t > 0),
+    }
+}
+
+/// Whether what follows the digits marks them as a standalone number rather
+/// than the first part of a word or a longer figure.
+fn starts_with_separator(rest: &str) -> bool {
+    match rest.chars().next() {
+        // Nothing after the digits at all — the whole stem is a number.
+        None => true,
+        Some(c) => c.is_whitespace() || matches!(c, '-' | '.' | '_'),
+    }
 }
 
 /// Upserts one scanned file. Returns `true` when the row was newly inserted.
@@ -155,8 +265,11 @@ fn upsert_track(
 
     conn.execute(
         "INSERT INTO tracks (folder_id, path, title, artist, album, composer, duration_secs,
-                             format, sample_rate, bit_depth, channels, lossless)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+                             format, sample_rate, bit_depth, channels, lossless,
+                             track_number, track_total, disc_number, disc_total,
+                             year, genre, album_artist)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12,
+                 ?13, ?14, ?15, ?16, ?17, ?18, ?19)
          ON CONFLICT(path) DO UPDATE SET
              folder_id = excluded.folder_id,
              title = excluded.title,
@@ -168,7 +281,14 @@ fn upsert_track(
              sample_rate = excluded.sample_rate,
              bit_depth = excluded.bit_depth,
              channels = excluded.channels,
-             lossless = excluded.lossless",
+             lossless = excluded.lossless,
+             track_number = excluded.track_number,
+             track_total = excluded.track_total,
+             disc_number = excluded.disc_number,
+             disc_total = excluded.disc_total,
+             year = excluded.year,
+             genre = excluded.genre,
+             album_artist = excluded.album_artist",
         rusqlite::params![
             folder_id,
             path,
@@ -182,6 +302,13 @@ fn upsert_track(
             meta.bit_depth,
             meta.channels,
             meta.lossless as i64,
+            meta.track_number,
+            meta.track_total,
+            meta.disc_number,
+            meta.disc_total,
+            meta.year,
+            meta.genre,
+            meta.album_artist,
         ],
     )
     .map_err(|e| format!("upsert track {}: {}", path, e))?;
@@ -268,6 +395,144 @@ mod tests {
         // m4a stays out deliberately: AAC-or-ALAC, reported lossy.
         assert!(!LOSSLESS_EXTENSIONS.contains(&"m4a"));
     }
+
+    fn position(name: &str) -> FilenamePosition {
+        track_number_from_filename(Path::new(name))
+    }
+
+    #[test]
+    fn reads_a_leading_track_number() {
+        for name in [
+            "07 - Alive.flac",
+            "07 Alive.flac",
+            "07. Alive.flac",
+            "07.Alive.flac",
+            "07_Alive.flac",
+        ] {
+            assert_eq!(position(name).track, Some(7), "{name} should give track 7");
+        }
+    }
+
+    #[test]
+    fn reads_a_disc_and_track_pair() {
+        assert_eq!(
+            position("2-03 Reprise.mp3"),
+            FilenamePosition {
+                disc: Some(2),
+                track: Some(3)
+            }
+        );
+        assert_eq!(
+            position("1_11 Closing Time.mp3"),
+            FilenamePosition {
+                disc: Some(1),
+                track: Some(11)
+            }
+        );
+    }
+
+    #[test]
+    fn a_three_digit_number_is_still_a_track() {
+        // Some rips number across discs: 104 = disc 1, track 4.
+        assert_eq!(position("104 - Title.m4a").track, Some(104));
+    }
+
+    #[test]
+    fn a_year_is_not_a_track_number() {
+        // The guard that matters: four digits are never a position, so this
+        // must not read as track 198.
+        assert_eq!(position("1984 - Track.mp3"), FilenamePosition::default());
+        assert_eq!(
+            position("2001 A Space Odyssey.mp3"),
+            FilenamePosition::default()
+        );
+    }
+
+    #[test]
+    fn digits_running_into_the_title_are_not_a_track_number() {
+        assert_eq!(position("07Alive.flac"), FilenamePosition::default());
+        assert_eq!(position("99Luftballons.mp3"), FilenamePosition::default());
+    }
+
+    #[test]
+    fn a_filename_with_no_leading_digits_yields_nothing() {
+        assert_eq!(position("Alive.flac"), FilenamePosition::default());
+        assert_eq!(
+            position("Pearl Jam - Alive.flac"),
+            FilenamePosition::default()
+        );
+    }
+
+    #[test]
+    fn track_zero_is_treated_as_absent() {
+        // "00 - Intro" is a hidden-track convention, not position zero.
+        assert_eq!(position("00 - Intro.mp3").track, None);
+    }
+
+    #[test]
+    fn a_bare_number_is_the_whole_name() {
+        assert_eq!(position("03.mp3").track, Some(3));
+    }
+
+    /// A minimal untagged WAV, so the scanner can be exercised without
+    /// shipping a binary fixture.
+    fn write_wav(path: &Path) {
+        use std::io::Write;
+        let (rate, channels, frames) = (44_100u32, 1u16, 100usize);
+        let block_align = channels * 2;
+        let data_len = frames as u32 * block_align as u32;
+        let mut wav = Vec::new();
+        wav.extend_from_slice(b"RIFF");
+        wav.extend_from_slice(&(36 + data_len).to_le_bytes());
+        wav.extend_from_slice(b"WAVEfmt ");
+        wav.extend_from_slice(&16u32.to_le_bytes());
+        wav.extend_from_slice(&1u16.to_le_bytes());
+        wav.extend_from_slice(&channels.to_le_bytes());
+        wav.extend_from_slice(&rate.to_le_bytes());
+        wav.extend_from_slice(&(rate * block_align as u32).to_le_bytes());
+        wav.extend_from_slice(&block_align.to_le_bytes());
+        wav.extend_from_slice(&16u16.to_le_bytes());
+        wav.extend_from_slice(b"data");
+        wav.extend_from_slice(&data_len.to_le_bytes());
+        wav.extend_from_slice(&vec![0u8; data_len as usize]);
+        std::fs::create_dir_all(path.parent().expect("has a parent")).expect("temp dir");
+        std::fs::File::create(path)
+            .and_then(|mut f| f.write_all(&wav))
+            .expect("write test wav");
+    }
+
+    #[test]
+    fn an_untagged_file_still_gets_its_position_from_its_name() {
+        // The end-to-end path: no tags at all, so everything shown about this
+        // track has to come from the filename and the decoder.
+        let dir = std::env::temp_dir().join("janis-scan-test");
+        let path = dir.join("04 - Blue in Green.wav");
+        write_wav(&path);
+
+        let meta = read_metadata(&path).expect("an untagged wav should still scan");
+
+        assert_eq!(meta.track_number, Some(4), "recovered from the filename");
+        assert_eq!(meta.title, "04 - Blue in Green", "the stem is the title");
+        assert_eq!(meta.disc_number, None);
+        assert_eq!(meta.year, None);
+        assert_eq!(meta.format, "WAV");
+        assert!(meta.lossless);
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn a_disc_prefixed_name_survives_the_scanner() {
+        let dir = std::env::temp_dir().join("janis-scan-test");
+        let path = dir.join("2-11 Reprise.wav");
+        write_wav(&path);
+
+        let meta = read_metadata(&path).expect("should scan");
+        assert_eq!(meta.disc_number, Some(2));
+        assert_eq!(meta.track_number, Some(11));
+
+        let _ = std::fs::remove_file(&path);
+    }
 }
 
 #[tauri::command]
@@ -276,7 +541,9 @@ pub fn list_tracks(db: tauri::State<'_, DbState>) -> Result<Vec<Track>, String> 
     let mut stmt = conn
         .prepare(
             "SELECT id, folder_id, path, title, artist, album, composer, duration_secs,
-                    format, sample_rate, bit_depth, channels, lossless, added_at
+                    format, sample_rate, bit_depth, channels, lossless, added_at,
+                    track_number, track_total, disc_number, disc_total,
+                    year, genre, album_artist
              FROM tracks ORDER BY added_at DESC, id DESC",
         )
         .map_err(|e| format!("prepare list_tracks: {}", e))?;
@@ -297,6 +564,13 @@ pub fn list_tracks(db: tauri::State<'_, DbState>) -> Result<Vec<Track>, String> 
                 channels: row.get(11)?,
                 lossless: row.get::<_, i64>(12)? != 0,
                 added_at: row.get(13)?,
+                track_number: row.get(14)?,
+                track_total: row.get(15)?,
+                disc_number: row.get(16)?,
+                disc_total: row.get(17)?,
+                year: row.get(18)?,
+                genre: row.get(19)?,
+                album_artist: row.get(20)?,
             })
         })
         .and_then(|rows| rows.collect::<Result<Vec<_>, _>>())

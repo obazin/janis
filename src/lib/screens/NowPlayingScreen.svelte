@@ -19,6 +19,24 @@
     // A station announcing a track wins the hero slot — the station name is
     // already in the eyebrow, and what is playing is the more useful headline.
     const title = $derived(track?.title ?? playerStore.streamTitle ?? station?.name ?? '');
+    // Position on the record and its year — whatever the tags gave us.
+    const albumLine = $derived.by(() => {
+        if (!track) return null;
+        const parts: string[] = [];
+        if (track.trackNumber !== null) {
+            parts.push(
+                track.trackTotal !== null
+                    ? t('now.trackOf', { n: track.trackNumber, total: track.trackTotal })
+                    : t('now.trackNo', { n: track.trackNumber }),
+            );
+        }
+        if (track.discTotal !== null && track.discTotal > 1 && track.discNumber !== null) {
+            parts.push(t('now.discOf', { n: track.discNumber, total: track.discTotal }));
+        }
+        if (track.year !== null) parts.push(String(track.year));
+        return parts.length ? parts.join(' · ') : null;
+    });
+
     const artSeed = $derived(
         track ? `${track.artist ?? ''}-${track.album ?? track.title}` : (station?.id ?? 'janis'),
     );
@@ -104,7 +122,18 @@
                         <div class="text-heading-md font-semibold text-text-secondary">
                             {track.album ?? t('common.unknownAlbum')}
                         </div>
+                        {#if albumLine}
+                            <div class="text-caption text-text-faint mt-0.5">{albumLine}</div>
+                        {/if}
                     </div>
+                    {#if track.genre}
+                        <div>
+                            <SectionLabel class="mb-1">{t('now.genre')}</SectionLabel>
+                            <div class="text-heading-md font-semibold text-text-secondary">
+                                {track.genre}
+                            </div>
+                        </div>
+                    {/if}
                 {:else if station}
                     {#if playerStore.streamArtist}
                         <div>

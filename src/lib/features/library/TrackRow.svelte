@@ -9,10 +9,18 @@
     interface Props {
         track: Track;
         index: number;
+        /** Show the track's own album position instead of its row number. */
+        useTrackNumber?: boolean;
         onclick: () => void;
     }
 
-    let { track, index, onclick }: Props = $props();
+    let { track, index, useTrackNumber = false, onclick }: Props = $props();
+
+    // The album position when asked for and known, else the row's place in
+    // whatever list is being shown.
+    const number = $derived(
+        useTrackNumber && track.trackNumber !== null ? track.trackNumber : index + 1,
+    );
 </script>
 
 <button
@@ -21,7 +29,7 @@
     {onclick}
 >
     <div class="w-6.5 text-center font-mono text-body text-text-faint">
-        {String(index + 1).padStart(2, '0')}
+        {String(number).padStart(2, '0')}
     </div>
     <ArtTile
         seed="{track.artist ?? ''}-{track.album ?? track.title}"

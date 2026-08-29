@@ -60,8 +60,27 @@ CREATE INDEX IF NOT EXISTS idx_tracks_folder ON tracks(folder_id);
 CREATE INDEX IF NOT EXISTS idx_tracks_added ON tracks(added_at DESC);
 ";
 
+/// `SCHEMA` above is frozen at version 1 — it only ever creates a fresh file.
+/// Every change since is a migration, so a new database and an existing one
+/// converge on the same shape.
+const SCHEMA_VERSION: i64 = 2;
+
+/// Index `i` upgrades to version `i + 2`. Append only: editing a shipped entry
+/// would skip the change for anyone who already ran it.
+const MIGRATIONS: &[&str] = &[
+    // → 2: the tag fields the scanner reads beyond title/artist/album, so
+    //      albums can be shown in their own running order.
+    "ALTER TABLE tracks ADD COLUMN track_number INTEGER;
+     ALTER TABLE tracks ADD COLUMN track_total INTEGER;
+     ALTER TABLE tracks ADD COLUMN disc_number INTEGER;
+     ALTER TABLE tracks ADD COLUMN disc_total INTEGER;
+     ALTER TABLE tracks ADD COLUMN year INTEGER;
+     ALTER TABLE tracks ADD COLUMN genre TEXT;
+     ALTER TABLE tracks ADD COLUMN album_artist TEXT;",
+];
+
 /// Opens (creating if needed) `janis.db` under the app-data directory and
-/// applies the schema. Called once from `main.rs`'s setup hook.
+/// brings it up to date. Called once from `main.rs`'s setup hook.
 pub fn init(app_data_dir: PathBuf) -> Result<DbState, String> {
     std::fs::create_dir_all(&app_data_dir)
         .map_err(|e| format!("create app data dir {}: {}", app_data_dir.display(), e))?;
@@ -72,9 +91,43 @@ pub fn init(app_data_dir: PathBuf) -> Result<DbState, String> {
         .map_err(|e| format!("enable foreign keys: {}", e))?;
     conn.execute_batch(SCHEMA)
         .map_err(|e| format!("apply schema: {}", e))?;
+    migrate(&conn)?;
     conn.execute("INSERT OR IGNORE INTO user_preferences (id) VALUES (1)", [])
         .map_err(|e| format!("seed preferences row: {}", e))?;
     Ok(DbState(Mutex::new(conn)))
+}
+
+/// Applies any migration the file has not seen, tracked in SQLite's own
+/// `user_version`. Each runs in a transaction so a failure leaves the version
+/// where it was rather than half-applied.
+fn migrate(conn: &Connection) -> Result<(), String> {
+    let mut version: i64 = conn
+        .query_row("PRAGMA user_version", [], |row| row.get(0))
+        .map_err(|e| format!("read schema version: {}", e))?;
+
+    // Zero means the file predates migrations, which is exactly the shape
+    // `SCHEMA` produces — the version it would have been stamped with.
+    if version == 0 {
+        version = 1;
+    }
+
+    for (index, sql) in MIGRATIONS.iter().enumerate() {
+        let target = index as i64 + 2;
+        if version >= target {
+            continue;
+        }
+        conn.execute_batch(&format!("BEGIN; {} COMMIT;", sql))
+            .map_err(|e| format!("migration to v{}: {}", target, e))?;
+        conn.pragma_update(None, "user_version", target)
+            .map_err(|e| format!("stamp schema version {}: {}", target, e))?;
+        version = target;
+    }
+
+    debug_assert_eq!(
+        version, SCHEMA_VERSION,
+        "MIGRATIONS must reach SCHEMA_VERSION"
+    );
+    Ok(())
 }
 
 #[derive(Serialize)]
@@ -199,4 +252,109 @@ pub fn set_language(db: tauri::State<'_, DbState>, language: String) -> Result<(
     )
     .map_err(|e| format!("persist language: {}", e))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_dir(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("janis-db-{}", name));
+        let _ = std::fs::remove_dir_all(&dir);
+        dir
+    }
+
+    fn columns(conn: &Connection, table: &str) -> Vec<String> {
+        let mut stmt = conn
+            .prepare(&format!("PRAGMA table_info({})", table))
+            .expect("table_info");
+        let rows = stmt
+            .query_map([], |row| row.get::<_, String>(1))
+            .expect("query")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("collect");
+        rows
+    }
+
+    #[test]
+    fn a_fresh_database_lands_on_the_current_version() {
+        let dir = temp_dir("fresh");
+        let db = init(dir.clone()).expect("init a new database");
+        let conn = db.lock();
+
+        let version: i64 = conn
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .expect("read version");
+        assert_eq!(version, SCHEMA_VERSION);
+
+        let cols = columns(&conn, "tracks");
+        for expected in [
+            "track_number",
+            "disc_number",
+            "year",
+            "genre",
+            "album_artist",
+        ] {
+            assert!(cols.contains(&expected.to_string()), "missing {expected}");
+        }
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_existing_v1_database_gains_the_new_columns() {
+        // The case that silently breaks without migrations: a library created
+        // before these columns existed. `CREATE TABLE IF NOT EXISTS` would
+        // leave it untouched and every read of a new column would fail.
+        let dir = temp_dir("upgrade");
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        {
+            let conn = Connection::open(dir.join("janis.db")).expect("open");
+            conn.execute_batch(SCHEMA).expect("v1 schema");
+            conn.execute(
+                "INSERT INTO tracks (path, title, format) VALUES ('/a.flac', 'A', 'FLAC')",
+                [],
+            )
+            .expect("seed a track");
+            // Version 0 is what a pre-migration file carries.
+            conn.pragma_update(None, "user_version", 0).expect("stamp");
+        }
+
+        let db = init(dir.clone()).expect("init over an existing database");
+        let conn = db.lock();
+
+        let cols = columns(&conn, "tracks");
+        assert!(cols.contains(&"track_number".to_string()));
+        assert!(cols.contains(&"album_artist".to_string()));
+
+        // The row that was already there survives, with the new column empty.
+        let (title, track_number): (String, Option<u32>) = conn
+            .query_row(
+                "SELECT title, track_number FROM tracks WHERE path = '/a.flac'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .expect("the existing row is still there");
+        assert_eq!(title, "A");
+        assert_eq!(track_number, None);
+
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn migrating_twice_is_a_no_op() {
+        // Every launch runs `init`; the second must not try to re-add columns.
+        let dir = temp_dir("idempotent");
+        let first = init(dir.clone()).expect("first open");
+        drop(first);
+        let second = init(dir.clone()).expect("second open must not fail");
+        let conn = second.lock();
+        let version: i64 = conn
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .expect("read version");
+        assert_eq!(version, SCHEMA_VERSION);
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
