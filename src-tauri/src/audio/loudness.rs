@@ -324,12 +324,42 @@ mod tests {
         assert_eq!(meter.finish(), None);
     }
 
+    /// One second of a stereo sine at the given amplitude.
+    fn stereo_tone(amplitude: f32) -> Vec<f32> {
+        let rate = 48_000;
+        (0..rate * 2)
+            .map(|n| {
+                let frame = (n / 2) as f32;
+                amplitude * (std::f32::consts::TAU * 997.0 * frame / rate as f32).sin()
+            })
+            .collect()
+    }
+
     #[test]
-    fn a_partial_trailing_frame_is_ignored() {
-        let mut meter = Loudness::new(48_000, 2).expect("meter");
-        // Three samples of stereo is one whole frame and half of another.
-        meter.feed(&[0.1, 0.1, 0.1]);
-        // Nothing to assert but that it did not panic or desync.
-        assert_eq!(meter.finish(), None);
+    fn a_partial_trailing_frame_is_dropped_not_the_whole_buffer() {
+        // Two meters hear the same loud-then-quiet signal; one buffer also
+        // carries a dangling half frame. The guard must trim just that
+        // sample: if the whole odd-length buffer were rejected instead, the
+        // ragged meter would miss the loud second entirely and measure a
+        // very different loudness.
+        let loud = stereo_tone(1.0);
+        let quiet = stereo_tone(0.05);
+
+        let mut clean = Loudness::new(48_000, 2).expect("meter");
+        clean.feed(&loud);
+        clean.feed(&quiet);
+
+        let mut ragged = Loudness::new(48_000, 2).expect("meter");
+        let mut loud_with_dangler = loud.clone();
+        loud_with_dangler.push(0.7);
+        ragged.feed(&loud_with_dangler);
+        ragged.feed(&quiet);
+
+        let clean = clean.finish().expect("two seconds gate").lufs;
+        let ragged = ragged.finish().expect("two seconds gate").lufs;
+        assert!(
+            (clean - ragged).abs() < 0.05,
+            "one trimmed sample must not move the measurement: clean {clean}, ragged {ragged}"
+        );
     }
 }
