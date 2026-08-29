@@ -7,6 +7,7 @@
 //! and the hard correctness work lives in [`super::queue`].
 
 use std::collections::VecDeque;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -17,6 +18,7 @@ use super::decode::Decoder;
 use super::dsp::remap_channels;
 use super::events::{EngineEvent, Mode};
 use super::icy;
+use super::nowplaying::Update;
 use super::output::{self, Output};
 use super::params::Params;
 use super::queue::{Queue, QueueEntry};
@@ -46,6 +48,8 @@ pub enum EngineCommand {
     PlayStream {
         station_id: String,
         stream: Box<RadioStream>,
+        /// True when a now-playing poller was started for this station.
+        has_provider: bool,
     },
     Play,
     Pause,
@@ -58,6 +62,13 @@ pub enum EngineCommand {
     SetShuffle(bool),
     SetRepeat(bool),
     SetDevice(Option<String>),
+    /// A now-playing poller reporting what a station is playing. Carries the
+    /// epoch it started under so a late answer about a station the listener
+    /// has already left is discarded.
+    StationMetadata {
+        epoch: u64,
+        update: Update,
+    },
     /// Re-emit everything the UI needs to render current state. Sent on
     /// subscribe, so a reloaded webview catches up with audio that never
     /// stopped.
@@ -96,6 +107,11 @@ pub struct Engine {
     /// Written by the ICY reader as the station announces tracks.
     now_playing: Option<NowPlaying>,
     reported_title: Option<String>,
+    /// Set when the station has a now-playing provider. The provider is then
+    /// the only source: merging it with ICY, which often disagrees about
+    /// timing, produces worse answers than either feed alone.
+    has_provider: bool,
+    station_epoch: Arc<AtomicU64>,
     resampler: Option<Resampler>,
 
     /// Total frames handed to the ring since the stream was built.
@@ -118,6 +134,7 @@ impl Engine {
         commands: Receiver<EngineCommand>,
         params: Arc<Params>,
         subscribers: Arc<Subscribers>,
+        station_epoch: Arc<AtomicU64>,
         device_id: Option<String>,
     ) -> Self {
         Self {
@@ -136,6 +153,8 @@ impl Engine {
             preloaded: None,
             now_playing: None,
             reported_title: None,
+            has_provider: false,
+            station_epoch,
             resampler: None,
             frames_written: 0,
             boundaries: VecDeque::new(),
@@ -183,6 +202,8 @@ impl Engine {
                 self.station_id = None;
                 self.now_playing = None;
                 self.reported_title = None;
+                self.has_provider = false;
+                self.station_epoch.fetch_add(1, Ordering::Relaxed);
                 self.queue.load(entries, index);
                 if self.queue.is_empty() {
                     self.stop();
@@ -191,8 +212,25 @@ impl Engine {
                     self.start_current();
                 }
             }
-            EngineCommand::PlayStream { station_id, stream } => {
+            EngineCommand::PlayStream {
+                station_id,
+                stream,
+                has_provider,
+            } => {
+                self.has_provider = has_provider;
                 self.start_stream(station_id, *stream);
+            }
+            EngineCommand::StationMetadata { epoch, update } => {
+                // A poller for a station already left behind must not
+                // overwrite what is playing now.
+                if epoch == self.station_epoch.load(Ordering::Relaxed) {
+                    self.emit(EngineEvent::StreamMetadata {
+                        title: update.info.as_ref().map(|i| i.title.clone()),
+                        artist: update.info.as_ref().and_then(|i| i.artist.clone()),
+                        album: update.info.as_ref().and_then(|i| i.album.clone()),
+                        cover: update.cover,
+                    });
+                }
             }
             EngineCommand::Play => self.set_playing(true),
             EngineCommand::Pause => self.set_playing(false),
@@ -284,6 +322,8 @@ impl Engine {
         self.station_id = None;
         self.now_playing = None;
         self.reported_title = None;
+        self.has_provider = false;
+        self.station_epoch.fetch_add(1, Ordering::Relaxed);
         self.decoder = None;
         self.preloaded = None;
         self.pending_out.clear();
@@ -717,7 +757,13 @@ impl Engine {
     }
 
     /// Announces a station's current track when it changes.
+    ///
+    /// Skipped entirely when a now-playing provider is polling: it reports the
+    /// same track with more detail, and two sources racing would flicker.
     fn emit_stream_metadata(&mut self) {
+        if self.has_provider {
+            return;
+        }
         let Some(source) = self.now_playing.as_ref() else {
             return;
         };
@@ -876,6 +922,9 @@ mod tests {
             .send(EngineCommand::PlayStream {
                 station_id: "soma-groovesalad".to_string(),
                 stream: Box::new(stream),
+                // No poller here: this test is about audio reaching the
+                // device, so ICY stays the metadata source.
+                has_provider: false,
             })
             .expect("engine accepts the station");
 

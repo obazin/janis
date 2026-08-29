@@ -208,7 +208,7 @@ class PlayerStore {
         // Resolves only once the station is connected and buffered, which is
         // why the card can show a connecting state rather than pretending.
         audioEngine
-            .playStream(station.id, station.url)
+            .playStream(station.id, station.url, station.nowPlaying)
             .catch((err) => {
                 console.error('radio play failed:', err);
                 this.#station = null;

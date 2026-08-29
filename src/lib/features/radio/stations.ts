@@ -13,6 +13,7 @@ export const STATIONS: Station[] = [
         kbps: 256,
         url: 'https://ice1.somafm.com/groovesalad-256-mp3',
         gradIndex: 0,
+        nowPlaying: { provider: 'somafm', key: 'groovesalad' },
     },
     {
         id: 'soma-groovesalad2',
@@ -21,6 +22,7 @@ export const STATIONS: Station[] = [
         kbps: 256,
         url: 'https://ice1.somafm.com/groovesalad2-256-mp3',
         gradIndex: 1,
+        nowPlaying: { provider: 'somafm', key: 'groovesalad2' },
     },
     {
         id: 'soma-gsclassic',
@@ -29,6 +31,7 @@ export const STATIONS: Station[] = [
         kbps: 160,
         url: 'https://ice1.somafm.com/gsclassic-128-mp3',
         gradIndex: 2,
+        nowPlaying: { provider: 'somafm', key: 'gsclassic' },
     },
     {
         id: 'soma-dronezone',
@@ -37,6 +40,7 @@ export const STATIONS: Station[] = [
         kbps: 256,
         url: 'https://ice1.somafm.com/dronezone-256-mp3',
         gradIndex: 3,
+        nowPlaying: { provider: 'somafm', key: 'dronezone' },
     },
     {
         id: 'soma-dz2',
@@ -45,6 +49,7 @@ export const STATIONS: Station[] = [
         kbps: 128,
         url: 'https://ice1.somafm.com/dz2-128-mp3',
         gradIndex: 4,
+        nowPlaying: { provider: 'somafm', key: 'dz2' },
     },
     {
         id: 'soma-deepspaceone',
@@ -53,6 +58,7 @@ export const STATIONS: Station[] = [
         kbps: 128,
         url: 'https://ice1.somafm.com/deepspaceone-128-mp3',
         gradIndex: 5,
+        nowPlaying: { provider: 'somafm', key: 'deepspaceone' },
     },
     {
         id: 'soma-missioncontrol',
@@ -61,6 +67,7 @@ export const STATIONS: Station[] = [
         kbps: 128,
         url: 'https://ice1.somafm.com/missioncontrol-128-mp3',
         gradIndex: 0,
+        nowPlaying: { provider: 'somafm', key: 'missioncontrol' },
     },
     {
         id: 'soma-darkzone',
@@ -69,6 +76,7 @@ export const STATIONS: Station[] = [
         kbps: 256,
         url: 'https://ice1.somafm.com/darkzone-256-mp3',
         gradIndex: 1,
+        nowPlaying: { provider: 'somafm', key: 'darkzone' },
     },
     {
         id: 'soma-synphaera',
@@ -77,6 +85,7 @@ export const STATIONS: Station[] = [
         kbps: 256,
         url: 'https://ice1.somafm.com/synphaera-256-mp3',
         gradIndex: 2,
+        nowPlaying: { provider: 'somafm', key: 'synphaera' },
     },
     {
         id: 'soma-spacestation',
@@ -85,6 +94,7 @@ export const STATIONS: Station[] = [
         kbps: 128,
         url: 'https://ice1.somafm.com/spacestation-128-mp3',
         gradIndex: 3,
+        nowPlaying: { provider: 'somafm', key: 'spacestation' },
     },
     {
         id: 'soma-defcon',
@@ -93,6 +103,7 @@ export const STATIONS: Station[] = [
         kbps: 256,
         url: 'https://ice1.somafm.com/defcon-256-mp3',
         gradIndex: 4,
+        nowPlaying: { provider: 'somafm', key: 'defcon' },
     },
     {
         id: 'soma-lush',
@@ -101,6 +112,7 @@ export const STATIONS: Station[] = [
         kbps: 128,
         url: 'https://ice1.somafm.com/lush-128-mp3',
         gradIndex: 5,
+        nowPlaying: { provider: 'somafm', key: 'lush' },
     },
     {
         id: 'soma-chillits',
@@ -109,6 +121,7 @@ export const STATIONS: Station[] = [
         kbps: 320,
         url: 'https://ice1.somafm.com/chillits-256-mp3',
         gradIndex: 0,
+        nowPlaying: { provider: 'somafm', key: 'chillits' },
     },
     {
         id: 'soma-beatblender',
@@ -117,6 +130,7 @@ export const STATIONS: Station[] = [
         kbps: 128,
         url: 'https://ice1.somafm.com/beatblender-128-mp3',
         gradIndex: 1,
+        nowPlaying: { provider: 'somafm', key: 'beatblender' },
     },
     {
         id: 'soma-thetrip',
@@ -125,6 +139,7 @@ export const STATIONS: Station[] = [
         kbps: 128,
         url: 'https://ice1.somafm.com/thetrip-128-mp3',
         gradIndex: 2,
+        nowPlaying: { provider: 'somafm', key: 'thetrip' },
     },
     {
         id: 'soma-cliqhop',
@@ -133,6 +148,7 @@ export const STATIONS: Station[] = [
         kbps: 256,
         url: 'https://ice1.somafm.com/cliqhop-256-mp3',
         gradIndex: 3,
+        nowPlaying: { provider: 'somafm', key: 'cliqhop' },
     },
     {
         id: 'soma-dubstep',
@@ -141,6 +157,7 @@ export const STATIONS: Station[] = [
         kbps: 256,
         url: 'https://ice1.somafm.com/dubstep-256-mp3',
         gradIndex: 4,
+        nowPlaying: { provider: 'somafm', key: 'dubstep' },
     },
     {
         id: 'soma-fluid',
@@ -149,6 +166,7 @@ export const STATIONS: Station[] = [
         kbps: 128,
         url: 'https://ice1.somafm.com/fluid-128-mp3',
         gradIndex: 5,
+        nowPlaying: { provider: 'somafm', key: 'fluid' },
     },
     {
         id: 'soma-vaporwaves',
@@ -157,6 +175,7 @@ export const STATIONS: Station[] = [
         kbps: 128,
         url: 'https://ice1.somafm.com/vaporwaves-128-mp3',
         gradIndex: 0,
+        nowPlaying: { provider: 'somafm', key: 'vaporwaves' },
     },
     {
         id: 'soma-u80s',
@@ -165,6 +184,7 @@ export const STATIONS: Station[] = [
         kbps: 256,
         url: 'https://ice1.somafm.com/u80s-256-mp3',
         gradIndex: 1,
+        nowPlaying: { provider: 'somafm', key: 'u80s' },
     },
     {
         id: 'soma-poptron',
@@ -173,6 +193,7 @@ export const STATIONS: Station[] = [
         kbps: 128,
         url: 'https://ice1.somafm.com/poptron-128-mp3',
         gradIndex: 2,
+        nowPlaying: { provider: 'somafm', key: 'poptron' },
     },
     {
         id: 'soma-indiepop',
@@ -181,6 +202,7 @@ export const STATIONS: Station[] = [
         kbps: 128,
         url: 'https://ice1.somafm.com/indiepop-128-mp3',
         gradIndex: 3,
+        nowPlaying: { provider: 'somafm', key: 'indiepop' },
     },
     {
         id: 'soma-digitalis',
@@ -189,6 +211,7 @@ export const STATIONS: Station[] = [
         kbps: 256,
         url: 'https://ice1.somafm.com/digitalis-256-mp3',
         gradIndex: 4,
+        nowPlaying: { provider: 'somafm', key: 'digitalis' },
     },
     {
         id: 'soma-folkfwd',
@@ -197,6 +220,7 @@ export const STATIONS: Station[] = [
         kbps: 128,
         url: 'https://ice1.somafm.com/folkfwd-128-mp3',
         gradIndex: 5,
+        nowPlaying: { provider: 'somafm', key: 'folkfwd' },
     },
     {
         id: 'soma-thistle',
@@ -205,6 +229,7 @@ export const STATIONS: Station[] = [
         kbps: 128,
         url: 'https://ice1.somafm.com/thistle-128-mp3',
         gradIndex: 0,
+        nowPlaying: { provider: 'somafm', key: 'thistle' },
     },
     {
         id: 'soma-suburbsofgoa',
@@ -213,6 +238,7 @@ export const STATIONS: Station[] = [
         kbps: 128,
         url: 'https://ice1.somafm.com/suburbsofgoa-128-mp3',
         gradIndex: 1,
+        nowPlaying: { provider: 'somafm', key: 'suburbsofgoa' },
     },
     {
         id: 'soma-bossa',
@@ -221,6 +247,7 @@ export const STATIONS: Station[] = [
         kbps: 256,
         url: 'https://ice1.somafm.com/bossa-256-mp3',
         gradIndex: 2,
+        nowPlaying: { provider: 'somafm', key: 'bossa' },
     },
     {
         id: 'soma-tikitime',
@@ -229,6 +256,7 @@ export const STATIONS: Station[] = [
         kbps: 256,
         url: 'https://ice1.somafm.com/tikitime-256-mp3',
         gradIndex: 3,
+        nowPlaying: { provider: 'somafm', key: 'tikitime' },
     },
     {
         id: 'soma-illstreet',
@@ -237,6 +265,7 @@ export const STATIONS: Station[] = [
         kbps: 128,
         url: 'https://ice1.somafm.com/illstreet-128-mp3',
         gradIndex: 4,
+        nowPlaying: { provider: 'somafm', key: 'illstreet' },
     },
     {
         id: 'soma-secretagent',
@@ -245,6 +274,7 @@ export const STATIONS: Station[] = [
         kbps: 128,
         url: 'https://ice1.somafm.com/secretagent-128-mp3',
         gradIndex: 5,
+        nowPlaying: { provider: 'somafm', key: 'secretagent' },
     },
     {
         id: 'soma-7soul',
@@ -253,6 +283,7 @@ export const STATIONS: Station[] = [
         kbps: 160,
         url: 'https://ice1.somafm.com/7soul-128-mp3',
         gradIndex: 0,
+        nowPlaying: { provider: 'somafm', key: '7soul' },
     },
     {
         id: 'soma-insound',
@@ -261,6 +292,7 @@ export const STATIONS: Station[] = [
         kbps: 256,
         url: 'https://ice1.somafm.com/insound-256-mp3',
         gradIndex: 1,
+        nowPlaying: { provider: 'somafm', key: 'insound' },
     },
     {
         id: 'soma-seventies',
@@ -269,6 +301,7 @@ export const STATIONS: Station[] = [
         kbps: 128,
         url: 'https://ice1.somafm.com/seventies-128-mp3',
         gradIndex: 2,
+        nowPlaying: { provider: 'somafm', key: 'seventies' },
     },
     {
         id: 'soma-brfm',
@@ -277,6 +310,7 @@ export const STATIONS: Station[] = [
         kbps: 128,
         url: 'https://ice1.somafm.com/brfm-128-mp3',
         gradIndex: 3,
+        nowPlaying: { provider: 'somafm', key: 'brfm' },
     },
     {
         id: 'soma-covers',
@@ -285,6 +319,7 @@ export const STATIONS: Station[] = [
         kbps: 128,
         url: 'https://ice1.somafm.com/covers-128-mp3',
         gradIndex: 4,
+        nowPlaying: { provider: 'somafm', key: 'covers' },
     },
     {
         id: 'soma-bootliquor',
@@ -293,6 +328,7 @@ export const STATIONS: Station[] = [
         kbps: 128,
         url: 'https://ice1.somafm.com/bootliquor-128-mp3',
         gradIndex: 5,
+        nowPlaying: { provider: 'somafm', key: 'bootliquor' },
     },
     {
         id: 'soma-sonicuniverse',
@@ -301,6 +337,7 @@ export const STATIONS: Station[] = [
         kbps: 256,
         url: 'https://ice1.somafm.com/sonicuniverse-256-mp3',
         gradIndex: 0,
+        nowPlaying: { provider: 'somafm', key: 'sonicuniverse' },
     },
     {
         id: 'soma-metal',
@@ -309,6 +346,7 @@ export const STATIONS: Station[] = [
         kbps: 128,
         url: 'https://ice1.somafm.com/metal-128-mp3',
         gradIndex: 1,
+        nowPlaying: { provider: 'somafm', key: 'metal' },
     },
     {
         id: 'soma-reggae',
@@ -317,6 +355,7 @@ export const STATIONS: Station[] = [
         kbps: 320,
         url: 'https://ice1.somafm.com/reggae-256-mp3',
         gradIndex: 2,
+        nowPlaying: { provider: 'somafm', key: 'reggae' },
     },
     {
         id: 'soma-doomed',
@@ -325,6 +364,7 @@ export const STATIONS: Station[] = [
         kbps: 256,
         url: 'https://ice1.somafm.com/doomed-256-mp3',
         gradIndex: 3,
+        nowPlaying: { provider: 'somafm', key: 'doomed' },
     },
     {
         id: 'soma-n5md',
@@ -333,6 +373,7 @@ export const STATIONS: Station[] = [
         kbps: 128,
         url: 'https://ice1.somafm.com/n5md-128-mp3',
         gradIndex: 4,
+        nowPlaying: { provider: 'somafm', key: 'n5md' },
     },
     // — Radio France —
     {
@@ -342,6 +383,7 @@ export const STATIONS: Station[] = [
         kbps: 128,
         url: 'https://icecast.radiofrance.fr/fip-midfi.mp3',
         gradIndex: 5,
+        nowPlaying: { provider: 'radiofrance', key: '7' },
     },
     {
         id: 'fip-rock',
@@ -350,6 +392,7 @@ export const STATIONS: Station[] = [
         kbps: 128,
         url: 'https://icecast.radiofrance.fr/fiprock-midfi.mp3',
         gradIndex: 0,
+        nowPlaying: { provider: 'radiofrance', key: '64' },
     },
     {
         id: 'fip-jazz',
@@ -358,6 +401,7 @@ export const STATIONS: Station[] = [
         kbps: 128,
         url: 'https://icecast.radiofrance.fr/fipjazz-midfi.mp3',
         gradIndex: 1,
+        nowPlaying: { provider: 'radiofrance', key: '65' },
     },
     {
         id: 'fip-groove',
@@ -366,6 +410,7 @@ export const STATIONS: Station[] = [
         kbps: 128,
         url: 'https://icecast.radiofrance.fr/fipgroove-midfi.mp3',
         gradIndex: 2,
+        nowPlaying: { provider: 'radiofrance', key: '66' },
     },
     {
         id: 'fip-monde',
@@ -374,6 +419,7 @@ export const STATIONS: Station[] = [
         kbps: 128,
         url: 'https://icecast.radiofrance.fr/fipworld-midfi.mp3',
         gradIndex: 3,
+        nowPlaying: { provider: 'radiofrance', key: '69' },
     },
     {
         id: 'fip-nouveautes',
@@ -382,6 +428,7 @@ export const STATIONS: Station[] = [
         kbps: 128,
         url: 'https://icecast.radiofrance.fr/fipnouveautes-midfi.mp3',
         gradIndex: 4,
+        nowPlaying: { provider: 'radiofrance', key: '70' },
     },
     {
         id: 'fip-reggae',
@@ -390,6 +437,7 @@ export const STATIONS: Station[] = [
         kbps: 128,
         url: 'https://icecast.radiofrance.fr/fipreggae-midfi.mp3',
         gradIndex: 5,
+        nowPlaying: { provider: 'radiofrance', key: '71' },
     },
     {
         id: 'fip-electro',
@@ -398,6 +446,7 @@ export const STATIONS: Station[] = [
         kbps: 128,
         url: 'https://icecast.radiofrance.fr/fipelectro-midfi.mp3',
         gradIndex: 0,
+        nowPlaying: { provider: 'radiofrance', key: '74' },
     },
     {
         id: 'fip-pop',
@@ -422,6 +471,7 @@ export const STATIONS: Station[] = [
         kbps: 128,
         url: 'https://icecast.radiofrance.fr/fipmetal-midfi.mp3',
         gradIndex: 3,
+        nowPlaying: { provider: 'radiofrance', key: '77' },
     },
     {
         id: 'fm-easy-classique',
@@ -511,6 +561,7 @@ export const STATIONS: Station[] = [
         kbps: 320,
         url: 'https://stream.radioparadise.com/aac-320',
         gradIndex: 2,
+        nowPlaying: { provider: 'radioparadise', key: '0' },
     },
     {
         id: 'rp-mellow',
@@ -519,6 +570,7 @@ export const STATIONS: Station[] = [
         kbps: 320,
         url: 'https://stream.radioparadise.com/mellow-320',
         gradIndex: 3,
+        nowPlaying: { provider: 'radioparadise', key: '1' },
     },
     {
         id: 'rp-rock',
@@ -527,6 +579,7 @@ export const STATIONS: Station[] = [
         kbps: 320,
         url: 'https://stream.radioparadise.com/rock-320',
         gradIndex: 4,
+        nowPlaying: { provider: 'radioparadise', key: '2' },
     },
     {
         id: 'rp-global',
@@ -535,6 +588,7 @@ export const STATIONS: Station[] = [
         kbps: 320,
         url: 'https://stream.radioparadise.com/global-320',
         gradIndex: 5,
+        nowPlaying: { provider: 'radioparadise', key: '3' },
     },
     {
         id: 'rp-serenity',

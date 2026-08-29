@@ -13,6 +13,7 @@
 // at this rate.
 
 import { invoke, Channel } from '@tauri-apps/api/core';
+import type { NowPlayingSource } from '$lib/models/Station';
 
 export interface AudioDevice {
     id: string;
@@ -106,8 +107,8 @@ class AudioEngine {
      * Resolves once the station is connected and buffered, so the caller can
      * tell "connecting" from "playing".
      */
-    playStream(stationId: string, url: string) {
-        return invoke('audio_play_stream', { stationId, url });
+    playStream(stationId: string, url: string, nowPlaying?: NowPlayingSource) {
+        return invoke('audio_play_stream', { stationId, url, nowPlaying: nowPlaying ?? null });
     }
 
     play() {
