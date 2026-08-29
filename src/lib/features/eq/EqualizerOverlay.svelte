@@ -1,7 +1,7 @@
 <script lang="ts">
     import { eqStore } from './EqStore.svelte';
     import { PRESET_ORDER, PRESET_LABEL_KEYS, type EqPresetName } from './presets';
-    import { FREQ_LABELS } from '$lib/features/player/audioGraph';
+    import { FREQ_LABELS } from './bands';
     import EqBandSlider from './EqBandSlider.svelte';
     import Chip from '$lib/design-system/atoms/Chip.svelte';
     import IconButton from '$lib/design-system/atoms/IconButton.svelte';

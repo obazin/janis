@@ -2,11 +2,10 @@
 //!
 //! Scanning walks a folder for audio files and reads tags + audio properties
 //! via `lofty`, then upserts rows into `tracks` keyed by absolute path — so a
-//! rescan updates metadata in place and never duplicates. Decoding and
-//! playback happen in the webview (HTML5 audio + Web Audio EQ/analyser);
-//! files reach it through Tauri's asset protocol, whose scope is extended at
-//! runtime to exactly the folders/files the user added — nothing else on
-//! disk is reachable.
+//! rescan updates metadata in place and never duplicates. This module only
+//! ever produces metadata: the `audio` engine reads the files themselves, and
+//! the webview never touches the filesystem at all — cover art reaches it as
+//! base64 over IPC.
 
 use base64::Engine;
 use lofty::prelude::*;
@@ -18,8 +17,13 @@ use walkdir::WalkDir;
 
 use crate::persistence::DbState;
 
-/// Extensions the scanner picks up. Formats WKWebView/WebKit can decode —
-/// playback happens in the webview, so this list tracks what it accepts.
+/// Extensions the scanner picks up. This list tracks what the `audio` engine
+/// can decode, not what any browser accepts.
+///
+/// `opus` is the one entry the engine cannot yet play: Symphonia has no Opus
+/// decoder. Such files still scan and appear in the library — dropping them
+/// would delete rows on the next rescan — but playing one reports an error and
+/// skips to the next track until a libopus-backed decoder is wired in.
 const AUDIO_EXTENSIONS: &[&str] = &[
     "mp3", "flac", "wav", "m4a", "aac", "ogg", "opus", "aif", "aiff",
 ];
@@ -235,44 +239,6 @@ fn prune_missing(conn: &rusqlite::Connection) -> Result<usize, String> {
     Ok(removed)
 }
 
-/// Collects one string column, swallowing errors — scope restoration is
-/// best-effort and must never block startup.
-fn collect_paths(conn: &rusqlite::Connection, sql: &str) -> Vec<String> {
-    let mut stmt = match conn.prepare(sql) {
-        Ok(stmt) => stmt,
-        Err(_) => return Vec::new(),
-    };
-    let rows = match stmt.query_map([], |row| row.get::<_, String>(0)) {
-        Ok(rows) => rows,
-        Err(_) => return Vec::new(),
-    };
-    rows.filter_map(|r| r.ok()).collect()
-}
-
-/// Re-grants the asset-protocol scope for everything the library references.
-/// Called once from setup: the scope is in-memory state, the library is not.
-pub fn restore_asset_scope(app: &AppHandle) {
-    let (folders, files) = {
-        let db = app.state::<DbState>();
-        let conn = db.lock();
-        (
-            collect_paths(&conn, "SELECT path FROM watched_folders"),
-            collect_paths(&conn, "SELECT path FROM tracks WHERE folder_id IS NULL"),
-        )
-    };
-    let scope = app.asset_protocol_scope();
-    for folder in folders {
-        if let Err(e) = scope.allow_directory(&folder, true) {
-            log::warn!("asset scope for {}: {}", folder, e);
-        }
-    }
-    for file in files {
-        if let Err(e) = scope.allow_file(&file) {
-            log::warn!("asset scope for {}: {}", file, e);
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -370,9 +336,6 @@ pub async fn add_watched_folder(app: AppHandle, path: String) -> Result<ScanRepo
     if !folder.is_dir() {
         return Err(format!("not a directory: {}", path));
     }
-    app.asset_protocol_scope()
-        .allow_directory(&folder, true)
-        .map_err(|e| format!("asset scope: {}", e))?;
     tauri::async_runtime::spawn_blocking(move || {
         let db = app.state::<DbState>();
         let conn = db.lock();
@@ -407,12 +370,6 @@ pub fn remove_watched_folder(db: tauri::State<'_, DbState>, folder_id: i64) -> R
 /// file still exists.
 #[tauri::command]
 pub async fn import_files(app: AppHandle, paths: Vec<String>) -> Result<ScanReport, String> {
-    let scope = app.asset_protocol_scope();
-    for p in &paths {
-        scope
-            .allow_file(p)
-            .map_err(|e| format!("asset scope for {}: {}", p, e))?;
-    }
     tauri::async_runtime::spawn_blocking(move || {
         let db = app.state::<DbState>();
         let conn = db.lock();

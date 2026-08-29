@@ -29,6 +29,9 @@
     const bootPromise = browser ? boot() : new Promise<void>(() => {});
 
     async function boot() {
+        // Attach to the engine first: it has been running since setup, so a
+        // reloaded webview needs its state replayed before anything renders.
+        await playerStore.connect();
         const prefs = await invoke<Preferences>('get_preferences');
         languageStore.init(prefs.language);
         eqStore.init(prefs.eqGains, prefs.eqPreset);

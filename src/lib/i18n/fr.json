@@ -9,16 +9,15 @@
     "nav.local": "Fichiers locaux",
     "nav.spotify": "Spotify",
     "nav.settings": "Réglages",
-
     "titlebar.search": "Rechercher titres, artistes, stations…",
     "titlebar.openSource": "Open source",
-
     "now.eyebrow": "En lecture · De {album}",
     "now.eyebrowNoAlbum": "En lecture",
     "now.eyebrowRadio": "Radio en direct · {station}",
     "now.artist": "Artiste",
     "now.composer": "Compositeur",
     "now.album": "Album",
+    "now.station": "Station",
     "now.waveform": "Forme d'onde",
     "now.tabUpNext": "À suivre",
     "now.tabPlaylist": "Liste",
@@ -33,7 +32,6 @@
     "now.empty.title": "Rien en lecture",
     "now.empty.desc": "Ajoutez de la musique à votre bibliothèque, ou déposez des fichiers audio dans la fenêtre.",
     "now.empty.cta": "Ajouter de la musique",
-
     "library.eyebrow": "Votre collection",
     "library.title": "Bibliothèque",
     "library.addMusic": "Ajouter de la musique",
@@ -47,7 +45,6 @@
     "library.playlistsSoon.desc": "La création et l'édition de playlists arriveront dans une prochaine version. Parcourez vos albums, artistes et titres en attendant.",
     "library.empty.title": "Votre bibliothèque est vide",
     "library.empty.desc": "Ajoutez un dossier à analyser, ou déposez des fichiers audio dans la fenêtre.",
-
     "discover.eyebrow": "Depuis votre bibliothèque",
     "discover.title": "Découvrir",
     "discover.recentAlbums": "Albums ajoutés récemment",
@@ -55,10 +52,10 @@
     "discover.rediscover": "Redécouvrir",
     "discover.empty.title": "Rien à découvrir pour l'instant",
     "discover.empty.desc": "Découvrir se remplit avec votre bibliothèque — des rayons d'albums et d'artistes construits à partir de votre musique.",
-
     "radio.eyebrow": "En streaming mondial",
     "radio.title": "Radio web",
     "radio.live": "Direct",
+    "radio.connecting": "Connexion…",
     "radio.kbps": "{kbps} kbps",
     "radio.genre.all": "Toutes",
     "radio.genre.ambient": "Ambient",
@@ -96,7 +93,6 @@
     "radio.genre.trance": "Trance",
     "radio.genre.vaporwave": "Vaporwave",
     "radio.genre.world": "Musiques du monde",
-
     "local.eyebrow": "Depuis cet ordinateur",
     "local.title": "Fichiers locaux",
     "local.drop.title": "Déposez vos fichiers audio ici",
@@ -116,7 +112,6 @@
     "local.removeFolder": "Retirer le dossier",
     "local.empty.title": "Aucun fichier local",
     "local.empty.desc": "Ajoutez un dossier à surveiller, ou déposez des fichiers ici.",
-
     "spotify.title": "Connecter Spotify",
     "spotify.desc": "Retrouvez vos playlists Spotify, vos titres likés et votre Discover Weekly dans Janis — aux côtés de votre bibliothèque locale et de la radio web.",
     "spotify.cta": "Connecter le compte",
@@ -124,7 +119,6 @@
     "spotify.feature.playlists": "Vos playlists",
     "spotify.feature.search": "Recherche unifiée",
     "spotify.feature.eq": "L'EQ sur tout",
-
     "settings.eyebrow": "Préférences",
     "settings.title": "Réglages",
     "settings.eqPresets": "Préréglages d'égaliseur",
@@ -146,7 +140,6 @@
     "settings.language.desc": "Langue de l'interface",
     "settings.banner.title": "Janis est libre et open source",
     "settings.banner.desc": "GPL-3.0 · Construit avec Tauri et la Web Audio API",
-
     "eq.title": "Égaliseur 10 bandes",
     "eq.subtitle": "EQ graphique · appliqué en direct à la lecture",
     "eq.reset": "Réinitialiser",
@@ -160,7 +153,6 @@
     "eq.preset.vocal": "Voix",
     "eq.preset.electronic": "Électro",
     "eq.preset.custom": "Personnalisé",
-
     "player.eq": "EQ",
     "player.play": "Lecture",
     "player.pause": "Pause",
@@ -170,7 +162,6 @@
     "player.repeat": "Répéter",
     "player.volume": "Volume",
     "player.seek": "Position",
-
     "common.unknownArtist": "Artiste inconnu",
     "common.unknownAlbum": "Album inconnu",
     "common.localFile": "Fichier local"

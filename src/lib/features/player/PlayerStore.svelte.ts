@@ -1,22 +1,26 @@
-import { convertFileSrc, invoke } from '@tauri-apps/api/core';
+import { invoke } from '@tauri-apps/api/core';
 import type { Track, CoverArt } from '$lib/models/Track';
 import type { Station } from '$lib/models/Station';
-import { audioGraph } from './audioGraph';
+import { audioEngine, type EngineEvent } from './audioEngine';
 
-// The playback engine. Setter-method rune class (side effects everywhere:
-// two audio elements, the Web Audio graph, IPC persistence of volume), so
-// every write goes through a method.
+// The playback store. Rust owns the queue, the transport and the signal path;
+// this is a reactive mirror of the engine plus the bits of presentation the
+// engine has no business knowing about (the `Track` objects the UI renders,
+// and cover art).
 //
-// Two sources, two elements:
-//  - local tracks play through `audioGraph.element` (EQ + analyser);
-//  - radio streams play through a plain element — a cross-origin stream
-//    without CORS headers would be silenced by the graph, so streams skip
-//    it and the visualizers run synthetic.
+// Setter-method rune class: every write either sends an IPC command or
+// persists something, so nothing is exposed as a public `$state` field.
+//
+// Radio goes through the same engine as local files, so a station gets the
+// equalizer and a real visualiser like anything else. The store keeps the
+// `Station` object for rendering; the engine only knows its id.
 class PlayerStore {
     #queue = $state<Track[]>([]);
     #index = $state(0);
     #playing = $state(false);
-    #mode = $state<'local' | 'radio' | null>(null);
+    #engineMode = $state<'idle' | 'local' | 'radio'>('idle');
+    #streamTitle = $state<string | null>(null);
+    #connecting = $state(false);
     #station = $state<Station | null>(null);
     #volume = $state(0.8);
     #shuffle = $state(false);
@@ -24,11 +28,13 @@ class PlayerStore {
     #currentTime = $state(0);
     #duration = $state(0);
     #coverUrl = $state<string | null>(null);
+    #sampleRate = $state<number | null>(null);
+    #deviceName = $state<string | null>(null);
 
-    #wired = false;
-    #streamEl: HTMLAudioElement | null = null;
     #coverEpoch = 0;
     #volumeTimer: ReturnType<typeof setTimeout> | null = null;
+    /** Wall-clock reading of the last `position` event, for interpolation. */
+    #positionAt = 0;
 
     get queue(): readonly Track[] {
         return this.#queue;
@@ -36,8 +42,9 @@ class PlayerStore {
     get playing() {
         return this.#playing;
     }
-    get mode() {
-        return this.#mode;
+    get mode(): 'local' | 'radio' | null {
+        if (this.#engineMode === 'idle') return null;
+        return this.#engineMode;
     }
     get station() {
         return this.#station;
@@ -60,117 +67,176 @@ class PlayerStore {
     get coverUrl() {
         return this.#coverUrl;
     }
+    /** The track a station is announcing over ICY metadata, when it sends one. */
+    get streamTitle() {
+        return this.#streamTitle;
+    }
+    /** True while a station is connecting and buffering. */
+    get connecting() {
+        return this.#connecting;
+    }
+    /** Device sample rate, for the Settings readout. */
+    get sampleRate() {
+        return this.#sampleRate;
+    }
+    get deviceName() {
+        return this.#deviceName;
+    }
 
     /** The local track playing/paused, or null in radio/idle mode. */
     get current(): Track | null {
-        return this.#mode === 'local' ? (this.#queue[this.#index] ?? null) : null;
+        return this.mode === 'local' ? (this.#queue[this.#index] ?? null) : null;
     }
 
     get progress(): number {
         return this.#duration > 0 ? this.#currentTime / this.#duration : 0;
     }
 
-    /** Fractional progress read straight off the element — smooth at 60 fps. */
+    /**
+     * Fractional progress, interpolated between the engine's ~10 Hz position
+     * events so the playhead stays smooth at 60 fps without paying for 60 Hz
+     * of IPC.
+     */
     liveProgress(): number {
-        if (this.#mode !== 'local') return 0;
-        const el = audioGraph.element;
-        return el.duration > 0 ? el.currentTime / el.duration : this.progress;
+        if (this.mode !== 'local' || this.#duration <= 0) return 0;
+        const elapsed = this.#playing ? (performance.now() - this.#positionAt) / 1000 : 0;
+        const at = Math.min(this.#duration, this.#currentTime + elapsed);
+        return at / this.#duration;
     }
 
-    get analyser(): AnalyserNode | null {
-        return this.#mode === 'local' ? audioGraph.analyser : null;
+    /**
+     * The latest visualiser frame from the engine, or null when idle. Radio
+     * has one too now — it decodes through the same path as a local file.
+     */
+    get visualFrame(): Uint8Array | null {
+        return this.mode === null ? null : audioEngine.frame;
     }
 
     /** Boot hydration (volume comes from the preferences row). */
     initVolume(volume: number) {
-        this.#volume = Math.min(1, Math.max(0, volume));
+        const v = Math.min(1, Math.max(0, volume));
+        this.#volume = v;
+        void audioEngine.setVolume(v);
     }
 
-    #wire() {
-        if (this.#wired) return;
-        this.#wired = true;
-        const el = audioGraph.element;
-        el.addEventListener('timeupdate', () => {
-            this.#currentTime = el.currentTime;
-        });
-        el.addEventListener('durationchange', () => {
-            if (Number.isFinite(el.duration) && el.duration > 0) this.#duration = el.duration;
-        });
-        el.addEventListener('ended', () => this.#onEnded());
-        el.addEventListener('pause', () => {
-            if (this.#mode === 'local') this.#playing = !el.paused && this.#playing;
-        });
+    /** Attaches to the engine's event stream. Called once, from boot. */
+    async connect() {
+        await audioEngine.subscribe((event) => this.#apply(event));
+    }
+
+    #apply(event: EngineEvent) {
+        switch (event.event) {
+            case 'state':
+                this.#engineMode = event.data.mode;
+                this.#index = event.data.index;
+                this.#shuffle = event.data.shuffle;
+                this.#repeat = event.data.repeat;
+                this.#playing = event.data.playing;
+                if (event.data.mode !== 'radio') {
+                    this.#station = null;
+                    this.#streamTitle = null;
+                }
+                break;
+            case 'position':
+                this.#currentTime = event.data.positionSecs;
+                this.#duration = event.data.durationSecs;
+                this.#positionAt = performance.now();
+                break;
+            case 'streamTitle':
+                this.#streamTitle = event.data.title;
+                break;
+            case 'trackChanged':
+                this.#index = event.data.index;
+                void this.#loadCover(this.#queue[event.data.index]);
+                break;
+            case 'device':
+                this.#deviceName = event.data.name;
+                this.#sampleRate = event.data.sampleRate;
+                break;
+            case 'format':
+                break;
+            case 'error':
+                console.error('audio engine:', event.data.message);
+                break;
+        }
     }
 
     /** Replaces the queue and starts at `index`. */
     playQueue(tracks: Track[], index: number) {
         if (!tracks.length) return;
-        this.#stopStream();
+        this.#station = null;
+        this.#streamTitle = null;
         this.#queue = [...tracks];
         this.#index = Math.min(Math.max(0, index), tracks.length - 1);
-        this.#mode = 'local';
-        this.#load();
+        this.#engineMode = 'local';
+        this.#playing = true;
+        this.#currentTime = 0;
+        this.#duration = tracks[this.#index]?.durationSecs ?? 0;
+        this.#positionAt = performance.now();
+        void this.#loadCover(this.#queue[this.#index]);
+        void audioEngine.loadQueue(
+            tracks.map((track) => ({
+                trackId: track.id,
+                path: track.path,
+                durationSecs: track.durationSecs,
+                gainDb: 0,
+            })),
+            this.#index,
+        );
     }
 
     playStation(station: Station) {
-        this.#wire();
-        audioGraph.element.pause();
-        this.#mode = 'radio';
         this.#station = station;
+        this.#streamTitle = null;
         this.#coverUrl = null;
         this.#currentTime = 0;
         this.#duration = 0;
-        if (!this.#streamEl) this.#streamEl = new Audio();
-        this.#streamEl.src = station.url;
-        this.#streamEl.volume = this.#volume;
-        this.#streamEl.play().catch((err) => console.error('radio play failed:', err));
-        this.#playing = true;
+        this.#connecting = true;
+        // Resolves only once the station is connected and buffered, which is
+        // why the card can show a connecting state rather than pretending.
+        audioEngine
+            .playStream(station.id, station.url)
+            .catch((err) => {
+                console.error('radio play failed:', err);
+                this.#station = null;
+            })
+            .finally(() => {
+                this.#connecting = false;
+            });
     }
 
     toggle() {
-        if (this.#mode === 'local') {
-            const el = audioGraph.element;
-            audioGraph.resume();
-            if (this.#playing) {
-                el.pause();
-                this.#playing = false;
-            } else {
-                el.play().catch((err) => console.error('play failed:', err));
-                this.#playing = true;
-            }
-        } else if (this.#mode === 'radio' && this.#streamEl) {
-            if (this.#playing) {
-                this.#streamEl.pause();
-                this.#playing = false;
-            } else {
-                this.#streamEl.play().catch((err) => console.error('radio play failed:', err));
-                this.#playing = true;
-            }
-        }
+        if (this.mode === null) return;
+        this.#playing = !this.#playing;
+        this.#positionAt = performance.now();
+        void audioEngine.toggle();
     }
 
     next() {
-        this.#step(1);
+        void audioEngine.next();
     }
 
     previous() {
-        this.#step(-1);
+        void audioEngine.previous();
+    }
+
+    /** Plays a specific position in the current queue. */
+    jumpTo(index: number) {
+        void audioEngine.jumpTo(index);
     }
 
     seekTo(fraction: number) {
-        if (this.#mode !== 'local') return;
-        const el = audioGraph.element;
-        if (!(el.duration > 0)) return;
+        if (this.mode !== 'local' || !(this.#duration > 0)) return;
         const f = Math.min(1, Math.max(0, fraction));
-        el.currentTime = f * el.duration;
-        this.#currentTime = el.currentTime;
+        this.#currentTime = f * this.#duration;
+        this.#positionAt = performance.now();
+        void audioEngine.seek(this.#currentTime);
     }
 
     setVolume(volume: number) {
         const v = Math.min(1, Math.max(0, volume));
         this.#volume = v;
-        audioGraph.element.volume = v;
-        if (this.#streamEl) this.#streamEl.volume = v;
+        void audioEngine.setVolume(v);
         // Debounced persist — a drag emits dozens of values per second.
         if (this.#volumeTimer) clearTimeout(this.#volumeTimer);
         this.#volumeTimer = setTimeout(() => {
@@ -182,62 +248,18 @@ class PlayerStore {
 
     toggleShuffle() {
         this.#shuffle = !this.#shuffle;
+        void audioEngine.setShuffle(this.#shuffle);
     }
 
     toggleRepeat() {
         this.#repeat = !this.#repeat;
+        void audioEngine.setRepeat(this.#repeat);
     }
 
-    #step(direction: 1 | -1) {
-        if (this.#mode !== 'local' || !this.#queue.length) return;
-        const len = this.#queue.length;
-        if (this.#shuffle && len > 1 && direction === 1) {
-            let pick = this.#index;
-            while (pick === this.#index) pick = Math.floor(Math.random() * len);
-            this.#index = pick;
-        } else {
-            this.#index = (this.#index + direction + len) % len;
-        }
-        this.#load();
-    }
-
-    #onEnded() {
-        if (this.#mode !== 'local') return;
-        const atEnd = this.#index === this.#queue.length - 1;
-        if (atEnd && !this.#repeat) {
-            this.#playing = false;
-            return;
-        }
-        this.#step(1);
-    }
-
-    #load() {
-        const track = this.#queue[this.#index];
-        if (!track) return;
-        this.#wire();
-        audioGraph.ensure();
-        audioGraph.resume();
-        const el = audioGraph.element;
-        el.src = convertFileSrc(track.path);
-        el.volume = this.#volume;
-        el.play().catch((err) => console.error('play failed:', err));
-        this.#playing = true;
-        this.#currentTime = 0;
-        this.#duration = track.durationSecs;
-        void this.#loadCover(track);
-    }
-
-    #stopStream() {
-        if (this.#streamEl) {
-            this.#streamEl.pause();
-            this.#streamEl.removeAttribute('src');
-        }
-        this.#station = null;
-    }
-
-    async #loadCover(track: Track) {
+    async #loadCover(track: Track | undefined) {
         const epoch = ++this.#coverEpoch;
         this.#coverUrl = null;
+        if (!track) return;
         try {
             const cover = await invoke<CoverArt | null>('get_track_cover', { trackId: track.id });
             if (epoch !== this.#coverEpoch) return;

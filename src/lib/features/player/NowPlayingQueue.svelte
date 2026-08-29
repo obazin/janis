@@ -61,7 +61,10 @@
         }
         // Up next — everything after the current track, wrapping once so the
         // queue always reads as a ring.
-        const ring = [...queue.slice(currentIndex + 1), ...queue.slice(0, Math.max(0, currentIndex))];
+        const ring = [
+            ...queue.slice(currentIndex + 1),
+            ...queue.slice(0, Math.max(0, currentIndex)),
+        ];
         return ring.map((track, i) => ({
             track,
             display: i + 1,
@@ -137,7 +140,11 @@
                 >
                     <div class="w-6.5 flex justify-center flex-none">
                         {#if row.isCurrent}
-                            <svg class="size-3.5 text-accent" viewBox="0 0 24 24" fill="currentColor">
+                            <svg
+                                class="size-3.5 text-accent"
+                                viewBox="0 0 24 24"
+                                fill="currentColor"
+                            >
                                 <path d={ICONS.play} />
                             </svg>
                         {:else}

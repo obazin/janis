@@ -6,10 +6,12 @@
     interface Props {
         station: Station;
         active: boolean;
+        /** True while this station is being connected and buffered. */
+        connecting?: boolean;
         onclick: () => void;
     }
 
-    let { station, active, onclick }: Props = $props();
+    let { station, active, connecting = false, onclick }: Props = $props();
 </script>
 
 <button
@@ -28,8 +30,14 @@
             {t(station.genreKey)} · {t('radio.kbps', { kbps: station.kbps })}
         </div>
     </div>
-    <div class="flex items-center gap-1.25 text-label font-bold text-live uppercase">
-        <span class="size-1.75 rounded-full bg-live glow-live"></span>
-        {t('radio.live')}
+    <div
+        class="flex items-center gap-1.25 text-label font-bold uppercase
+        {connecting ? 'text-text-muted' : 'text-live'}"
+    >
+        <span
+            class="size-1.75 rounded-full
+            {connecting ? 'bg-text-muted animate-pulse' : 'bg-live glow-live'}"
+        ></span>
+        {connecting ? t('radio.connecting') : t('radio.live')}
     </div>
 </button>

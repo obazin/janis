@@ -16,7 +16,9 @@
 
     const track = $derived(playerStore.current);
     const station = $derived(playerStore.station);
-    const title = $derived(track?.title ?? station?.name ?? '');
+    // A station announcing a track wins the hero slot — the station name is
+    // already in the eyebrow, and what is playing is the more useful headline.
+    const title = $derived(track?.title ?? playerStore.streamTitle ?? station?.name ?? '');
     const artSeed = $derived(
         track ? `${track.artist ?? ''}-${track.album ?? track.title}` : (station?.id ?? 'janis'),
     );
@@ -105,6 +107,10 @@
                     </div>
                 {:else if station}
                     <div>
+                        <SectionLabel class="mb-1">{t('now.station')}</SectionLabel>
+                        <div class="text-heading-md font-bold">{station.name}</div>
+                    </div>
+                    <div>
                         <SectionLabel class="mb-1">{t('radio.title')}</SectionLabel>
                         <div class="text-heading-md font-bold">{t(station.genreKey)}</div>
                     </div>
@@ -113,7 +119,9 @@
 
             <div>
                 <SectionLabel class="mb-2">{t('now.waveform')}</SectionLabel>
-                <div class="relative h-30 bg-well rounded-card border border-border overflow-hidden">
+                <div
+                    class="relative h-30 bg-well rounded-card border border-border overflow-hidden"
+                >
                     <WaveformCanvas variant="big" />
                 </div>
                 <div class="flex justify-between mt-2 font-mono text-caption text-text-muted">

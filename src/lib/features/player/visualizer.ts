@@ -1,15 +1,19 @@
 // Shared per-frame visual data for the waveform + spectrum canvases.
 //
-// When the analyser is live (local playback through the Web Audio graph) the
-// wave is the real time-domain signal and the bars are real frequency bins.
-// Without an analyser (radio streams, paused, nothing loaded) both fall back
-// to a synthetic animation whose energy eases toward zero — the same
-// behaviour in either case, so the canvases never care which source fed them.
+// The engine pushes a 170-byte frame roughly sixty times a second: 160
+// waveform points then ten band magnitudes, already windowed, FFT'd, folded
+// and smoothed in Rust. The byte encoding matches what `AnalyserNode` used to
+// hand back (128 is silence in the trace, 0–255 across the band range), so the
+// canvases draw exactly what they drew before.
+//
+// With no frame — nothing loaded, paused, or radio, which still plays outside
+// the engine — both fall back to a synthetic animation whose energy eases
+// toward zero, so the canvases never care which source fed them.
 //
 // Every canvas runs its own rAF loop and calls `tick(now)`; the first call
 // of a frame does the work, later calls are no-ops.
 
-import { EQ_BAND_COUNT } from './audioGraph';
+import { EQ_BAND_COUNT } from '$lib/features/eq/bands';
 
 const WAVE_POINTS = 160;
 
@@ -21,14 +25,12 @@ export class Visualizer {
     #t = 0;
     #lastNow = 0;
     #lastFrame = -1;
-    #freqData: Uint8Array<ArrayBuffer> | null = null;
-    #timeData: Uint8Array<ArrayBuffer> | null = null;
 
     constructor() {
         this.mags.fill(0.15);
     }
 
-    tick(now: number, analyser: AnalyserNode | null, playing: boolean, eqGains: readonly number[]) {
+    tick(now: number, frame: Uint8Array | null, playing: boolean, eqGains: readonly number[]) {
         if (now === this.#lastFrame) return;
         this.#lastFrame = now;
         const dt = Math.min(0.05, (now - this.#lastNow) / 1000) || 0.016;
@@ -38,30 +40,15 @@ export class Visualizer {
         const targetEnergy = playing ? 1 : 0.04;
         this.energy += (targetEnergy - this.energy) * Math.min(1, dt * 4);
 
-        if (analyser && playing) {
-            if (!this.#freqData || this.#freqData.length !== analyser.frequencyBinCount) {
-                this.#freqData = new Uint8Array(analyser.frequencyBinCount);
-                this.#timeData = new Uint8Array(analyser.fftSize);
-            }
-            analyser.getByteFrequencyData(this.#freqData);
-            analyser.getByteTimeDomainData(this.#timeData!);
-            const n = this.#freqData.length;
-            for (let i = 0; i < EQ_BAND_COUNT; i++) {
-                const lo = Math.floor(Math.pow(n, i / EQ_BAND_COUNT));
-                const hi = Math.max(lo + 1, Math.floor(Math.pow(n, (i + 1) / EQ_BAND_COUNT)));
-                let sum = 0;
-                let count = 0;
-                for (let k = lo; k < hi && k < n; k++) {
-                    sum += this.#freqData[k];
-                    count++;
-                }
-                const v = count ? sum / count / 255 : 0;
-                this.mags[i] += (v - this.mags[i]) * 0.4;
-            }
-            const time = this.#timeData!;
+        if (frame && playing) {
             for (let i = 0; i < WAVE_POINTS; i++) {
-                const idx = Math.floor((i / WAVE_POINTS) * time.length);
-                this.wave[i] = (time[idx] - 128) / 128;
+                this.wave[i] = (frame[i] - 128) / 128;
+            }
+            for (let i = 0; i < EQ_BAND_COUNT; i++) {
+                const v = frame[WAVE_POINTS + i] / 255;
+                // A little easing on top of the engine's own smoothing, so a
+                // dropped frame reads as a pause rather than a jolt.
+                this.mags[i] += (v - this.mags[i]) * 0.4;
             }
         } else {
             for (let i = 0; i < EQ_BAND_COUNT; i++) {
