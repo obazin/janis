@@ -102,7 +102,6 @@ pub trait Store: Send + Sync {
 pub struct NoStore;
 
 #[cfg(test)]
-
 impl Store for NoStore {
     fn needs_measurement(&self, _track_id: i64) -> bool {
         false
