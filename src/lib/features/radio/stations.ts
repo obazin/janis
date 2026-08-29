@@ -480,6 +480,7 @@ export const STATIONS: Station[] = [
         kbps: 128,
         url: 'https://icecast.radiofrance.fr/francemusiqueeasyclassique-midfi.mp3',
         gradIndex: 4,
+        nowPlaying: { provider: 'radiofrance', key: '401' },
     },
     {
         id: 'fm-classique-plus',
@@ -488,6 +489,7 @@ export const STATIONS: Station[] = [
         kbps: 128,
         url: 'https://icecast.radiofrance.fr/francemusiqueclassiqueplus-midfi.mp3',
         gradIndex: 5,
+        nowPlaying: { provider: 'radiofrance', key: '402' },
     },
     {
         id: 'fm-concerts',
@@ -496,6 +498,7 @@ export const STATIONS: Station[] = [
         kbps: 128,
         url: 'https://icecast.radiofrance.fr/francemusiqueconcertsradiofrance-midfi.mp3',
         gradIndex: 0,
+        nowPlaying: { provider: 'radiofrance', key: '403' },
     },
     {
         id: 'fm-jazz',
@@ -504,6 +507,7 @@ export const STATIONS: Station[] = [
         kbps: 128,
         url: 'https://icecast.radiofrance.fr/francemusiquelajazz-midfi.mp3',
         gradIndex: 1,
+        nowPlaying: { provider: 'radiofrance', key: '405' },
     },
     {
         id: 'fm-contemporaine',
@@ -512,6 +516,7 @@ export const STATIONS: Station[] = [
         kbps: 128,
         url: 'https://icecast.radiofrance.fr/francemusiquelacontemporaine-midfi.mp3',
         gradIndex: 2,
+        nowPlaying: { provider: 'radiofrance', key: '406' },
     },
     {
         id: 'fm-ocora',
@@ -520,6 +525,7 @@ export const STATIONS: Station[] = [
         kbps: 128,
         url: 'https://icecast.radiofrance.fr/francemusiqueocoramonde-midfi.mp3',
         gradIndex: 3,
+        nowPlaying: { provider: 'radiofrance', key: '404' },
     },
     {
         id: 'fm-baroque',
@@ -528,6 +534,7 @@ export const STATIONS: Station[] = [
         kbps: 128,
         url: 'https://icecast.radiofrance.fr/francemusiquebaroque-midfi.mp3',
         gradIndex: 4,
+        nowPlaying: { provider: 'radiofrance', key: '408' },
     },
     {
         id: 'fm-opera',
@@ -536,6 +543,7 @@ export const STATIONS: Station[] = [
         kbps: 128,
         url: 'https://icecast.radiofrance.fr/francemusiqueopera-midfi.mp3',
         gradIndex: 5,
+        nowPlaying: { provider: 'radiofrance', key: '409' },
     },
     {
         id: 'fm-films',
@@ -544,6 +552,7 @@ export const STATIONS: Station[] = [
         kbps: 128,
         url: 'https://icecast.radiofrance.fr/francemusiquelabo-midfi.mp3',
         gradIndex: 0,
+        nowPlaying: { provider: 'radiofrance', key: '407' },
     },
     {
         id: 'mouv',
@@ -552,6 +561,7 @@ export const STATIONS: Station[] = [
         kbps: 128,
         url: 'https://icecast.radiofrance.fr/mouv-midfi.mp3',
         gradIndex: 1,
+        nowPlaying: { provider: 'radiofrance', key: '6' },
     },
     // — Radio Paradise —
     {
