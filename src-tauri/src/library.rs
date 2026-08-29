@@ -8,6 +8,7 @@
 //! base64 over IPC.
 
 use base64::Engine;
+use lofty::picture::PictureType;
 use lofty::prelude::*;
 use lofty::probe::Probe;
 use serde::Serialize;
@@ -521,6 +522,64 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 
+    /// Writes a cover picture into a file's ID3v2 tag.
+    fn tag_with_cover(path: &Path, pic_type: PictureType) {
+        use lofty::config::WriteOptions;
+        use lofty::picture::{MimeType, Picture};
+        use lofty::tag::{Tag, TagType};
+
+        let mut tag = Tag::new(TagType::Id3v2);
+        tag.push_picture(Picture::new_unchecked(
+            pic_type,
+            Some(MimeType::Jpeg),
+            None,
+            // Not a real JPEG; `read_cover` never decodes it, it only
+            // re-encodes the bytes for the IPC hop.
+            vec![0xFF, 0xD8, 0xFF, 0xE0, 1, 2, 3, 4],
+        ));
+        tag.save_to_path(path, WriteOptions::default())
+            .expect("write cover tag");
+    }
+
+    #[test]
+    fn cover_art_is_read_back_from_the_file() {
+        let dir = std::env::temp_dir().join("janis-cover-test");
+        let path = dir.join("with-art.wav");
+        write_wav(&path);
+        tag_with_cover(&path, PictureType::CoverFront);
+
+        let cover = read_cover(path.to_str().expect("utf-8 path"))
+            .expect("the picture just written should come back");
+        assert_eq!(cover.mime, "image/jpeg");
+        assert!(!cover.data_base64.is_empty());
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn a_file_with_no_picture_yields_none() {
+        let dir = std::env::temp_dir().join("janis-cover-test");
+        let path = dir.join("no-art.wav");
+        write_wav(&path);
+
+        assert!(read_cover(path.to_str().expect("utf-8 path")).is_none());
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn a_back_cover_is_used_when_there_is_no_front() {
+        // Better the back of the sleeve than the generated gradient.
+        let dir = std::env::temp_dir().join("janis-cover-test");
+        let path = dir.join("back-art.wav");
+        write_wav(&path);
+        tag_with_cover(&path, PictureType::CoverBack);
+
+        assert!(read_cover(path.to_str().expect("utf-8 path")).is_some());
+
+        let _ = std::fs::remove_file(&path);
+    }
+
     #[test]
     fn a_disc_prefixed_name_survives_the_scanner() {
         let dir = std::env::temp_dir().join("janis-scan-test");
@@ -699,41 +758,90 @@ pub async fn rescan_library(app: AppHandle) -> Result<ScanReport, String> {
     .map_err(|e| format!("rescan task: {}", e))?
 }
 
-/// Embedded cover art for one track, base64-encoded for the IPC hop. `None`
-/// when the file carries no picture — the frontend falls back to its
-/// generated gradient art.
+/// Cover art for one track, base64-encoded for the IPC hop.
+///
+/// Falls back to the rest of the album: a rip where only the first file
+/// carries the picture is common, and every track on that record should still
+/// show the sleeve. `None` only when nothing in the album has art — the
+/// frontend then draws its generated gradient.
 #[tauri::command]
 pub async fn get_track_cover(app: AppHandle, track_id: i64) -> Result<Option<CoverArt>, String> {
-    let path: Option<String> = {
-        let db = app.state::<DbState>();
-        let conn = db.lock();
-        conn.query_row("SELECT path FROM tracks WHERE id = ?1", [track_id], |r| {
-            r.get(0)
-        })
-        .ok()
-    };
-    let Some(path) = path else {
+    let paths = cover_candidates(&app, track_id);
+    if paths.is_empty() {
         return Ok(None);
-    };
+    }
     tauri::async_runtime::spawn_blocking(move || {
-        let tagged = match Probe::open(&path).and_then(|p| p.read()) {
-            Ok(t) => t,
-            Err(_) => return Ok(None),
-        };
-        let tag = tagged.primary_tag().or_else(|| tagged.first_tag());
-        let Some(tag) = tag else { return Ok(None) };
-        let Some(picture) = tag.pictures().first() else {
-            return Ok(None);
-        };
-        let mime = picture
-            .mime_type()
-            .map(|m| m.to_string())
-            .unwrap_or_else(|| "image/jpeg".to_string());
-        Ok(Some(CoverArt {
-            mime,
-            data_base64: base64::engine::general_purpose::STANDARD.encode(picture.data()),
-        }))
+        for path in paths {
+            if let Some(cover) = read_cover(&path) {
+                return Ok(Some(cover));
+            }
+        }
+        Ok(None)
     })
     .await
     .map_err(|e| format!("cover task: {}", e))?
+}
+
+/// How many album siblings to open before giving up. A record whose first
+/// dozen files carry no art almost certainly has none.
+const COVER_SIBLING_LIMIT: usize = 12;
+
+/// The track's own file first, then its album siblings in playing order.
+fn cover_candidates(app: &AppHandle, track_id: i64) -> Vec<String> {
+    let db = app.state::<DbState>();
+    let conn = db.lock();
+
+    let Ok(own) = conn.query_row("SELECT path FROM tracks WHERE id = ?1", [track_id], |r| {
+        r.get::<_, String>(0)
+    }) else {
+        return Vec::new();
+    };
+
+    // `IS` rather than `=` so two tracks with no album artist still match.
+    let siblings = conn
+        .prepare(
+            "SELECT t.path FROM tracks t, tracks cur
+             WHERE cur.id = ?1
+               AND t.id != cur.id
+               AND cur.album IS NOT NULL
+               AND t.album = cur.album
+               AND COALESCE(t.album_artist, t.artist) IS COALESCE(cur.album_artist, cur.artist)
+             ORDER BY t.disc_number, t.track_number, t.id
+             LIMIT ?2",
+        )
+        .and_then(|mut stmt| {
+            stmt.query_map(
+                rusqlite::params![track_id, COVER_SIBLING_LIMIT as i64],
+                |r| r.get::<_, String>(0),
+            )?
+            .collect::<Result<Vec<_>, _>>()
+        })
+        .unwrap_or_default();
+
+    let mut paths = Vec::with_capacity(siblings.len() + 1);
+    paths.push(own);
+    paths.extend(siblings);
+    paths
+}
+
+/// The first embedded picture in a file, preferring the front cover.
+///
+/// Searches every tag block, not just the primary one: a file can carry both
+/// ID3v2 and APE, and the artwork is not always in the tag lofty considers
+/// primary.
+fn read_cover(path: &str) -> Option<CoverArt> {
+    let tagged = Probe::open(path).ok()?.read().ok()?;
+    let pictures = || tagged.tags().iter().flat_map(|tag| tag.pictures());
+
+    let picture = pictures()
+        .find(|p| p.pic_type() == PictureType::CoverFront)
+        .or_else(|| pictures().next())?;
+
+    Some(CoverArt {
+        mime: picture
+            .mime_type()
+            .map(|m| m.to_string())
+            .unwrap_or_else(|| "image/jpeg".to_string()),
+        data_base64: base64::engine::general_purpose::STANDARD.encode(picture.data()),
+    })
 }

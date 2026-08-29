@@ -42,6 +42,7 @@
                             title={album.album ?? t('common.unknownAlbum')}
                             subtitle={album.artist ?? t('common.unknownArtist')}
                             seed="{album.artist ?? ''}-{album.album ?? ''}"
+                            coverTrackId={album.tracks[0]?.id ?? null}
                             onclick={() => playerStore.playQueue(album.tracks, 0)}
                         />
                     {/each}
@@ -59,6 +60,7 @@
                             title={artist.artist}
                             subtitle={t('library.tracks', { count: artist.tracks.length })}
                             seed={artist.artist}
+                            coverTrackId={artist.tracks[0]?.id ?? null}
                             onclick={() => playerStore.playQueue(artist.tracks, 0)}
                         />
                     {/each}
