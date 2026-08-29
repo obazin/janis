@@ -19,7 +19,7 @@ pub struct QueueEntry {
     pub path: PathBuf,
     pub duration_secs: f64,
     /// Normalization gain in dB, resolved when the queue was loaded.
-    pub gain_db: f32,
+    pub gain_db: f64,
 }
 
 pub struct Queue {

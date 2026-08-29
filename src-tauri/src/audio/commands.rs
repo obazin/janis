@@ -31,9 +31,10 @@ pub struct QueueItem {
     pub track_id: i64,
     pub path: String,
     pub duration_secs: f64,
-    /// Normalization gain in dB. Zero until the library records one.
+    /// Normalization gain in dB, already resolved by the library from the
+    /// file's ReplayGain tags or its measured loudness.
     #[serde(default)]
-    pub gain_db: f32,
+    pub gain_db: f64,
 }
 
 impl From<QueueItem> for QueueEntry {
@@ -171,6 +172,14 @@ pub fn audio_set_repeat(
     enabled: bool,
 ) -> Result<(), String> {
     engine.send(EngineCommand::SetRepeat(enabled))
+}
+
+#[tauri::command]
+pub fn audio_set_normalize(
+    engine: tauri::State<'_, AudioEngine>,
+    enabled: bool,
+) -> Result<(), String> {
+    engine.send(EngineCommand::SetNormalize(enabled))
 }
 
 /// Straight to the atomics — see the module note on why this skips the queue.

@@ -33,7 +33,10 @@ fn main() {
             // The engine thread starts here and outlives every screen — the
             // output device itself is opened lazily on first play, so a
             // machine with no sound card still boots.
-            app.manage(audio::init(None));
+            app.manage(audio::init(
+                std::sync::Arc::new(library::LoudnessStore(app.handle().clone())),
+                None,
+            ));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -64,6 +67,7 @@ fn main() {
             audio::commands::audio_seek,
             audio::commands::audio_set_shuffle,
             audio::commands::audio_set_repeat,
+            audio::commands::audio_set_normalize,
             audio::commands::audio_set_volume,
             audio::commands::audio_set_eq,
         ])

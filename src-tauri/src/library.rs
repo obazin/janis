@@ -16,6 +16,7 @@ use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Manager};
 use walkdir::WalkDir;
 
+use crate::audio::loudness;
 use crate::persistence::DbState;
 
 /// Extensions the scanner picks up. This list tracks what the `audio` engine
@@ -56,6 +57,10 @@ pub struct Track {
     pub genre: Option<String>,
     /// The album's own artist, which on a compilation is not the track's.
     pub album_artist: Option<String>,
+    /// Playback gain in dB, already resolved from the ReplayGain tags or the
+    /// measured loudness. Zero when neither is known. Resolved here so the
+    /// frontend never has to re-derive it.
+    pub gain_db: f64,
 }
 
 #[derive(Serialize)]
@@ -100,6 +105,10 @@ struct ScannedFile {
     year: Option<u32>,
     genre: Option<String>,
     album_artist: Option<String>,
+    rg_track_gain_db: Option<f64>,
+    rg_track_peak: Option<f64>,
+    rg_album_gain_db: Option<f64>,
+    rg_album_peak: Option<f64>,
 }
 
 fn audio_extension(path: &Path) -> Option<String> {
@@ -151,6 +160,16 @@ fn read_metadata(path: &Path) -> Result<ScannedFile, String> {
             })
     };
     let text = |key: ItemKey| non_empty(tag.and_then(|t| t.get_string(&key)).map(str::to_string));
+    // ReplayGain values are stored as free-form text whatever the container,
+    // so the parsing lives in one tolerant place.
+    let gain = |key: ItemKey| {
+        tag.and_then(|t| t.get_string(&key))
+            .and_then(loudness::parse_gain_db)
+    };
+    let peak = |key: ItemKey| {
+        tag.and_then(|t| t.get_string(&key))
+            .and_then(loudness::parse_peak)
+    };
 
     // A file with no track number still belongs somewhere in the album, and
     // the position is usually sitting in its filename.
@@ -180,6 +199,10 @@ fn read_metadata(path: &Path) -> Result<ScannedFile, String> {
         }),
         genre: text(ItemKey::Genre),
         album_artist: text(ItemKey::AlbumArtist),
+        rg_track_gain_db: gain(ItemKey::ReplayGainTrackGain),
+        rg_track_peak: peak(ItemKey::ReplayGainTrackPeak),
+        rg_album_gain_db: gain(ItemKey::ReplayGainAlbumGain),
+        rg_album_peak: peak(ItemKey::ReplayGainAlbumPeak),
     })
 }
 
@@ -263,9 +286,11 @@ fn upsert_track(
         "INSERT INTO tracks (folder_id, path, title, artist, album, composer, duration_secs,
                              format, sample_rate, bit_depth, channels, lossless,
                              track_number, track_total, disc_number, disc_total,
-                             year, genre, album_artist)
+                             year, genre, album_artist,
+                             rg_track_gain_db, rg_track_peak,
+                             rg_album_gain_db, rg_album_peak)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12,
-                 ?13, ?14, ?15, ?16, ?17, ?18, ?19)
+                 ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23)
          ON CONFLICT(path) DO UPDATE SET
              folder_id = excluded.folder_id,
              title = excluded.title,
@@ -284,7 +309,11 @@ fn upsert_track(
              disc_total = excluded.disc_total,
              year = excluded.year,
              genre = excluded.genre,
-             album_artist = excluded.album_artist",
+             album_artist = excluded.album_artist,
+             rg_track_gain_db = excluded.rg_track_gain_db,
+             rg_track_peak = excluded.rg_track_peak,
+             rg_album_gain_db = excluded.rg_album_gain_db,
+             rg_album_peak = excluded.rg_album_peak",
         rusqlite::params![
             folder_id,
             path,
@@ -305,6 +334,10 @@ fn upsert_track(
             meta.year,
             meta.genre,
             meta.album_artist,
+            meta.rg_track_gain_db,
+            meta.rg_track_peak,
+            meta.rg_album_gain_db,
+            meta.rg_album_peak,
         ],
     )
     .map_err(|e| format!("upsert track {}: {}", path, e))?;
@@ -597,7 +630,8 @@ pub fn list_tracks(db: tauri::State<'_, DbState>) -> Result<Vec<Track>, String> 
             "SELECT id, folder_id, path, title, artist, album, composer, duration_secs,
                     format, sample_rate, bit_depth, channels, lossless, added_at,
                     track_number, track_total, disc_number, disc_total,
-                    year, genre, album_artist
+                    year, genre, album_artist,
+                    rg_track_gain_db, rg_track_peak, loudness_lufs, loudness_peak
              FROM tracks ORDER BY added_at DESC, id DESC",
         )
         .map_err(|e| format!("prepare list_tracks: {}", e))?;
@@ -625,6 +659,15 @@ pub fn list_tracks(db: tauri::State<'_, DbState>) -> Result<Vec<Track>, String> 
                 year: row.get(18)?,
                 genre: row.get(19)?,
                 album_artist: row.get(20)?,
+                // Tag first, measurement second, and the peak from whichever
+                // source supplied the gain.
+                gain_db: {
+                    let tag_gain: Option<f64> = row.get(21)?;
+                    let tag_peak: Option<f64> = row.get(22)?;
+                    let lufs: Option<f64> = row.get(23)?;
+                    let measured_peak: Option<f64> = row.get(24)?;
+                    loudness::gain_db(tag_gain, lufs, tag_peak.or(measured_peak))
+                },
             })
         })
         .and_then(|rows| rows.collect::<Result<Vec<_>, _>>())
@@ -751,6 +794,55 @@ pub async fn rescan_library(app: AppHandle) -> Result<ScanReport, String> {
     })
     .await
     .map_err(|e| format!("rescan task: {}", e))?
+}
+
+/// The engine's route to the loudness columns.
+pub struct LoudnessStore(pub AppHandle);
+
+impl crate::audio::loudness::Store for LoudnessStore {
+    fn needs_measurement(&self, track_id: i64) -> bool {
+        needs_loudness(&self.0, track_id)
+    }
+
+    fn record(&self, track_id: i64, measured: crate::audio::loudness::Measured) {
+        store_loudness(&self.0, track_id, measured.lufs, measured.peak);
+    }
+}
+
+/// Whether a track still has no idea how loud it is.
+///
+/// True only when neither the file's tags nor a previous measurement said,
+/// which is what decides if playing it is worth measuring.
+pub fn needs_loudness(app: &AppHandle, track_id: i64) -> bool {
+    let Some(db) = app.try_state::<DbState>() else {
+        return false;
+    };
+    let conn = db.lock();
+    conn.query_row(
+        "SELECT rg_track_gain_db IS NULL AND loudness_lufs IS NULL
+         FROM tracks WHERE id = ?1",
+        [track_id],
+        |row| row.get::<_, i64>(0),
+    )
+    .map(|needs| needs != 0)
+    .unwrap_or(false)
+}
+
+/// Records a loudness measurement taken while a track played.
+///
+/// Written outside `upsert_track` on purpose: a rescan re-reads tags and would
+/// otherwise wipe a measurement it knows nothing about.
+pub fn store_loudness(app: &AppHandle, track_id: i64, lufs: f64, peak: f64) {
+    let Some(db) = app.try_state::<DbState>() else {
+        return;
+    };
+    let conn = db.lock();
+    if let Err(e) = conn.execute(
+        "UPDATE tracks SET loudness_lufs = ?2, loudness_peak = ?3 WHERE id = ?1",
+        rusqlite::params![track_id, lufs, peak],
+    ) {
+        log::warn!("store loudness for track {}: {}", track_id, e);
+    }
 }
 
 /// Cover art for one track, base64-encoded for the IPC hop.
