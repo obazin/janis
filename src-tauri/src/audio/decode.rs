@@ -322,9 +322,12 @@ mod tests {
     /// Decodes a real Opus file, proving the libopus-backed decoder is wired
     /// into the registry and produces audio.
     ///
-    /// Ignored because it needs a fixture that `ffmpeg` generates:
+    /// Ignored because it needs two fixtures that `ffmpeg` generates:
+    ///   mkdir -p /tmp/janis-opus
     ///   ffmpeg -f lavfi -i "sine=frequency=440:duration=3:sample_rate=48000" \
     ///          -ac 2 -c:a libopus -b:a 96k /tmp/janis-opus/tone.opus
+    ///   ffmpeg -f lavfi -i "sine=frequency=440:duration=3:sample_rate=48000" \
+    ///          -ac 1 -c:a libopus -b:a 64k /tmp/janis-opus/mono.opus
     /// Then: cargo test -- --ignored decodes_a_real_opus_file --nocapture
     #[test]
     #[ignore = "requires an Opus fixture generated with ffmpeg"]
