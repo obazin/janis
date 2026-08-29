@@ -20,6 +20,9 @@ class PlayerStore {
     #playing = $state(false);
     #engineMode = $state<'idle' | 'local' | 'radio'>('idle');
     #streamTitle = $state<string | null>(null);
+    #streamArtist = $state<string | null>(null);
+    #streamAlbum = $state<string | null>(null);
+    #streamCover = $state<string | null>(null);
     #connecting = $state(false);
     #station = $state<Station | null>(null);
     #volume = $state(0.8);
@@ -64,12 +67,19 @@ class PlayerStore {
     get duration() {
         return this.#duration;
     }
+    /** Art for whatever is playing: the track's own, or the station's. */
     get coverUrl() {
-        return this.#coverUrl;
+        return this.mode === 'radio' ? this.#streamCover : this.#coverUrl;
     }
-    /** The track a station is announcing over ICY metadata, when it sends one. */
+    /** What the station says it is playing, when it says anything. */
     get streamTitle() {
         return this.#streamTitle;
+    }
+    get streamArtist() {
+        return this.#streamArtist;
+    }
+    get streamAlbum() {
+        return this.#streamAlbum;
     }
     /** True while a station is connecting and buffering. */
     get connecting() {
@@ -134,7 +144,7 @@ class PlayerStore {
                 this.#playing = event.data.playing;
                 if (event.data.mode !== 'radio') {
                     this.#station = null;
-                    this.#streamTitle = null;
+                    this.#clearStreamInfo();
                 }
                 break;
             case 'position':
@@ -142,8 +152,11 @@ class PlayerStore {
                 this.#duration = event.data.durationSecs;
                 this.#positionAt = performance.now();
                 break;
-            case 'streamTitle':
+            case 'streamMetadata':
                 this.#streamTitle = event.data.title;
+                this.#streamArtist = event.data.artist;
+                this.#streamAlbum = event.data.album;
+                this.#streamCover = event.data.cover;
                 break;
             case 'trackChanged':
                 this.#index = event.data.index;
@@ -165,7 +178,7 @@ class PlayerStore {
     playQueue(tracks: Track[], index: number) {
         if (!tracks.length) return;
         this.#station = null;
-        this.#streamTitle = null;
+        this.#clearStreamInfo();
         this.#queue = [...tracks];
         this.#index = Math.min(Math.max(0, index), tracks.length - 1);
         this.#engineMode = 'local';
@@ -187,7 +200,7 @@ class PlayerStore {
 
     playStation(station: Station) {
         this.#station = station;
-        this.#streamTitle = null;
+        this.#clearStreamInfo();
         this.#coverUrl = null;
         this.#currentTime = 0;
         this.#duration = 0;
@@ -254,6 +267,13 @@ class PlayerStore {
     toggleRepeat() {
         this.#repeat = !this.#repeat;
         void audioEngine.setRepeat(this.#repeat);
+    }
+
+    #clearStreamInfo() {
+        this.#streamTitle = null;
+        this.#streamArtist = null;
+        this.#streamAlbum = null;
+        this.#streamCover = null;
     }
 
     async #loadCover(track: Track | undefined) {

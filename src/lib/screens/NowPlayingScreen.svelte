@@ -106,6 +106,22 @@
                         </div>
                     </div>
                 {:else if station}
+                    {#if playerStore.streamArtist}
+                        <div>
+                            <SectionLabel class="mb-1">{t('now.artist')}</SectionLabel>
+                            <div class="text-heading-md font-bold">
+                                {playerStore.streamArtist}
+                            </div>
+                        </div>
+                    {/if}
+                    {#if playerStore.streamAlbum}
+                        <div>
+                            <SectionLabel class="mb-1">{t('now.album')}</SectionLabel>
+                            <div class="text-heading-md font-semibold text-text-secondary">
+                                {playerStore.streamAlbum}
+                            </div>
+                        </div>
+                    {/if}
                     <div>
                         <SectionLabel class="mb-1">{t('now.station')}</SectionLabel>
                         <div class="text-heading-md font-bold">{station.name}</div>

@@ -44,7 +44,15 @@ export type EngineEvent =
       }
     | { event: 'position'; data: { positionSecs: number; durationSecs: number } }
     | { event: 'trackChanged'; data: { index: number } }
-    | { event: 'streamTitle'; data: { title: string | null } }
+    | {
+          event: 'streamMetadata';
+          data: {
+              title: string | null;
+              artist: string | null;
+              album: string | null;
+              cover: string | null;
+          };
+      }
     | { event: 'format'; data: { sampleRate: number; channels: number; codec: string } }
     | { event: 'device'; data: { name: string; sampleRate: number; channels: number } }
     | { event: 'error'; data: { message: string } };
