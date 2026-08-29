@@ -139,7 +139,7 @@
     "settings.language": "Langue",
     "settings.language.desc": "Langue de l'interface",
     "settings.banner.title": "Janis est libre et open source",
-    "settings.banner.desc": "GPL-3.0 · Construit avec Tauri et la Web Audio API",
+    "settings.banner.desc": "GPL-3.0 · Construit avec Tauri, Rust et Svelte",
     "eq.title": "Égaliseur 10 bandes",
     "eq.subtitle": "EQ graphique · appliqué en direct à la lecture",
     "eq.reset": "Réinitialiser",

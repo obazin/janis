@@ -16,6 +16,7 @@ use super::analyser::{Analyser, FRAME_BYTES};
 use super::decode::Decoder;
 use super::dsp::remap_channels;
 use super::events::{EngineEvent, Mode};
+use super::icy;
 use super::output::{self, Output};
 use super::params::Params;
 use super::queue::{Queue, QueueEntry};
@@ -701,7 +702,7 @@ impl Engine {
             }
         }
 
-        self.emit_stream_title();
+        self.emit_stream_metadata();
 
         if self.mode != Mode::Idle {
             self.emit(EngineEvent::Position {
@@ -716,7 +717,7 @@ impl Engine {
     }
 
     /// Announces a station's current track when it changes.
-    fn emit_stream_title(&mut self) {
+    fn emit_stream_metadata(&mut self) {
         let Some(source) = self.now_playing.as_ref() else {
             return;
         };
@@ -726,10 +727,18 @@ impl Engine {
             Ok(guard) => guard.clone(),
             Err(_) => return,
         };
-        if title != self.reported_title {
-            self.reported_title = title.clone();
-            self.emit(EngineEvent::StreamTitle { title });
+        if title == self.reported_title {
+            return;
         }
+        self.reported_title = title.clone();
+
+        let parsed = title.as_deref().and_then(icy::parse);
+        self.emit(EngineEvent::StreamMetadata {
+            title: parsed.as_ref().map(|p| p.title.clone()),
+            artist: parsed.as_ref().and_then(|p| p.artist.clone()),
+            album: parsed.as_ref().and_then(|p| p.album.clone()),
+            cover: None,
+        });
     }
 
     /// Builds and sends one visualiser frame, at roughly 60 Hz.

@@ -56,10 +56,18 @@ pub enum EngineEvent {
         channels: u16,
         codec: String,
     },
-    /// The track a station is announcing over ICY metadata. `None` when the
-    /// station stops sending one, or sends nothing at all.
+    /// What a station is currently playing. Every field is optional: ICY
+    /// carries one free-form string, and what can be pulled out of it varies
+    /// by station. All-`None` means the station said nothing useful.
     #[serde(rename_all = "camelCase")]
-    StreamTitle { title: Option<String> },
+    StreamMetadata {
+        title: Option<String>,
+        artist: Option<String>,
+        album: Option<String>,
+        /// Cover art as a `data:` URL. Fetched and encoded in Rust, because
+        /// the webview's CSP allows no remote images.
+        cover: Option<String>,
+    },
     /// The output device actually in use — what the Settings screen shows
     /// instead of the hard-coded "System default" it used to claim.
     #[serde(rename_all = "camelCase")]
