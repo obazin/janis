@@ -241,37 +241,7 @@ impl Decoder {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// A 16-bit PCM WAV built in memory, so the decode path can be tested
-    /// without shipping a binary fixture.
-    fn wav_bytes(sample_rate: u32, channels: u16, frames: usize) -> Vec<u8> {
-        let bits = 16u16;
-        let block_align = channels * bits / 8;
-        let data_len = frames as u32 * block_align as u32;
-
-        let mut out = Vec::new();
-        out.extend_from_slice(b"RIFF");
-        out.extend_from_slice(&(36 + data_len).to_le_bytes());
-        out.extend_from_slice(b"WAVEfmt ");
-        out.extend_from_slice(&16u32.to_le_bytes());
-        out.extend_from_slice(&1u16.to_le_bytes()); // PCM
-        out.extend_from_slice(&channels.to_le_bytes());
-        out.extend_from_slice(&sample_rate.to_le_bytes());
-        out.extend_from_slice(&(sample_rate * block_align as u32).to_le_bytes());
-        out.extend_from_slice(&block_align.to_le_bytes());
-        out.extend_from_slice(&bits.to_le_bytes());
-        out.extend_from_slice(b"data");
-        out.extend_from_slice(&data_len.to_le_bytes());
-
-        for frame in 0..frames {
-            // A ramp, so a test can tell which frame it is looking at.
-            let value = ((frame as f32 / frames as f32) * 30_000.0) as i16;
-            for _ in 0..channels {
-                out.extend_from_slice(&value.to_le_bytes());
-            }
-        }
-        out
-    }
+    use crate::audio::fixtures::{ramp, wav_bytes};
 
     fn decoder_over(bytes: Vec<u8>) -> Decoder {
         let mut hint = Hint::new();
@@ -281,7 +251,7 @@ mod tests {
 
     #[test]
     fn reports_the_format_of_the_source() {
-        let decoder = decoder_over(wav_bytes(44_100, 2, 1000));
+        let decoder = decoder_over(wav_bytes(44_100, 2, &ramp(2, 1000)));
         let format = decoder.format();
         assert_eq!(format.sample_rate, 44_100);
         assert_eq!(format.channels, 2);
@@ -296,7 +266,7 @@ mod tests {
     fn reads_every_frame_then_reports_exhaustion() {
         let frames = 1000;
         let channels = 2;
-        let mut decoder = decoder_over(wav_bytes(44_100, channels, frames));
+        let mut decoder = decoder_over(wav_bytes(44_100, channels, &ramp(channels, frames)));
 
         let mut total = 0;
         let mut buffer = [0.0f32; 256];
@@ -318,7 +288,7 @@ mod tests {
 
     #[test]
     fn a_short_read_only_happens_at_the_end() {
-        let mut decoder = decoder_over(wav_bytes(44_100, 2, 1000));
+        let mut decoder = decoder_over(wav_bytes(44_100, 2, &ramp(2, 1000)));
         let mut buffer = [0.0f32; 64];
         // 1000 frames x 2ch = 2000 samples; the first 31 reads are full.
         for _ in 0..31 {
@@ -329,7 +299,7 @@ mod tests {
 
     #[test]
     fn seeking_moves_the_reported_position() {
-        let mut decoder = decoder_over(wav_bytes(44_100, 2, 44_100));
+        let mut decoder = decoder_over(wav_bytes(44_100, 2, &ramp(2, 44_100)));
         let landed = decoder.seek(0.5).expect("wav is seekable");
         assert!((landed - 0.5).abs() < 0.01, "landed at {landed}");
         assert!((decoder.position_secs - landed).abs() < f64::EPSILON);
@@ -337,7 +307,7 @@ mod tests {
 
     #[test]
     fn seeking_clears_buffered_samples_from_the_old_position() {
-        let mut decoder = decoder_over(wav_bytes(44_100, 1, 44_100));
+        let mut decoder = decoder_over(wav_bytes(44_100, 1, &ramp(1, 44_100)));
         let mut buffer = [0.0f32; 16];
         decoder.read(&mut buffer).unwrap();
         let before = buffer[0];

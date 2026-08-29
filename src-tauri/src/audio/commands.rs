@@ -108,6 +108,7 @@ pub async fn audio_play_stream(
     let epoch = engine.next_station_epoch();
     engine.send(EngineCommand::PlayStream {
         station_id,
+        url,
         stream: Box::new(stream),
         has_provider: now_playing.is_some(),
     })?;

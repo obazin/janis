@@ -27,6 +27,7 @@ pub mod decode;
 pub mod dsp;
 pub mod engine;
 pub mod events;
+pub mod fixtures;
 pub mod icy;
 pub mod loudness;
 pub mod nowplaying;
@@ -143,6 +144,7 @@ pub fn init(loudness_store: Arc<dyn loudness::Store>, device_id: Option<String>)
     let engine = Engine::new(
         loudness_store,
         rx,
+        tx.clone(),
         Arc::clone(&params),
         Arc::clone(&subscribers),
         Arc::clone(&station_epoch),

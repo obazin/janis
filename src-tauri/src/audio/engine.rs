@@ -11,7 +11,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use crossbeam_channel::{Receiver, TryRecvError};
+use crossbeam_channel::{Receiver, Sender, TryRecvError};
 
 use super::analyser::{Analyser, FRAME_BYTES};
 use super::decode::Decoder;
@@ -35,6 +35,11 @@ const RING_SECONDS: f32 = 0.5;
 const PUMP_FRAMES: usize = 2048;
 /// Start opening the next track this long before the current one ends.
 const PRELOAD_SECS: f64 = 5.0;
+/// How many times to try getting a dropped station back before giving up and
+/// telling the listener.
+const MAX_RECONNECT_ATTEMPTS: u32 = 8;
+/// Caps the backoff at 2^5 = 32 seconds.
+const MAX_RECONNECT_BACKOFF_SHIFT: u32 = 5;
 /// Cadence of `Position` events. The frontend interpolates between them.
 const POSITION_INTERVAL: Duration = Duration::from_millis(100);
 
@@ -48,6 +53,8 @@ pub enum EngineCommand {
     /// receives a reader that is ready to decode.
     PlayStream {
         station_id: String,
+        /// Kept so a dropped stream can be reopened without the frontend.
+        url: String,
         stream: Box<RadioStream>,
         /// True when a now-playing poller was started for this station.
         has_provider: bool,
@@ -70,6 +77,19 @@ pub enum EngineCommand {
     StationMetadata {
         epoch: u64,
         update: Update,
+    },
+    /// A reconnect attempt succeeded. Carries the epoch it began under, so a
+    /// station the listener has since left is discarded.
+    Reconnected {
+        epoch: u64,
+        station_id: String,
+        url: String,
+        stream: Box<RadioStream>,
+        has_provider: bool,
+    },
+    /// A reconnect attempt failed; try again if the station is still wanted.
+    ReconnectFailed {
+        epoch: u64,
     },
     /// Re-emit everything the UI needs to render current state. Sent on
     /// subscribe, so a reloaded webview catches up with audio that never
@@ -103,6 +123,13 @@ pub struct Engine {
     mode: Mode,
     playing: bool,
     station_id: Option<String>,
+    /// The playing station's url, so a dropped connection can be reopened.
+    station_url: Option<String>,
+    /// Consecutive failed reconnects, which sets how long to wait before the
+    /// next one. Reset by any successful connection.
+    reconnect_attempt: u32,
+    /// Lets the engine hand a reopened stream back to itself.
+    commands_tx: Sender<EngineCommand>,
 
     device_id: Option<String>,
     output: Option<Output>,
@@ -151,6 +178,7 @@ impl Engine {
     pub fn new(
         loudness_store: Arc<dyn Store>,
         commands: Receiver<EngineCommand>,
+        commands_tx: Sender<EngineCommand>,
         params: Arc<Params>,
         subscribers: Arc<Subscribers>,
         station_epoch: Arc<AtomicU64>,
@@ -165,6 +193,9 @@ impl Engine {
             mode: Mode::Idle,
             playing: false,
             station_id: None,
+            station_url: None,
+            reconnect_attempt: 0,
+            commands_tx,
             device_id,
             output: None,
             producer: None,
@@ -238,10 +269,13 @@ impl Engine {
             }
             EngineCommand::PlayStream {
                 station_id,
+                url,
                 stream,
                 has_provider,
             } => {
                 self.has_provider = has_provider;
+                self.reconnect_attempt = 0;
+                self.station_url = Some(url);
                 self.start_stream(station_id, *stream);
             }
             EngineCommand::StationMetadata { epoch, update } => {
@@ -304,9 +338,86 @@ impl Engine {
                     self.seek(position);
                 }
             }
+            EngineCommand::Reconnected {
+                epoch,
+                station_id,
+                url,
+                stream,
+                has_provider,
+            } => {
+                if epoch == self.station_epoch.load(Ordering::Relaxed) {
+                    self.reconnect_attempt = 0;
+                    self.has_provider = has_provider;
+                    self.station_url = Some(url);
+                    self.start_stream(station_id, *stream);
+                }
+            }
+            EngineCommand::ReconnectFailed { epoch } => {
+                if epoch == self.station_epoch.load(Ordering::Relaxed) {
+                    self.reconnect();
+                }
+            }
             EngineCommand::Describe => self.describe(),
             EngineCommand::Shutdown => {}
         }
+    }
+
+    /// Reopens a station whose connection dropped, backing off between
+    /// attempts.
+    ///
+    /// Stations drop routinely — a server restarts, a CDN node rotates — and
+    /// falling silent is the wrong answer to something that fixes itself. The
+    /// connect is async, so it happens off this thread and the reopened stream
+    /// arrives back as an ordinary command.
+    fn reconnect(&mut self) {
+        let (Some(station_id), Some(url)) = (self.station_id.clone(), self.station_url.clone())
+        else {
+            self.stop();
+            return;
+        };
+
+        if self.reconnect_attempt >= MAX_RECONNECT_ATTEMPTS {
+            self.emit(EngineEvent::Error {
+                message: format!("{} stopped responding", station_id),
+            });
+            self.stop();
+            return;
+        }
+
+        // Doubling from a second, capped — long enough to outlast a restart,
+        // short enough that a blip is barely noticed.
+        let wait =
+            Duration::from_secs(1u64 << self.reconnect_attempt.min(MAX_RECONNECT_BACKOFF_SHIFT));
+        self.reconnect_attempt += 1;
+
+        // The decoder is finished with; keep the output running so the ring
+        // drains rather than cutting off mid-word.
+        self.decoder = None;
+        self.preloaded = None;
+
+        let epoch = self.station_epoch.load(Ordering::Relaxed);
+        let has_provider = self.has_provider;
+        let commands = self.commands_tx.clone();
+
+        tauri::async_runtime::spawn(async move {
+            tokio::time::sleep(wait).await;
+            match super::stream::open(&url).await {
+                Ok(stream) => {
+                    let _ = commands.send(EngineCommand::Reconnected {
+                        epoch,
+                        station_id,
+                        url,
+                        stream: Box::new(stream),
+                        has_provider,
+                    });
+                }
+                Err(message) => {
+                    log::warn!("reconnect to {}: {}", station_id, message);
+                    // Ask the engine to try again; it owns the attempt count.
+                    let _ = commands.send(EngineCommand::ReconnectFailed { epoch });
+                }
+            }
+        });
     }
 
     /// Begins measuring the playing track's loudness, when it is a local
@@ -404,6 +515,7 @@ impl Engine {
         self.playing = false;
         self.mode = Mode::Idle;
         self.station_id = None;
+        self.station_url = None;
         self.now_playing = None;
         self.reported_title = None;
         self.has_provider = false;
@@ -678,6 +790,12 @@ impl Engine {
         let complete = self.decoder.as_ref().is_some_and(|d| d.is_exhausted());
         self.finish_measuring(complete);
 
+        if self.mode == Mode::Radio {
+            // A station does not end; the connection dropped. Get it back
+            // rather than falling silent.
+            self.reconnect();
+            return;
+        }
         if self.mode != Mode::Local {
             self.stop();
             return;
@@ -930,6 +1048,7 @@ impl Engine {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::audio::fixtures;
     use std::io::Write;
 
     /// These tests are about audio reaching the device, not about remembering
@@ -952,32 +1071,10 @@ mod tests {
         std::fs::create_dir_all(&dir).expect("temp dir");
         let path = dir.join("tone.wav");
 
-        // Two seconds of a 440 Hz tone, 16-bit stereo at 44.1 kHz — a rate
-        // that differs from most devices' 48 kHz, so the resampler is on the
-        // path too.
-        let (rate, channels, frames) = (44_100u32, 2u16, 88_200usize);
-        let mut wav = Vec::new();
-        let block_align = channels * 2;
-        let data_len = frames as u32 * block_align as u32;
-        wav.extend_from_slice(b"RIFF");
-        wav.extend_from_slice(&(36 + data_len).to_le_bytes());
-        wav.extend_from_slice(b"WAVEfmt ");
-        wav.extend_from_slice(&16u32.to_le_bytes());
-        wav.extend_from_slice(&1u16.to_le_bytes());
-        wav.extend_from_slice(&channels.to_le_bytes());
-        wav.extend_from_slice(&rate.to_le_bytes());
-        wav.extend_from_slice(&(rate * block_align as u32).to_le_bytes());
-        wav.extend_from_slice(&block_align.to_le_bytes());
-        wav.extend_from_slice(&16u16.to_le_bytes());
-        wav.extend_from_slice(b"data");
-        wav.extend_from_slice(&data_len.to_le_bytes());
-        for n in 0..frames {
-            let t = n as f32 / rate as f32;
-            let sample = ((t * 440.0 * std::f32::consts::TAU).sin() * 12_000.0) as i16;
-            for _ in 0..channels {
-                wav.extend_from_slice(&sample.to_le_bytes());
-            }
-        }
+        // Two seconds of a 440 Hz tone at 44.1 kHz — a rate that differs from
+        // most devices' 48 kHz, so the resampler is on the path too.
+        let wav = fixtures::wav_bytes(44_100, 2, &fixtures::tone(44_100, 2, 88_200, 440.0));
+
         std::fs::File::create(&path)
             .and_then(|mut f| f.write_all(&wav))
             .expect("write test tone");
@@ -1015,6 +1112,71 @@ mod tests {
         );
     }
 
+    /// Serves a short stream that ends, and checks the engine goes back for
+    /// more instead of falling silent.
+    ///
+    /// Counting connections is the assertion: a station that ends is
+    /// indistinguishable from one that dropped, so a second request means the
+    /// reconnect path ran.
+    ///
+    /// `cargo test -- --ignored a_dropped_station_is_reconnected --nocapture`
+    #[test]
+    #[ignore = "requires an audio output device"]
+    fn a_dropped_station_is_reconnected() {
+        use std::io::{Read, Write};
+        use std::sync::atomic::AtomicUsize;
+
+        // Half a second of silence is enough to decode and end quickly.
+        let wav = fixtures::wav_bytes(44_100, 1, &fixtures::silence(1, 22_050));
+
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind a local server");
+        let port = listener.local_addr().expect("addr").port();
+        let connections = Arc::new(AtomicUsize::new(0));
+
+        let served = Arc::clone(&connections);
+        std::thread::spawn(move || {
+            for stream in listener.incoming().flatten() {
+                served.fetch_add(1, Ordering::Relaxed);
+                let mut stream = stream;
+                // Read past the request headers, then answer.
+                let mut scratch = [0u8; 1024];
+                let _ = stream.read(&mut scratch);
+                let _ = stream.write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Type: audio/wav\r\nConnection: close\r\n\r\n",
+                );
+                let _ = stream.write_all(&wav);
+                let _ = stream.flush();
+            }
+        });
+
+        let url = format!("http://127.0.0.1:{port}/stream.wav");
+        let stream = tauri::async_runtime::block_on(super::super::stream::open(&url))
+            .expect("the local server should serve a stream");
+
+        let engine = crate::audio::init(no_store(), None);
+        engine.params().set_volume(0.0);
+        engine
+            .send(EngineCommand::PlayStream {
+                station_id: "local-test".to_string(),
+                url: url.clone(),
+                stream: Box::new(stream),
+                has_provider: false,
+            })
+            .expect("engine accepts the station");
+
+        // Long enough for the stream to end and the first backoff (1s) to
+        // elapse and reconnect.
+        std::thread::sleep(Duration::from_millis(4000));
+        let served = connections.load(Ordering::Relaxed);
+        crate::audio::shutdown(&engine);
+
+        assert!(
+            served >= 2,
+            "the station was fetched {served} time(s); a dropped stream should be reopened"
+        );
+        println!("station fetched {served} times — reconnect ran");
+    }
+
     /// The same path, fed by a live Icecast station instead of a file.
     ///
     /// Ignored by default: it needs both an audio device and the network.
@@ -1035,6 +1197,7 @@ mod tests {
         engine
             .send(EngineCommand::PlayStream {
                 station_id: "soma-groovesalad".to_string(),
+                url: URL.to_string(),
                 stream: Box::new(stream),
                 // No poller here: this test is about audio reaching the
                 // device, so ICY stays the metadata source.
