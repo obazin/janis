@@ -273,6 +273,11 @@ impl Engine {
                 stream,
                 has_provider,
             } => {
+                // A meter running for the local track that was playing must
+                // be abandoned, exactly as LoadQueue does — otherwise it
+                // would be fed the station and record the station's loudness
+                // against that track's id.
+                self.finish_measuring(false);
                 self.has_provider = has_provider;
                 self.reconnect_attempt = 0;
                 self.station_url = Some(url);
@@ -626,10 +631,14 @@ impl Engine {
         }
         match Decoder::open(stream.source, stream.hint) {
             Ok(decoder) => {
+                // The mode flips before `install_decoder`: `start_measuring`
+                // guards on it, and with the old order the guard still read
+                // `Local` — so a meter keyed to the previous local track was
+                // built and fed the station's audio.
+                self.mode = Mode::Radio;
                 // A station has no length and no normalization gain.
                 self.current_duration = 0.0;
                 self.install_decoder(decoder, 0.0);
-                self.mode = Mode::Radio;
                 self.station_id = Some(station_id);
                 self.now_playing = Some(stream.now_playing);
                 self.reported_title = None;
@@ -875,6 +884,11 @@ impl Engine {
         self.rebuild_resampler(format.sample_rate);
         self.decoder = Some(decoder);
         self.preloaded = None;
+        // The incoming track deserves a meter too. `install_decoder` is
+        // bypassed on this path to keep the ring intact, and without this
+        // call only the first track of a queue would ever be measured —
+        // every gapless-advanced track would keep gain 0 forever.
+        self.start_measuring(&format);
 
         // No flush: whatever is still in the ring belongs to the previous
         // track and must be heard. The boundary tells us when the new track
@@ -1104,9 +1118,13 @@ mod tests {
     /// transport logic (queue advance, seek bookkeeping, boundary crossing)
     /// needs none of them, so it can be exercised directly.
     fn bare_engine() -> Engine {
+        bare_engine_with(no_store())
+    }
+
+    fn bare_engine_with(store: Arc<dyn Store>) -> Engine {
         let (tx, rx) = crossbeam_channel::unbounded();
         Engine::new(
-            no_store(),
+            store,
             rx,
             tx,
             Arc::new(Params::default()),
@@ -1114,6 +1132,17 @@ mod tests {
             Arc::new(AtomicU64::new(0)),
             None,
         )
+    }
+
+    /// A store that wants everything measured — what arms the measuring path
+    /// the way an untagged, never-played WAV does in production.
+    struct EagerStore;
+
+    impl Store for EagerStore {
+        fn needs_measurement(&self, _track_id: i64) -> bool {
+            true
+        }
+        fn record(&self, _track_id: i64, _measured: super::super::loudness::Measured) {}
     }
 
     #[test]
@@ -1193,6 +1222,82 @@ mod tests {
         assert!(
             !engine.playing || engine.decoder.is_some(),
             "playing with no decoder must be unreachable"
+        );
+    }
+
+    #[test]
+    fn clicking_a_station_never_measures_it_against_the_previous_local_track() {
+        // The corruption this guards against: a local WAV is playing and
+        // being measured; the user clicks a station without stopping; the
+        // meter keyed to the WAV's id would then be fed the station and its
+        // loudness written permanently into the WAV's row.
+        let mut engine = bare_engine_with(Arc::new(EagerStore));
+        engine.queue.load(missing_entries(1), 0);
+        engine.mode = Mode::Local;
+        engine.measuring = Some((0, Loudness::new(44_100, 2).expect("meter")));
+
+        let wav = fixtures::wav_bytes(44_100, 2, &fixtures::silence(2, 4_410));
+        let mut hint = symphonia::core::formats::probe::Hint::new();
+        hint.with_extension("wav");
+        let stream = RadioStream {
+            source: Box::new(std::io::Cursor::new(wav)),
+            hint,
+            now_playing: Arc::new(std::sync::Mutex::new(None)),
+        };
+        engine.handle(EngineCommand::PlayStream {
+            station_id: "test-station".into(),
+            url: "http://localhost/never-used".into(),
+            stream: Box::new(stream),
+            has_provider: false,
+        });
+
+        assert!(
+            engine.measuring.is_none(),
+            "a station has no track row to record against — the local \
+             track's meter must be abandoned, not fed the stream"
+        );
+    }
+
+    #[test]
+    fn a_gapless_advance_starts_measuring_the_incoming_track() {
+        let dir = std::env::temp_dir().join("janis-gapless-measure-test");
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let path = dir.join("next.wav");
+        let wav = fixtures::wav_bytes(44_100, 2, &fixtures::silence(2, 4_410));
+        std::fs::File::create(&path)
+            .and_then(|mut f| f.write_all(&wav))
+            .expect("write test wav");
+
+        let mut engine = bare_engine_with(Arc::new(EagerStore));
+        engine.queue.load(
+            vec![
+                QueueEntry {
+                    track_id: 1,
+                    path: std::path::PathBuf::from("/nonexistent/finished.wav"),
+                    duration_secs: 1.0,
+                    gain_db: 0.0,
+                },
+                QueueEntry {
+                    track_id: 2,
+                    path: path.clone(),
+                    duration_secs: 0.1,
+                    gain_db: 0.0,
+                },
+            ],
+            0,
+        );
+        engine.mode = Mode::Local;
+
+        // Track 1 just ran out; the join installs track 2 by hand, bypassing
+        // install_decoder to keep the ring intact — it must still arm a meter,
+        // or only the first track of any queue is ever measured.
+        engine.advance_or_stop();
+
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(
+            engine.measuring.as_ref().map(|(id, _)| *id),
+            Some(2),
+            "the incoming track gets its own meter at a gapless join"
         );
     }
 
