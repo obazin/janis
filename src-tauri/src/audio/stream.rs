@@ -80,8 +80,15 @@ pub async fn open(url: &str) -> Result<RadioStream, String> {
         .map_err(|e| format!("bad station url {}: {}", url, e))?;
 
     // Asking for in-band metadata is what makes track titles available at all.
+    // Bounded waits, but deliberately no total request timeout — a station
+    // plays forever. The read timeout is what turns a server that stalls
+    // without closing the connection into an ordinary read error, which the
+    // engine answers with its reconnect path; without it the engine thread
+    // parks in the read indefinitely and even quitting the app hangs on it.
     let client = Client::builder()
         .request_icy_metadata()
+        .connect_timeout(std::time::Duration::from_secs(10))
+        .read_timeout(std::time::Duration::from_secs(15))
         .build()
         .map_err(|e| format!("build http client: {}", e))?;
 

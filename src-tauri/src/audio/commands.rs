@@ -100,13 +100,17 @@ pub async fn audio_play_stream(
     url: String,
     now_playing: Option<nowplaying::Source>,
 ) -> Result<(), String> {
-    let stream = super::stream::open(&url).await?;
     let engine = app.state::<AudioEngine>();
 
-    // Claim the epoch before starting anything: it retires the previous
-    // station's poller and tags this one so late answers can be discarded.
+    // Claim the epoch *before* the connect. It retires the previous
+    // station's poller, and it tags this request: the connect takes seconds,
+    // and anything the listener starts in that window bumps the epoch, so
+    // the engine can recognise this stream as abandoned and drop it instead
+    // of tearing down whatever they chose to play instead.
     let epoch = engine.next_station_epoch();
+    let stream = super::stream::open(&url).await?;
     engine.send(EngineCommand::PlayStream {
+        epoch,
         station_id,
         url,
         stream: Box::new(stream),

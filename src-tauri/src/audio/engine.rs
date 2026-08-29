@@ -52,6 +52,11 @@ pub enum EngineCommand {
     /// command layer on Tauri's async runtime, so the engine thread only ever
     /// receives a reader that is ready to decode.
     PlayStream {
+        /// The station epoch the command claimed *before* its connect. The
+        /// connect can take seconds, and anything the listener starts in
+        /// that window bumps the epoch — a stale value means this stream was
+        /// abandoned and must be dropped, not played.
+        epoch: u64,
         station_id: String,
         /// Kept so a dropped stream can be reopened without the frontend.
         url: String,
@@ -268,11 +273,19 @@ impl Engine {
                 }
             }
             EngineCommand::PlayStream {
+                epoch,
                 station_id,
                 url,
                 stream,
                 has_provider,
             } => {
+                // Anything the listener started while this station was
+                // connecting — a local queue, another station, a stop —
+                // bumped the epoch. A stale stream is one they abandoned;
+                // playing it would tear down what they chose instead.
+                if epoch != self.station_epoch.load(Ordering::Relaxed) {
+                    return;
+                }
                 // A meter running for the local track that was playing must
                 // be abandoned, exactly as LoadQueue does — otherwise it
                 // would be fed the station and record the station's loudness
@@ -351,10 +364,18 @@ impl Engine {
                 has_provider,
             } => {
                 if epoch == self.station_epoch.load(Ordering::Relaxed) {
-                    self.reconnect_attempt = 0;
                     self.has_provider = has_provider;
                     self.station_url = Some(url);
-                    self.start_stream(station_id, *stream);
+                    if self.start_stream(station_id, *stream) {
+                        self.reconnect_attempt = 0;
+                    } else {
+                        // Connected, but the body does not decode — an HTML
+                        // "stream offline" page served with a 200 is common.
+                        // That is a failed attempt, not a recovery: keep the
+                        // backoff running rather than parking for ever in
+                        // playing-with-no-decoder with the counter reset.
+                        self.reconnect();
+                    }
                 }
             }
             EngineCommand::ReconnectFailed { epoch } => {
@@ -624,10 +645,12 @@ impl Engine {
         }
     }
 
-    fn start_stream(&mut self, station_id: String, stream: RadioStream) {
+    /// Returns whether the station actually started playing, so a reconnect
+    /// can tell a recovery from a stream that connected but does not decode.
+    fn start_stream(&mut self, station_id: String, stream: RadioStream) -> bool {
         if let Err(message) = self.ensure_output() {
             self.emit(EngineEvent::Error { message });
-            return;
+            return false;
         }
         match Decoder::open(stream.source, stream.hint) {
             Ok(decoder) => {
@@ -643,8 +666,12 @@ impl Engine {
                 self.now_playing = Some(stream.now_playing);
                 self.reported_title = None;
                 self.begin_playback();
+                true
             }
-            Err(message) => self.emit(EngineEvent::Error { message }),
+            Err(message) => {
+                self.emit(EngineEvent::Error { message });
+                false
+            }
         }
     }
 
@@ -1245,6 +1272,7 @@ mod tests {
             now_playing: Arc::new(std::sync::Mutex::new(None)),
         };
         engine.handle(EngineCommand::PlayStream {
+            epoch: engine.station_epoch.load(Ordering::Relaxed),
             station_id: "test-station".into(),
             url: "http://localhost/never-used".into(),
             stream: Box::new(stream),
@@ -1256,6 +1284,71 @@ mod tests {
             "a station has no track row to record against — the local \
              track's meter must be abandoned, not fed the stream"
         );
+    }
+
+    #[test]
+    fn a_stale_play_stream_is_dropped_instead_of_overriding_the_listener() {
+        let mut engine = bare_engine();
+        // The command claimed epoch 0 before its connect; while it was
+        // connecting the listener started something else, which bumped it.
+        let claimed = engine.station_epoch.load(Ordering::Relaxed);
+        engine.station_epoch.fetch_add(1, Ordering::Relaxed);
+
+        let wav = fixtures::wav_bytes(44_100, 2, &fixtures::silence(2, 4_410));
+        let mut hint = symphonia::core::formats::probe::Hint::new();
+        hint.with_extension("wav");
+        let stream = RadioStream {
+            source: Box::new(std::io::Cursor::new(wav)),
+            hint,
+            now_playing: Arc::new(std::sync::Mutex::new(None)),
+        };
+        engine.handle(EngineCommand::PlayStream {
+            epoch: claimed,
+            station_id: "abandoned".into(),
+            url: "http://localhost/never-used".into(),
+            stream: Box::new(stream),
+            has_provider: false,
+        });
+
+        assert_eq!(
+            engine.mode,
+            Mode::Idle,
+            "a station the listener abandoned while it connected must not start"
+        );
+        assert!(engine.station_id.is_none());
+    }
+
+    #[test]
+    fn a_reconnect_that_fails_to_probe_gives_up_cleanly_instead_of_parking() {
+        let mut engine = bare_engine();
+        engine.mode = Mode::Radio;
+        engine.playing = true;
+        engine.station_id = Some("s".into());
+        engine.station_url = Some("http://localhost/x".into());
+        engine.reconnect_attempt = MAX_RECONNECT_ATTEMPTS;
+
+        // Connected, but the body is an HTML error page, not audio.
+        let stream = RadioStream {
+            source: Box::new(std::io::Cursor::new(
+                b"<html>stream offline</html>".to_vec(),
+            )),
+            hint: symphonia::core::formats::probe::Hint::new(),
+            now_playing: Arc::new(std::sync::Mutex::new(None)),
+        };
+        engine.handle(EngineCommand::Reconnected {
+            epoch: engine.station_epoch.load(Ordering::Relaxed),
+            station_id: "s".into(),
+            url: "http://localhost/x".into(),
+            stream: Box::new(stream),
+            has_provider: false,
+        });
+
+        // The old code reset the attempt counter before probing and absorbed
+        // the failure, leaving mode Radio / playing / no decoder — a state
+        // nothing could ever leave. A failed probe now keeps the backoff
+        // running, and an exhausted backoff stops playback honestly.
+        assert_eq!(engine.mode, Mode::Idle);
+        assert!(!engine.playing);
     }
 
     #[test]
@@ -1448,6 +1541,7 @@ mod tests {
         engine.params().set_volume(0.0);
         engine
             .send(EngineCommand::PlayStream {
+                epoch: engine.next_station_epoch(),
                 station_id: "local-test".to_string(),
                 url: url.clone(),
                 stream: Box::new(stream),
@@ -1487,6 +1581,7 @@ mod tests {
         engine.params().set_volume(0.0);
         engine
             .send(EngineCommand::PlayStream {
+                epoch: engine.next_station_epoch(),
                 station_id: "soma-groovesalad".to_string(),
                 url: URL.to_string(),
                 stream: Box::new(stream),
