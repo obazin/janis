@@ -21,7 +21,7 @@ use std::time::Duration;
 use base64::Engine as _;
 use crossbeam_channel::Sender;
 use serde::Deserialize;
-use stream_download::http::reqwest::Client;
+use stream_download::http::reqwest::{redirect, Client, Response, Url};
 
 use super::engine::EngineCommand;
 use super::icy::TrackInfo;
@@ -55,7 +55,11 @@ const ERROR_POLL: Duration = Duration::from_secs(30);
 const MIN_POLL: Duration = Duration::from_secs(5);
 const MAX_POLL: Duration = Duration::from_secs(300);
 /// Cover art larger than this is skipped rather than pushed through IPC.
+/// Enforced while downloading, not after — the cap must bound what reaches
+/// RAM, and the body size is chosen by the remote end.
 const MAX_COVER_BYTES: usize = 2 * 1024 * 1024;
+/// A now-playing JSON answer is a few KB; anything past this is not one.
+const MAX_JSON_BYTES: usize = 512 * 1024;
 
 /// Polls `source` until `epoch` changes, reporting each change to the engine.
 ///
@@ -63,7 +67,15 @@ const MAX_COVER_BYTES: usize = 2 * 1024 * 1024;
 /// how a poller for a station the listener has left stops on its own.
 pub fn spawn(commands: Sender<EngineCommand>, epoch: Arc<AtomicU64>, mine: u64, source: Source) {
     tauri::async_runtime::spawn(async move {
-        let client = match Client::builder().timeout(Duration::from_secs(10)).build() {
+        // No redirects: every URL this client fetches is either one we build
+        // against a provider's https API, or a cover URL out of third-party
+        // JSON that has already passed the host allowlist — and a redirect
+        // would walk it straight back off that list.
+        let client = match Client::builder()
+            .timeout(Duration::from_secs(10))
+            .redirect(redirect::Policy::none())
+            .build()
+        {
             Ok(client) => client,
             Err(e) => {
                 log::warn!("now-playing client: {}", e);
@@ -125,11 +137,33 @@ async fn get_json<T: for<'de> Deserialize<'de>>(client: &Client, url: &str) -> R
     if !response.status().is_success() {
         return Err(format!("{} returned {}", url, response.status()));
     }
-    let body = response
-        .text()
+    let body = read_bounded(response, MAX_JSON_BYTES)
         .await
         .map_err(|e| format!("read {}: {}", url, e))?;
-    serde_json::from_str(&body).map_err(|e| format!("decode {}: {}", url, e))
+    serde_json::from_slice(&body).map_err(|e| format!("decode {}: {}", url, e))
+}
+
+/// Reads a response body with a hard byte budget, chunk by chunk, so the cap
+/// bounds the allocation rather than being checked after the whole body has
+/// already landed in memory.
+async fn read_bounded(mut response: Response, budget: usize) -> Result<Vec<u8>, String> {
+    if let Some(length) = response.content_length() {
+        if length > budget as u64 {
+            return Err(format!("declared {} bytes, budget is {}", length, budget));
+        }
+    }
+    let mut body = Vec::new();
+    while let Some(chunk) = response
+        .chunk()
+        .await
+        .map_err(|e| format!("read body: {}", e))?
+    {
+        if body.len() + chunk.len() > budget {
+            return Err(format!("body exceeds the {} byte budget", budget));
+        }
+        body.extend_from_slice(&chunk);
+    }
+    Ok(body)
 }
 
 // ── SomaFM ──────────────────────────────────────────────────────────────
@@ -182,6 +216,10 @@ struct RadioFranceStep {
     end: Option<i64>,
 }
 
+/// Hosts Radio France cover art may come from; everything else in `visual`
+/// is refused.
+const RADIOFRANCE_COVER_HOSTS: &[&str] = &["radiofrance.fr", "radiofrance-podcast.net"];
+
 async fn radiofrance(client: &Client, id: &str) -> Result<(Update, Duration), String> {
     let url = format!("https://api.radiofrance.fr/livemeta/pull/{}", id);
     let body: RadioFranceResponse = get_json(client, &url).await?;
@@ -191,28 +229,14 @@ async fn radiofrance(client: &Client, id: &str) -> Result<(Update, Duration), St
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0);
 
-    // The step spanning now, else the most recent one that has begun.
-    let current = body
-        .steps
-        .values()
-        .filter(|s| s.title.is_some())
-        .filter(|s| s.start.is_none_or(|start| start <= now))
-        .max_by_key(|s| s.start.unwrap_or(0));
-
-    let Some(step) = current else {
+    let Some(step) = pick_step(&body.steps, now) else {
         return Ok((Update::default(), DEFAULT_POLL));
     };
 
-    // The station says when this track ends, so the next poll can land just
-    // after it rather than guessing.
-    let wait = step
-        .end
-        .map(|end| Duration::from_secs((end - now).max(1) as u64 + 1))
-        .unwrap_or(DEFAULT_POLL)
-        .clamp(MIN_POLL, MAX_POLL);
+    let wait = radiofrance_wait(step.end, now);
 
     let cover = match step.visual.as_deref() {
-        Some(url) => cover_data_url(client, url).await,
+        Some(url) => cover_data_url(client, url, RADIOFRANCE_COVER_HOSTS).await,
         None => None,
     };
 
@@ -223,6 +247,26 @@ async fn radiofrance(client: &Client, id: &str) -> Result<(Update, Duration), St
         },
         wait,
     ))
+}
+
+/// The step spanning `now`, else the most recent one that has begun.
+fn pick_step(
+    steps: &std::collections::HashMap<String, RadioFranceStep>,
+    now: i64,
+) -> Option<&RadioFranceStep> {
+    steps
+        .values()
+        .filter(|s| s.title.is_some())
+        .filter(|s| s.start.is_none_or(|start| start <= now))
+        .max_by_key(|s| s.start.unwrap_or(0))
+}
+
+/// The station says when the track ends, so the next poll can land just after
+/// it rather than guessing — bounded in case the timestamp is nonsense.
+fn radiofrance_wait(end: Option<i64>, now: i64) -> Duration {
+    end.map(|end| Duration::from_secs((end - now).max(1) as u64 + 1))
+        .unwrap_or(DEFAULT_POLL)
+        .clamp(MIN_POLL, MAX_POLL)
 }
 
 // ── Radio Paradise ──────────────────────────────────────────────────────
@@ -236,6 +280,8 @@ struct RadioParadiseResponse {
     cover: Option<String>,
 }
 
+const RADIOPARADISE_COVER_HOSTS: &[&str] = &["radioparadise.com"];
+
 async fn radioparadise(client: &Client, channel: &str) -> Result<(Update, Duration), String> {
     let url = format!(
         "https://api.radioparadise.com/api/now_playing?chan={}",
@@ -243,7 +289,7 @@ async fn radioparadise(client: &Client, channel: &str) -> Result<(Update, Durati
     );
     let body: RadioParadiseResponse = get_json(client, &url).await?;
     let cover = match body.cover.as_deref() {
-        Some(url) => cover_data_url(client, url).await,
+        Some(url) => cover_data_url(client, url, RADIOPARADISE_COVER_HOSTS).await,
         None => None,
     };
     Ok((
@@ -275,12 +321,37 @@ fn track(
     })
 }
 
+/// Whether a provider-supplied cover URL points at one of the provider's own
+/// hosts, over https.
+///
+/// The URL comes straight out of third-party JSON, and this process fetches
+/// from inside the user's network: unchecked, a hostile or compromised feed
+/// could aim GETs at the LAN (a router's admin page answers requests it
+/// trusts) or name any host as a per-listener tracking beacon. Only the
+/// provider's own domains are ever fetched.
+fn cover_url_allowed(url: &Url, allowed_hosts: &[&str]) -> bool {
+    if url.scheme() != "https" {
+        return false;
+    }
+    let Some(host) = url.host_str() else {
+        return false;
+    };
+    allowed_hosts
+        .iter()
+        .any(|suffix| host == *suffix || host.ends_with(&format!(".{suffix}")))
+}
+
 /// Downloads cover art and re-encodes it as a `data:` URL.
 ///
 /// Best-effort: art is decoration, so a failure logs and yields `None` rather
 /// than failing the whole update.
-async fn cover_data_url(client: &Client, url: &str) -> Option<String> {
-    let response = client.get(url).send().await.ok()?;
+async fn cover_data_url(client: &Client, url: &str, allowed_hosts: &[&str]) -> Option<String> {
+    let parsed = url.parse::<Url>().ok()?;
+    if !cover_url_allowed(&parsed, allowed_hosts) {
+        log::warn!("cover art url refused: {}", url);
+        return None;
+    }
+    let response = client.get(parsed).send().await.ok()?;
     if !response.status().is_success() {
         return None;
     }
@@ -296,11 +367,13 @@ async fn cover_data_url(client: &Client, url: &str) -> Option<String> {
     if !mime.starts_with("image/") {
         return None;
     }
-    let bytes = response.bytes().await.ok()?;
-    if bytes.len() > MAX_COVER_BYTES {
-        log::warn!("cover art at {} is {} bytes; skipped", url, bytes.len());
-        return None;
-    }
+    let bytes = match read_bounded(response, MAX_COVER_BYTES).await {
+        Ok(bytes) => bytes,
+        Err(e) => {
+            log::warn!("cover art at {}: {}", url, e);
+            return None;
+        }
+    };
     let encoded = base64::engine::general_purpose::STANDARD.encode(&bytes);
     Some(format!("data:{};base64,{}", mime, encoded))
 }
@@ -356,6 +429,72 @@ mod tests {
         assert_eq!(info.title, "Vibe 05");
         assert_eq!(info.artist.as_deref(), Some("Alex Cortiz"));
         assert_eq!(info.album.as_deref(), Some("The Chill Out Room"));
+    }
+
+    #[test]
+    fn the_step_spanning_now_is_picked() {
+        // A captured-shape Radio France body, so the serde renames
+        // (`titreAlbum`, camelCase) are pinned by a test that runs offline.
+        let body: RadioFranceResponse = serde_json::from_str(
+            r#"{"steps":{
+                "a":{"title":"Earlier","authors":"A","titreAlbum":"Old LP","visual":null,"start":100,"end":200},
+                "b":{"title":"Now Playing","authors":"B","titreAlbum":"New LP","visual":null,"start":200,"end":300},
+                "c":{"title":"Later","authors":"C","titreAlbum":null,"visual":null,"start":300,"end":400},
+                "d":{"authors":"No title","titreAlbum":null,"visual":null,"start":250,"end":260}
+            }}"#,
+        )
+        .expect("the captured shape must deserialise");
+
+        let step = pick_step(&body.steps, 250).expect("a step covers 250");
+        assert_eq!(step.title.as_deref(), Some("Now Playing"));
+        assert_eq!(
+            step.album.as_deref(),
+            Some("New LP"),
+            "titreAlbum maps to album"
+        );
+        assert_eq!(step.end, Some(300));
+
+        assert!(
+            pick_step(&body.steps, 50).is_none(),
+            "nothing has begun yet at 50"
+        );
+    }
+
+    #[test]
+    fn the_poll_lands_just_after_the_announced_end() {
+        assert_eq!(radiofrance_wait(Some(250), 200), Duration::from_secs(51));
+        assert_eq!(radiofrance_wait(None, 200), DEFAULT_POLL);
+        assert_eq!(
+            radiofrance_wait(Some(100), 200),
+            MIN_POLL,
+            "an end already past still waits the minimum"
+        );
+        assert_eq!(
+            radiofrance_wait(Some(1_000_000), 0),
+            MAX_POLL,
+            "a nonsense timestamp is clamped"
+        );
+    }
+
+    #[test]
+    fn cover_fetches_stay_on_the_provider_hosts() {
+        let allowed = |url: &str| cover_url_allowed(&url.parse().unwrap(), RADIOFRANCE_COVER_HOSTS);
+
+        assert!(allowed("https://www.radiofrance.fr/img/cover.jpg"));
+        assert!(allowed("https://cdn.radiofrance-podcast.net/x.jpg"));
+        assert!(
+            !allowed("http://www.radiofrance.fr/img/cover.jpg"),
+            "plain http is refused even on an allowed host"
+        );
+        assert!(
+            !allowed("https://192.168.1.1/setup.cgi?reboot=1"),
+            "a feed must not be able to aim requests into the LAN"
+        );
+        assert!(
+            !allowed("https://evilradiofrance.fr/x.jpg"),
+            "suffix matching must not accept a lookalike registration"
+        );
+        assert!(!allowed("https://example.com/radiofrance.fr"));
     }
 
     #[test]

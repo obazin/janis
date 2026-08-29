@@ -108,6 +108,15 @@ impl OpusDecoder {
     /// clear the buffer in one place — the trait requires it, and
     /// `last_decoded` depends on it.
     fn decode_inner(&mut self, packet: &PacketRef<'_>) -> Result<()> {
+        // A zero-length packet is legal OGG framing (a lacing value of 0, and
+        // the mapper forwards it), but handing libopus an empty slice selects
+        // its packet-loss *concealment* mode — which fabricates a full
+        // buffer's worth (120 ms) of extrapolated audio instead of decoding
+        // nothing. Skip it like any other undecodable packet.
+        if packet.data.is_empty() {
+            return decode_error("opus: empty packet");
+        }
+
         let frames = self
             .inner
             .decode_float(packet.data, &mut self.scratch, false)
@@ -201,5 +210,106 @@ impl RegisterableAudioDecoder for OpusDecoder {
                 profiles: &[],
             },
         }]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use symphonia::core::codecs::audio::well_known::CODEC_ID_FLAC;
+    use symphonia::core::units::{Duration, Timestamp};
+
+    /// A hand-built OpusHead identification header (RFC 7845 §5.1) — what the
+    /// OGG demuxer puts in `extra_data`.
+    fn opus_head(channels: u8, mapping_family: u8) -> Vec<u8> {
+        let mut head = b"OpusHead".to_vec();
+        head.push(1); // version
+        head.push(channels);
+        head.extend_from_slice(&312u16.to_le_bytes()); // pre-skip
+        head.extend_from_slice(&48_000u32.to_le_bytes()); // input sample rate
+        head.extend_from_slice(&0u16.to_le_bytes()); // output gain
+        head.push(mapping_family);
+        if mapping_family != 0 {
+            head.push(channels); // stream count
+            head.push(0); // coupled stream count
+            for channel in 0..channels {
+                head.push(channel); // channel mapping table
+            }
+        }
+        head
+    }
+
+    fn params_for(head: Vec<u8>) -> AudioCodecParameters {
+        let mut params = AudioCodecParameters::new();
+        params.for_codec(CODEC_ID_OPUS);
+        params.with_extra_data(head.into_boxed_slice());
+        params
+    }
+
+    fn opts() -> AudioDecoderOptions {
+        AudioDecoderOptions::default()
+    }
+
+    #[test]
+    fn a_valid_stereo_head_builds_a_decoder() {
+        let decoder = OpusDecoder::try_new(&params_for(opus_head(2, 0)), &opts())
+            .expect("stereo OpusHead should build");
+        let params = decoder.codec_params();
+        assert_eq!(
+            params.sample_rate,
+            Some(OPUS_RATE),
+            "opus always decodes at 48 kHz"
+        );
+        assert_eq!(params.channels.as_ref().map(|c| c.count()), Some(2));
+    }
+
+    #[test]
+    fn mono_maps_to_the_mono_layout() {
+        let decoder = OpusDecoder::try_new(&params_for(opus_head(1, 0)), &opts())
+            .expect("mono OpusHead should build");
+        assert_eq!(
+            decoder.codec_params().channels.as_ref().map(|c| c.count()),
+            Some(1),
+            "a mono file must not be widened by the layout mapping"
+        );
+    }
+
+    #[test]
+    fn the_wrong_codec_id_is_rejected() {
+        let mut params = params_for(opus_head(2, 0));
+        params.for_codec(CODEC_ID_FLAC);
+        assert!(OpusDecoder::try_new(&params, &opts()).is_err());
+    }
+
+    #[test]
+    fn a_missing_identification_header_is_rejected() {
+        let mut params = AudioCodecParameters::new();
+        params.for_codec(CODEC_ID_OPUS);
+        assert!(OpusDecoder::try_new(&params, &opts()).is_err());
+    }
+
+    #[test]
+    fn more_than_two_channels_is_rejected() {
+        // Mapping family 1 with six channels — needs the multistream decoder
+        // this deliberately does not carry.
+        assert!(OpusDecoder::try_new(&params_for(opus_head(6, 1)), &opts()).is_err());
+    }
+
+    #[test]
+    fn an_empty_packet_is_an_error_not_fabricated_audio() {
+        // The OGG reader emits zero-length packets for a lacing value of 0.
+        // libopus would treat the empty slice as a packet-loss-concealment
+        // request and synthesise 120 ms of audio; the decoder must refuse
+        // instead, so the caller skips the packet.
+        let mut decoder =
+            OpusDecoder::try_new(&params_for(opus_head(2, 0)), &opts()).expect("decoder");
+        let packet = PacketRef::new(0, Timestamp::ZERO, Duration::ZERO, &[]);
+
+        assert!(decoder.decode_ref(&packet).is_err());
+        assert_eq!(
+            decoder.last_decoded().frames(),
+            0,
+            "a failed decode must not leave synthesised audio behind"
+        );
     }
 }
