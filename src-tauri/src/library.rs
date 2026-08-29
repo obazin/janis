@@ -1,0 +1,508 @@
+//! The track library: watched folders, the metadata scanner, and cover art.
+//!
+//! Scanning walks a folder for audio files and reads tags + audio properties
+//! via `lofty`, then upserts rows into `tracks` keyed by absolute path — so a
+//! rescan updates metadata in place and never duplicates. Decoding and
+//! playback happen in the webview (HTML5 audio + Web Audio EQ/analyser);
+//! files reach it through Tauri's asset protocol, whose scope is extended at
+//! runtime to exactly the folders/files the user added — nothing else on
+//! disk is reachable.
+
+use base64::Engine;
+use lofty::prelude::*;
+use lofty::probe::Probe;
+use serde::Serialize;
+use std::path::{Path, PathBuf};
+use tauri::{AppHandle, Manager};
+use walkdir::WalkDir;
+
+use crate::persistence::DbState;
+
+/// Extensions the scanner picks up. Formats WKWebView/WebKit can decode —
+/// playback happens in the webview, so this list tracks what it accepts.
+const AUDIO_EXTENSIONS: &[&str] = &[
+    "mp3", "flac", "wav", "m4a", "aac", "ogg", "opus", "aif", "aiff",
+];
+
+/// Container formats that are always lossless. `m4a` is deliberately absent:
+/// it can hold either AAC (lossy) or ALAC (lossless) and we don't inspect the
+/// codec, so it is reported lossy — the conservative claim.
+const LOSSLESS_EXTENSIONS: &[&str] = &["flac", "wav", "aif", "aiff"];
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct Track {
+    pub id: i64,
+    pub folder_id: Option<i64>,
+    pub path: String,
+    pub title: String,
+    pub artist: Option<String>,
+    pub album: Option<String>,
+    pub composer: Option<String>,
+    pub duration_secs: f64,
+    pub format: String,
+    pub sample_rate: Option<u32>,
+    pub bit_depth: Option<u8>,
+    pub channels: Option<u8>,
+    pub lossless: bool,
+    pub added_at: i64,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WatchedFolder {
+    pub id: i64,
+    pub path: String,
+    pub track_count: i64,
+}
+
+#[derive(Serialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ScanReport {
+    pub added: usize,
+    pub updated: usize,
+    pub skipped: usize,
+    pub removed: usize,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CoverArt {
+    pub mime: String,
+    pub data_base64: String,
+}
+
+struct ScannedFile {
+    title: String,
+    artist: Option<String>,
+    album: Option<String>,
+    composer: Option<String>,
+    duration_secs: f64,
+    format: String,
+    sample_rate: Option<u32>,
+    bit_depth: Option<u8>,
+    channels: Option<u8>,
+    lossless: bool,
+}
+
+fn audio_extension(path: &Path) -> Option<String> {
+    let ext = path.extension()?.to_str()?.to_ascii_lowercase();
+    AUDIO_EXTENSIONS.contains(&ext.as_str()).then_some(ext)
+}
+
+/// Reads tags + properties for one file. Tag-less files still scan: the
+/// filename stem becomes the title, properties come from the decoder.
+fn read_metadata(path: &Path) -> Result<ScannedFile, String> {
+    let ext = audio_extension(path).ok_or_else(|| "not an audio file".to_string())?;
+    let tagged = Probe::open(path)
+        .map_err(|e| format!("probe {}: {}", path.display(), e))?
+        .read()
+        .map_err(|e| format!("read {}: {}", path.display(), e))?;
+
+    let props = tagged.properties();
+    let tag = tagged.primary_tag().or_else(|| tagged.first_tag());
+
+    let stem_title = || {
+        path.file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "Unknown".to_string())
+    };
+    let non_empty = |v: Option<String>| v.filter(|s| !s.trim().is_empty());
+
+    let (title, artist, album, composer) = match tag {
+        Some(tag) => (
+            non_empty(tag.title().map(|c| c.into_owned())).unwrap_or_else(stem_title),
+            non_empty(tag.artist().map(|c| c.into_owned())),
+            non_empty(tag.album().map(|c| c.into_owned())),
+            non_empty(tag.get_string(&ItemKey::Composer).map(|s| s.to_string())),
+        ),
+        None => (stem_title(), None, None, None),
+    };
+
+    Ok(ScannedFile {
+        title,
+        artist,
+        album,
+        composer,
+        duration_secs: props.duration().as_secs_f64(),
+        format: ext.to_ascii_uppercase(),
+        sample_rate: props.sample_rate(),
+        bit_depth: props.bit_depth(),
+        channels: props.channels(),
+        lossless: LOSSLESS_EXTENSIONS.contains(&ext.as_str()),
+    })
+}
+
+/// Upserts one scanned file. Returns `true` when the row was newly inserted.
+fn upsert_track(
+    conn: &rusqlite::Connection,
+    folder_id: Option<i64>,
+    path: &str,
+    meta: &ScannedFile,
+) -> Result<bool, String> {
+    let existed: bool = conn
+        .query_row("SELECT 1 FROM tracks WHERE path = ?1", [path], |_| Ok(()))
+        .map(|_| true)
+        .or_else(|e| match e {
+            rusqlite::Error::QueryReturnedNoRows => Ok(false),
+            other => Err(other),
+        })
+        .map_err(|e| format!("probe track row: {}", e))?;
+
+    conn.execute(
+        "INSERT INTO tracks (folder_id, path, title, artist, album, composer, duration_secs,
+                             format, sample_rate, bit_depth, channels, lossless)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+         ON CONFLICT(path) DO UPDATE SET
+             folder_id = excluded.folder_id,
+             title = excluded.title,
+             artist = excluded.artist,
+             album = excluded.album,
+             composer = excluded.composer,
+             duration_secs = excluded.duration_secs,
+             format = excluded.format,
+             sample_rate = excluded.sample_rate,
+             bit_depth = excluded.bit_depth,
+             channels = excluded.channels,
+             lossless = excluded.lossless",
+        rusqlite::params![
+            folder_id,
+            path,
+            meta.title,
+            meta.artist,
+            meta.album,
+            meta.composer,
+            meta.duration_secs,
+            meta.format,
+            meta.sample_rate,
+            meta.bit_depth,
+            meta.channels,
+            meta.lossless as i64,
+        ],
+    )
+    .map_err(|e| format!("upsert track {}: {}", path, e))?;
+    Ok(!existed)
+}
+
+/// Walks `folder` and upserts every audio file found under it.
+fn scan_folder_into(conn: &rusqlite::Connection, folder_id: i64, folder: &Path) -> ScanReport {
+    let mut report = ScanReport::default();
+    for entry in WalkDir::new(folder)
+        .follow_links(false)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().is_file())
+    {
+        let path = entry.path();
+        if audio_extension(path).is_none() {
+            continue;
+        }
+        match read_metadata(path) {
+            Ok(meta) => match upsert_track(conn, Some(folder_id), &path.to_string_lossy(), &meta) {
+                Ok(true) => report.added += 1,
+                Ok(false) => report.updated += 1,
+                Err(e) => {
+                    log::warn!("{}", e);
+                    report.skipped += 1;
+                }
+            },
+            Err(e) => {
+                log::warn!("{}", e);
+                report.skipped += 1;
+            }
+        }
+    }
+    report
+}
+
+/// Deletes rows whose file vanished from disk. Returns the number removed.
+fn prune_missing(conn: &rusqlite::Connection) -> Result<usize, String> {
+    let paths: Vec<(i64, String)> = conn
+        .prepare("SELECT id, path FROM tracks")
+        .and_then(|mut stmt| {
+            stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+                .collect()
+        })
+        .map_err(|e| format!("list track paths: {}", e))?;
+    let mut removed = 0;
+    for (id, path) in paths {
+        if !Path::new(&path).exists() {
+            conn.execute("DELETE FROM tracks WHERE id = ?1", [id])
+                .map_err(|e| format!("prune track {}: {}", path, e))?;
+            removed += 1;
+        }
+    }
+    Ok(removed)
+}
+
+/// Collects one string column, swallowing errors — scope restoration is
+/// best-effort and must never block startup.
+fn collect_paths(conn: &rusqlite::Connection, sql: &str) -> Vec<String> {
+    let mut stmt = match conn.prepare(sql) {
+        Ok(stmt) => stmt,
+        Err(_) => return Vec::new(),
+    };
+    let rows = match stmt.query_map([], |row| row.get::<_, String>(0)) {
+        Ok(rows) => rows,
+        Err(_) => return Vec::new(),
+    };
+    rows.filter_map(|r| r.ok()).collect()
+}
+
+/// Re-grants the asset-protocol scope for everything the library references.
+/// Called once from setup: the scope is in-memory state, the library is not.
+pub fn restore_asset_scope(app: &AppHandle) {
+    let (folders, files) = {
+        let db = app.state::<DbState>();
+        let conn = db.lock();
+        (
+            collect_paths(&conn, "SELECT path FROM watched_folders"),
+            collect_paths(&conn, "SELECT path FROM tracks WHERE folder_id IS NULL"),
+        )
+    };
+    let scope = app.asset_protocol_scope();
+    for folder in folders {
+        if let Err(e) = scope.allow_directory(&folder, true) {
+            log::warn!("asset scope for {}: {}", folder, e);
+        }
+    }
+    for file in files {
+        if let Err(e) = scope.allow_file(&file) {
+            log::warn!("asset scope for {}: {}", file, e);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn audio_extension_accepts_known_formats_case_insensitively() {
+        assert_eq!(
+            audio_extension(Path::new("/m/a.FLAC")).as_deref(),
+            Some("flac")
+        );
+        assert_eq!(
+            audio_extension(Path::new("/m/b.mp3")).as_deref(),
+            Some("mp3")
+        );
+        assert_eq!(audio_extension(Path::new("/m/c.txt")), None);
+        assert_eq!(audio_extension(Path::new("/m/noext")), None);
+    }
+
+    #[test]
+    fn lossless_extensions_are_a_subset_of_audio_extensions() {
+        for ext in LOSSLESS_EXTENSIONS {
+            assert!(
+                AUDIO_EXTENSIONS.contains(ext),
+                "{ext} missing from AUDIO_EXTENSIONS"
+            );
+        }
+        // m4a stays out deliberately: AAC-or-ALAC, reported lossy.
+        assert!(!LOSSLESS_EXTENSIONS.contains(&"m4a"));
+    }
+}
+
+#[tauri::command]
+pub fn list_tracks(db: tauri::State<'_, DbState>) -> Result<Vec<Track>, String> {
+    let conn = db.lock();
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, folder_id, path, title, artist, album, composer, duration_secs,
+                    format, sample_rate, bit_depth, channels, lossless, added_at
+             FROM tracks ORDER BY added_at DESC, id DESC",
+        )
+        .map_err(|e| format!("prepare list_tracks: {}", e))?;
+    let tracks = stmt
+        .query_map([], |row| {
+            Ok(Track {
+                id: row.get(0)?,
+                folder_id: row.get(1)?,
+                path: row.get(2)?,
+                title: row.get(3)?,
+                artist: row.get(4)?,
+                album: row.get(5)?,
+                composer: row.get(6)?,
+                duration_secs: row.get(7)?,
+                format: row.get(8)?,
+                sample_rate: row.get(9)?,
+                bit_depth: row.get(10)?,
+                channels: row.get(11)?,
+                lossless: row.get::<_, i64>(12)? != 0,
+                added_at: row.get(13)?,
+            })
+        })
+        .and_then(|rows| rows.collect::<Result<Vec<_>, _>>())
+        .map_err(|e| format!("read tracks: {}", e))?;
+    Ok(tracks)
+}
+
+#[tauri::command]
+pub fn list_watched_folders(db: tauri::State<'_, DbState>) -> Result<Vec<WatchedFolder>, String> {
+    let conn = db.lock();
+    let mut stmt = conn
+        .prepare(
+            "SELECT f.id, f.path, COUNT(t.id) FROM watched_folders f
+             LEFT JOIN tracks t ON t.folder_id = f.id
+             GROUP BY f.id ORDER BY f.added_at",
+        )
+        .map_err(|e| format!("prepare list_watched_folders: {}", e))?;
+    let folders = stmt
+        .query_map([], |row| {
+            Ok(WatchedFolder {
+                id: row.get(0)?,
+                path: row.get(1)?,
+                track_count: row.get(2)?,
+            })
+        })
+        .and_then(|rows| rows.collect::<Result<Vec<_>, _>>())
+        .map_err(|e| format!("read watched folders: {}", e))?;
+    Ok(folders)
+}
+
+/// Registers a folder and scans it. The scan is a long walk + tag reads, so
+/// it runs on the blocking pool — the UI stays live and shows the report
+/// when it lands.
+#[tauri::command]
+pub async fn add_watched_folder(app: AppHandle, path: String) -> Result<ScanReport, String> {
+    let folder = PathBuf::from(&path);
+    if !folder.is_dir() {
+        return Err(format!("not a directory: {}", path));
+    }
+    app.asset_protocol_scope()
+        .allow_directory(&folder, true)
+        .map_err(|e| format!("asset scope: {}", e))?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let db = app.state::<DbState>();
+        let conn = db.lock();
+        conn.execute(
+            "INSERT OR IGNORE INTO watched_folders (path) VALUES (?1)",
+            [&path],
+        )
+        .map_err(|e| format!("register folder: {}", e))?;
+        let folder_id: i64 = conn
+            .query_row(
+                "SELECT id FROM watched_folders WHERE path = ?1",
+                [&path],
+                |r| r.get(0),
+            )
+            .map_err(|e| format!("resolve folder id: {}", e))?;
+        Ok(scan_folder_into(&conn, folder_id, &folder))
+    })
+    .await
+    .map_err(|e| format!("scan task: {}", e))?
+}
+
+#[tauri::command]
+pub fn remove_watched_folder(db: tauri::State<'_, DbState>, folder_id: i64) -> Result<(), String> {
+    let conn = db.lock();
+    conn.execute("DELETE FROM watched_folders WHERE id = ?1", [folder_id])
+        .map_err(|e| format!("remove folder: {}", e))?;
+    Ok(())
+}
+
+/// Ad-hoc single-file import (the Add-music dialog and OS drag-and-drop).
+/// Files land with no watched folder; a rescan keeps them as long as the
+/// file still exists.
+#[tauri::command]
+pub async fn import_files(app: AppHandle, paths: Vec<String>) -> Result<ScanReport, String> {
+    let scope = app.asset_protocol_scope();
+    for p in &paths {
+        scope
+            .allow_file(p)
+            .map_err(|e| format!("asset scope for {}: {}", p, e))?;
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        let db = app.state::<DbState>();
+        let conn = db.lock();
+        let mut report = ScanReport::default();
+        for p in paths {
+            let path = Path::new(&p);
+            match read_metadata(path) {
+                Ok(meta) => match upsert_track(&conn, None, &p, &meta) {
+                    Ok(true) => report.added += 1,
+                    Ok(false) => report.updated += 1,
+                    Err(e) => {
+                        log::warn!("{}", e);
+                        report.skipped += 1;
+                    }
+                },
+                Err(e) => {
+                    log::warn!("{}", e);
+                    report.skipped += 1;
+                }
+            }
+        }
+        Ok(report)
+    })
+    .await
+    .map_err(|e| format!("import task: {}", e))?
+}
+
+/// Re-walks every watched folder (picking up new + changed files) and prunes
+/// rows whose file is gone.
+#[tauri::command]
+pub async fn rescan_library(app: AppHandle) -> Result<ScanReport, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let db = app.state::<DbState>();
+        let conn = db.lock();
+        let folders: Vec<(i64, String)> = conn
+            .prepare("SELECT id, path FROM watched_folders")
+            .and_then(|mut stmt| {
+                stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+                    .collect()
+            })
+            .map_err(|e| format!("list folders: {}", e))?;
+        let mut report = ScanReport::default();
+        for (id, path) in folders {
+            let sub = scan_folder_into(&conn, id, Path::new(&path));
+            report.added += sub.added;
+            report.updated += sub.updated;
+            report.skipped += sub.skipped;
+        }
+        report.removed = prune_missing(&conn)?;
+        Ok(report)
+    })
+    .await
+    .map_err(|e| format!("rescan task: {}", e))?
+}
+
+/// Embedded cover art for one track, base64-encoded for the IPC hop. `None`
+/// when the file carries no picture — the frontend falls back to its
+/// generated gradient art.
+#[tauri::command]
+pub async fn get_track_cover(app: AppHandle, track_id: i64) -> Result<Option<CoverArt>, String> {
+    let path: Option<String> = {
+        let db = app.state::<DbState>();
+        let conn = db.lock();
+        conn.query_row("SELECT path FROM tracks WHERE id = ?1", [track_id], |r| {
+            r.get(0)
+        })
+        .ok()
+    };
+    let Some(path) = path else {
+        return Ok(None);
+    };
+    tauri::async_runtime::spawn_blocking(move || {
+        let tagged = match Probe::open(&path).and_then(|p| p.read()) {
+            Ok(t) => t,
+            Err(_) => return Ok(None),
+        };
+        let tag = tagged.primary_tag().or_else(|| tagged.first_tag());
+        let Some(tag) = tag else { return Ok(None) };
+        let Some(picture) = tag.pictures().first() else {
+            return Ok(None);
+        };
+        let mime = picture
+            .mime_type()
+            .map(|m| m.to_string())
+            .unwrap_or_else(|| "image/jpeg".to_string());
+        Ok(Some(CoverArt {
+            mime,
+            data_base64: base64::engine::general_purpose::STANDARD.encode(picture.data()),
+        }))
+    })
+    .await
+    .map_err(|e| format!("cover task: {}", e))?
+}

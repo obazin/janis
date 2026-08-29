@@ -1,0 +1,21 @@
+# Generated / vendored — never prettier-format these (they have their own
+# canonical formatters, or churn on the next tool run).
+
+# Package / lock files owned by their tools
+pnpm-lock.yaml
+package-lock.json
+Cargo.lock
+flake.lock
+
+# Build output
+build/
+.svelte-kit/
+src-tauri/target/
+src-tauri/gen/
+
+# Hand-aligned: the @theme token block is column-aligned for readability and
+# breaks if prettier wraps an oklch() value across lines.
+src/app.css
+
+# Local env
+.direnv/

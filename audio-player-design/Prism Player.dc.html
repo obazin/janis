@@ -1,0 +1,2530 @@
+<!doctype html>
+<html>
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <script src="./support.js"></script>
+    </head>
+    <body>
+        <x-dc>
+            <helmet>
+                <link rel="preconnect" href="https://fonts.googleapis.com" />
+                <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+                <link
+                    href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700;800;900&family=Familjen+Grotesk:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap"
+                    rel="stylesheet"
+                />
+                <style>
+                    * {
+                        box-sizing: border-box;
+                    }
+                    html,
+                    body {
+                        margin: 0;
+                        height: 100%;
+                        background: radial-gradient(1200px 800px at 20% -10%, #241038, #06060a 60%);
+                        font-family: 'Familjen Grotesk', system-ui, sans-serif;
+                    }
+                    body {
+                        padding: 14px;
+                    }
+                    ::selection {
+                        background: #ff2d9b;
+                        color: #fff;
+                    }
+                    ::-webkit-scrollbar {
+                        width: 10px;
+                        height: 10px;
+                    }
+                    ::-webkit-scrollbar-thumb {
+                        background: rgba(255, 45, 155, 0.3);
+                        border-radius: 20px;
+                        border: 3px solid transparent;
+                        background-clip: padding-box;
+                    }
+                    ::-webkit-scrollbar-track {
+                        background: transparent;
+                    }
+                    a {
+                        color: #22e0d2;
+                        text-decoration: none;
+                    }
+                    a:hover {
+                        color: #6ff0e6;
+                    }
+                    @keyframes spin {
+                        to {
+                            transform: rotate(360deg);
+                        }
+                    }
+                    @keyframes pulseGlow {
+                        0%,
+                        100% {
+                            box-shadow:
+                                0 0 0 0 rgba(255, 45, 155, 0.45),
+                                0 12px 40px -8px rgba(255, 45, 155, 0.6);
+                        }
+                        50% {
+                            box-shadow:
+                                0 0 0 14px rgba(255, 45, 155, 0),
+                                0 12px 40px -8px rgba(255, 45, 155, 0.6);
+                        }
+                    }
+                    @keyframes floatUp {
+                        from {
+                            opacity: 0;
+                            transform: translateY(10px);
+                        }
+                        to {
+                            opacity: 1;
+                            transform: translateY(0);
+                        }
+                    }
+                </style>
+            </helmet>
+            <div
+                style="
+                    position: relative;
+                    width: 100%;
+                    height: calc(100vh - 28px);
+                    border-radius: 20px;
+                    overflow: hidden;
+                    background: linear-gradient(180deg, #160b26, #0c0714);
+                    box-shadow:
+                        0 40px 120px -30px rgba(0, 0, 0, 0.9),
+                        inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+                    display: flex;
+                    flex-direction: column;
+                    color: #f3ecfb;
+                "
+            >
+                <input
+                    type="file"
+                    accept="audio/*"
+                    multiple
+                    ref="{{ fileRef }}"
+                    onChange="{{ onPick }}"
+                    style="display: none"
+                />
+                <audio ref="{{ audioRef }}" crossorigin="anonymous" style="display: none"></audio>
+
+                <!-- TITLEBAR -->
+                <div
+                    style="
+                        height: 52px;
+                        flex: none;
+                        display: flex;
+                        align-items: center;
+                        gap: 16px;
+                        padding: 0 16px;
+                        background: rgba(255, 255, 255, 0.02);
+                        border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+                        cursor: default;
+                    "
+                >
+                    <div style="display: flex; gap: 8px; align-items: center">
+                        <div
+                            style="
+                                width: 12px;
+                                height: 12px;
+                                border-radius: 50%;
+                                background: #ff5f57;
+                            "
+                        ></div>
+                        <div
+                            style="
+                                width: 12px;
+                                height: 12px;
+                                border-radius: 50%;
+                                background: #febc2e;
+                            "
+                        ></div>
+                        <div
+                            style="
+                                width: 12px;
+                                height: 12px;
+                                border-radius: 50%;
+                                background: #28c840;
+                            "
+                        ></div>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 10px; margin-left: 6px">
+                        <div
+                            style="
+                                width: 24px;
+                                height: 24px;
+                                border-radius: 7px;
+                                background: conic-gradient(
+                                    from 0deg,
+                                    #ff2d9b,
+                                    #7c5cff,
+                                    #22e0d2,
+                                    #c6f135,
+                                    #ff2d9b
+                                );
+                            "
+                        ></div>
+                        <span
+                            style="
+                                font-family: 'Hanken Grotesk';
+                                font-weight: 900;
+                                letter-spacing: 2px;
+                                font-size: 15px;
+                            "
+                            >PRISM</span
+                        >
+                        <span
+                            style="
+                                font-size: 11px;
+                                color: #8b7ba6;
+                                font-weight: 600;
+                                letter-spacing: 0.5px;
+                                padding: 2px 7px;
+                                border: 1px solid rgba(255, 255, 255, 0.12);
+                                border-radius: 20px;
+                            "
+                            >OPEN SOURCE</span
+                        >
+                    </div>
+                    <div style="flex: 1; display: flex; justify-content: center">
+                        <div
+                            style="
+                                display: flex;
+                                align-items: center;
+                                gap: 9px;
+                                width: min(420px, 42%);
+                                background: rgba(0, 0, 0, 0.35);
+                                border: 1px solid rgba(255, 255, 255, 0.08);
+                                border-radius: 11px;
+                                padding: 8px 13px;
+                            "
+                        >
+                            <svg
+                                width="15"
+                                height="15"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="#8B7BA6"
+                                stroke-width="2"
+                            >
+                                <circle cx="11" cy="11" r="7" />
+                                <path d="M21 21l-4-4" />
+                            </svg>
+                            <input
+                                placeholder="Search songs, artists, stations…"
+                                style="
+                                    flex: 1;
+                                    background: none;
+                                    border: none;
+                                    outline: none;
+                                    color: #f3ecfb;
+                                    font-family: inherit;
+                                    font-size: 13px;
+                                "
+                            />
+                        </div>
+                    </div>
+                    <div style="display: flex; gap: 14px; align-items: center; color: #8b7ba6">
+                        <svg style="cursor: pointer" width="15" height="2" viewBox="0 0 15 2">
+                            <rect width="15" height="2" rx="1" fill="currentColor" />
+                        </svg>
+                        <svg
+                            style="cursor: pointer"
+                            width="13"
+                            height="13"
+                            viewBox="0 0 13 13"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="1.5"
+                        >
+                            <rect x="1" y="1" width="11" height="11" rx="2" />
+                        </svg>
+                        <svg
+                            style="cursor: pointer"
+                            width="13"
+                            height="13"
+                            viewBox="0 0 13 13"
+                            stroke="currentColor"
+                            stroke-width="1.6"
+                        >
+                            <path d="M1 1l11 11M12 1L1 12" />
+                        </svg>
+                    </div>
+                </div>
+
+                <!-- BODY -->
+                <div style="flex: 1; display: flex; min-height: 0">
+                    <!-- SIDEBAR -->
+                    <div
+                        style="
+                            width: 232px;
+                            flex: none;
+                            padding: 20px 14px;
+                            display: flex;
+                            flex-direction: column;
+                            gap: 6px;
+                            border-right: 1px solid rgba(255, 255, 255, 0.05);
+                            overflow-y: auto;
+                        "
+                    >
+                        <div
+                            style="
+                                font-size: 11px;
+                                font-weight: 700;
+                                letter-spacing: 1.5px;
+                                color: #6b5d82;
+                                padding: 6px 12px;
+                            "
+                        >
+                            PLAYING
+                        </div>
+                        <sc-for list="{{ navPlay }}" as="n" hint-placeholder-count="1">
+                            <div onClick="{{ n.go }}" style="{{ n.rowStyle }}">
+                                <svg
+                                    width="19"
+                                    height="19"
+                                    viewBox="0 0 24 24"
+                                    fill="none"
+                                    stroke="{{ n.color }}"
+                                    stroke-width="1.9"
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                >
+                                    <path d="{{ n.d }}" />
+                                </svg>
+                                <span>{{ n.label }}</span>
+                            </div>
+                        </sc-for>
+                        <div
+                            style="
+                                font-size: 11px;
+                                font-weight: 700;
+                                letter-spacing: 1.5px;
+                                color: #6b5d82;
+                                padding: 14px 12px 6px;
+                            "
+                        >
+                            LIBRARY
+                        </div>
+                        <sc-for list="{{ navLib }}" as="n" hint-placeholder-count="2">
+                            <div onClick="{{ n.go }}" style="{{ n.rowStyle }}">
+                                <svg
+                                    width="19"
+                                    height="19"
+                                    viewBox="0 0 24 24"
+                                    fill="none"
+                                    stroke="{{ n.color }}"
+                                    stroke-width="1.9"
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                >
+                                    <path d="{{ n.d }}" />
+                                </svg>
+                                <span>{{ n.label }}</span>
+                            </div>
+                        </sc-for>
+                        <div
+                            style="
+                                font-size: 11px;
+                                font-weight: 700;
+                                letter-spacing: 1.5px;
+                                color: #6b5d82;
+                                padding: 14px 12px 6px;
+                            "
+                        >
+                            SOURCES
+                        </div>
+                        <sc-for list="{{ navSrc }}" as="n" hint-placeholder-count="3">
+                            <div onClick="{{ n.go }}" style="{{ n.rowStyle }}">
+                                <svg
+                                    width="19"
+                                    height="19"
+                                    viewBox="0 0 24 24"
+                                    fill="none"
+                                    stroke="{{ n.color }}"
+                                    stroke-width="1.9"
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                >
+                                    <path d="{{ n.d }}" />
+                                </svg>
+                                <span>{{ n.label }}</span>
+                            </div>
+                        </sc-for>
+                        <div style="flex: 1"></div>
+                        <div onClick="{{ settingsItem.go }}" style="{{ settingsItem.rowStyle }}">
+                            <svg
+                                width="19"
+                                height="19"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="{{ settingsItem.color }}"
+                                stroke-width="1.9"
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                            >
+                                <path d="{{ settingsItem.d }}" />
+                            </svg>
+                            <span>{{ settingsItem.label }}</span>
+                        </div>
+                    </div>
+
+                    <!-- MAIN -->
+                    <div style="flex: 1; min-width: 0; overflow-y: auto; position: relative">
+                        <!-- NOW PLAYING -->
+                        <sc-if value="{{ isNow }}" hint-placeholder-val="{{ true }}">
+                            <div
+                                style="
+                                    padding: 36px 44px 40px;
+                                    animation: floatUp 0.4s ease;
+                                    display: grid;
+                                    grid-template-columns: minmax(300px, 380px) 1fr;
+                                    gap: 48px;
+                                    align-items: start;
+                                    min-height: 100%;
+                                "
+                            >
+                                <div
+                                    style="
+                                        display: flex;
+                                        flex-direction: column;
+                                        align-items: center;
+                                        gap: 22px;
+                                        position: sticky;
+                                        top: 0;
+                                    "
+                                >
+                                    <div style="position: relative; width: 100%; aspect-ratio: 1">
+                                        <div
+                                            style="
+                                                position: absolute;
+                                                inset: -6%;
+                                                border-radius: 50%;
+                                                background: conic-gradient(
+                                                    from 0deg,
+                                                    #ff2d9b,
+                                                    #7c5cff,
+                                                    #22e0d2,
+                                                    #c6f135,
+                                                    #ff2d9b
+                                                );
+                                                filter: blur(28px);
+                                                opacity: 0.5;
+                                                animation: spin 18s linear infinite;
+                                            "
+                                        ></div>
+                                        <div
+                                            style="position:absolute;inset:0;border-radius:22px;background:{{ art }};box-shadow:0 24px 70px -20px rgba(0,0,0,.8),inset 0 0 0 1px rgba(255,255,255,.12);overflow:hidden;"
+                                        >
+                                            <div
+                                                style="
+                                                    position: absolute;
+                                                    inset: 0;
+                                                    background: linear-gradient(
+                                                        140deg,
+                                                        rgba(255, 255, 255, 0.22),
+                                                        transparent 45%
+                                                    );
+                                                "
+                                            ></div>
+                                            <div
+                                                style="
+                                                    position: absolute;
+                                                    bottom: 16px;
+                                                    left: 18px;
+                                                    font-family: 'Hanken Grotesk';
+                                                    font-weight: 900;
+                                                    font-size: 40px;
+                                                    line-height: 0.9;
+                                                    opacity: 0.85;
+                                                    text-shadow: 0 2px 20px rgba(0, 0, 0, 0.4);
+                                                "
+                                            >
+                                                {{ artInitials }}
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div
+                                        style="
+                                            display: flex;
+                                            gap: 10px;
+                                            flex-wrap: wrap;
+                                            justify-content: center;
+                                        "
+                                    >
+                                        <div
+                                            style="
+                                                font-size: 12px;
+                                                font-weight: 600;
+                                                color: #c9bbdd;
+                                                padding: 6px 12px;
+                                                background: rgba(255, 255, 255, 0.06);
+                                                border-radius: 20px;
+                                            "
+                                        >
+                                            Hi-Res · FLAC 24/96
+                                        </div>
+                                        <div
+                                            style="
+                                                font-size: 12px;
+                                                font-weight: 600;
+                                                color: #c6f135;
+                                                padding: 6px 12px;
+                                                background: rgba(198, 241, 53, 0.12);
+                                                border-radius: 20px;
+                                            "
+                                        >
+                                            Lossless
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div
+                                    style="
+                                        display: flex;
+                                        flex-direction: column;
+                                        gap: 22px;
+                                        min-width: 0;
+                                    "
+                                >
+                                    <div>
+                                        <div
+                                            style="
+                                                font-size: 12px;
+                                                font-weight: 700;
+                                                letter-spacing: 2px;
+                                                color: #ff2d9b;
+                                                margin-bottom: 12px;
+                                            "
+                                        >
+                                            NOW PLAYING · FROM {{ albumUpper }}
+                                        </div>
+                                        <div
+                                            style="
+                                                font-family: 'Hanken Grotesk';
+                                                font-weight: 900;
+                                                font-size: 52px;
+                                                line-height: 1.02;
+                                                letter-spacing: -1px;
+                                                text-wrap: balance;
+                                            "
+                                        >
+                                            {{ title }}
+                                        </div>
+                                    </div>
+                                    <div style="display: flex; gap: 40px; flex-wrap: wrap">
+                                        <div>
+                                            <div
+                                                style="
+                                                    font-size: 11px;
+                                                    font-weight: 700;
+                                                    letter-spacing: 1.5px;
+                                                    color: #6b5d82;
+                                                    margin-bottom: 4px;
+                                                "
+                                            >
+                                                ARTIST
+                                            </div>
+                                            <div
+                                                style="
+                                                    font-size: 22px;
+                                                    font-weight: 700;
+                                                    color: #f3ecfb;
+                                                "
+                                            >
+                                                {{ artist }}
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <div
+                                                style="
+                                                    font-size: 11px;
+                                                    font-weight: 700;
+                                                    letter-spacing: 1.5px;
+                                                    color: #6b5d82;
+                                                    margin-bottom: 4px;
+                                                "
+                                            >
+                                                COMPOSER
+                                            </div>
+                                            <div
+                                                style="
+                                                    font-size: 22px;
+                                                    font-weight: 700;
+                                                    color: #22e0d2;
+                                                "
+                                            >
+                                                {{ composer }}
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <div
+                                                style="
+                                                    font-size: 11px;
+                                                    font-weight: 700;
+                                                    letter-spacing: 1.5px;
+                                                    color: #6b5d82;
+                                                    margin-bottom: 4px;
+                                                "
+                                            >
+                                                ALBUM
+                                            </div>
+                                            <div
+                                                style="
+                                                    font-size: 22px;
+                                                    font-weight: 600;
+                                                    color: #c9bbdd;
+                                                "
+                                            >
+                                                {{ album }}
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <!-- WAVEFORM -->
+                                    <div>
+                                        <div
+                                            style="
+                                                font-size: 11px;
+                                                font-weight: 700;
+                                                letter-spacing: 1.5px;
+                                                color: #6b5d82;
+                                                margin-bottom: 8px;
+                                            "
+                                        >
+                                            WAVEFORM
+                                        </div>
+                                        <div
+                                            onClick="{{ seek }}"
+                                            style="
+                                                position: relative;
+                                                height: 120px;
+                                                background: rgba(0, 0, 0, 0.28);
+                                                border-radius: 14px;
+                                                border: 1px solid rgba(255, 255, 255, 0.06);
+                                                cursor: pointer;
+                                                overflow: hidden;
+                                            "
+                                        >
+                                            <canvas
+                                                ref="{{ bigWaveRef }}"
+                                                style="
+                                                    position: absolute;
+                                                    inset: 0;
+                                                    width: 100%;
+                                                    height: 100%;
+                                                "
+                                            ></canvas>
+                                        </div>
+                                        <div
+                                            style="
+                                                display: flex;
+                                                justify-content: space-between;
+                                                margin-top: 8px;
+                                                font-family: 'Space Mono';
+                                                font-size: 12px;
+                                                color: #8b7ba6;
+                                            "
+                                        >
+                                            <span ref="{{ curTimeRef }}">0:00</span>
+                                            <span>{{ totalTime }}</span>
+                                        </div>
+                                    </div>
+
+                                    <!-- TRANSPORT -->
+                                    <div style="display: flex; align-items: center; gap: 20px">
+                                        <svg
+                                            onClick="{{ toggleShuffle }}"
+                                            style="cursor: pointer"
+                                            width="20"
+                                            height="20"
+                                            viewBox="0 0 24 24"
+                                            fill="none"
+                                            stroke="{{ shuffleColor }}"
+                                            stroke-width="2"
+                                            stroke-linecap="round"
+                                            stroke-linejoin="round"
+                                        >
+                                            <path
+                                                d="M16 3h5v5M4 20L21 3M21 16v5h-5M15 15l6 6M4 4l5 5"
+                                            />
+                                        </svg>
+                                        <svg
+                                            onClick="{{ prev }}"
+                                            style="cursor: pointer"
+                                            width="26"
+                                            height="26"
+                                            viewBox="0 0 24 24"
+                                            fill="#F3ECFB"
+                                        >
+                                            <path d="M6 6h2v12H6zM20 6v12l-9-6z" />
+                                        </svg>
+                                        <div onClick="{{ togglePlay }}" style="{{ playBtnStyle }}">
+                                            <sc-if
+                                                value="{{ playing }}"
+                                                hint-placeholder-val="{{ false }}"
+                                            >
+                                                <svg
+                                                    width="26"
+                                                    height="26"
+                                                    viewBox="0 0 24 24"
+                                                    fill="#0C0714"
+                                                >
+                                                    <rect
+                                                        x="6"
+                                                        y="5"
+                                                        width="4"
+                                                        height="14"
+                                                        rx="1"
+                                                    />
+                                                    <rect
+                                                        x="14"
+                                                        y="5"
+                                                        width="4"
+                                                        height="14"
+                                                        rx="1"
+                                                    />
+                                                </svg>
+                                            </sc-if>
+                                            <sc-if
+                                                value="{{ paused }}"
+                                                hint-placeholder-val="{{ true }}"
+                                            >
+                                                <svg
+                                                    width="26"
+                                                    height="26"
+                                                    viewBox="0 0 24 24"
+                                                    fill="#0C0714"
+                                                >
+                                                    <path d="M8 5v14l11-7z" />
+                                                </svg>
+                                            </sc-if>
+                                        </div>
+                                        <svg
+                                            onClick="{{ next }}"
+                                            style="cursor: pointer"
+                                            width="26"
+                                            height="26"
+                                            viewBox="0 0 24 24"
+                                            fill="#F3ECFB"
+                                        >
+                                            <path d="M16 6h2v12h-2zM4 6l9 6-9 6z" />
+                                        </svg>
+                                        <svg
+                                            onClick="{{ toggleRepeat }}"
+                                            style="cursor: pointer"
+                                            width="20"
+                                            height="20"
+                                            viewBox="0 0 24 24"
+                                            fill="none"
+                                            stroke="{{ repeatColor }}"
+                                            stroke-width="2"
+                                            stroke-linecap="round"
+                                            stroke-linejoin="round"
+                                        >
+                                            <path
+                                                d="M17 2l4 4-4 4M3 11V9a4 4 0 014-4h14M7 22l-4-4 4-4M21 13v2a4 4 0 01-4 4H3"
+                                            />
+                                        </svg>
+                                        <div style="flex: 1"></div>
+                                        <svg
+                                            width="19"
+                                            height="19"
+                                            viewBox="0 0 24 24"
+                                            fill="none"
+                                            stroke="#8B7BA6"
+                                            stroke-width="2"
+                                            stroke-linecap="round"
+                                        >
+                                            <path
+                                                d="M11 5L6 9H2v6h4l5 4zM15.5 8.5a5 5 0 010 7M19 5a9 9 0 010 14"
+                                            />
+                                        </svg>
+                                        <div
+                                            onClick="{{ setVol }}"
+                                            style="
+                                                width: 110px;
+                                                height: 6px;
+                                                background: rgba(255, 255, 255, 0.12);
+                                                border-radius: 20px;
+                                                cursor: pointer;
+                                                position: relative;
+                                            "
+                                        >
+                                            <div style="{{ volFillStyle }}"></div>
+                                        </div>
+                                    </div>
+
+                                    <!-- 10-BAND SPECTRUM -->
+                                    <div
+                                        style="
+                                            background: rgba(0, 0, 0, 0.24);
+                                            border: 1px solid rgba(255, 255, 255, 0.06);
+                                            border-radius: 16px;
+                                            padding: 18px 20px;
+                                        "
+                                    >
+                                        <div
+                                            style="
+                                                display: flex;
+                                                justify-content: space-between;
+                                                align-items: center;
+                                                margin-bottom: 12px;
+                                            "
+                                        >
+                                            <div
+                                                style="
+                                                    font-size: 11px;
+                                                    font-weight: 700;
+                                                    letter-spacing: 1.5px;
+                                                    color: #6b5d82;
+                                                "
+                                            >
+                                                10-BAND SPECTRUM
+                                            </div>
+                                            <div
+                                                onClick="{{ openEq }}"
+                                                style="
+                                                    display: flex;
+                                                    align-items: center;
+                                                    gap: 7px;
+                                                    cursor: pointer;
+                                                    font-size: 13px;
+                                                    font-weight: 700;
+                                                    color: #ff2d9b;
+                                                    padding: 6px 13px;
+                                                    background: rgba(255, 45, 155, 0.12);
+                                                    border-radius: 20px;
+                                                    border: 1px solid rgba(255, 45, 155, 0.3);
+                                                "
+                                            >
+                                                <svg
+                                                    width="15"
+                                                    height="15"
+                                                    viewBox="0 0 24 24"
+                                                    fill="none"
+                                                    stroke="#FF2D9B"
+                                                    stroke-width="2"
+                                                    stroke-linecap="round"
+                                                >
+                                                    <path
+                                                        d="M4 8h10M18 8h2M4 16h2M10 16h10M14 6v4M8 14v4"
+                                                    />
+                                                </svg>
+                                                Open Equalizer
+                                            </div>
+                                        </div>
+                                        <div style="height: 88px">
+                                            <canvas
+                                                ref="{{ specRef }}"
+                                                style="width: 100%; height: 100%"
+                                            ></canvas>
+                                        </div>
+                                        <div
+                                            style="
+                                                display: grid;
+                                                grid-template-columns: repeat(10, 1fr);
+                                                margin-top: 8px;
+                                            "
+                                        >
+                                            <sc-for
+                                                list="{{ freqs }}"
+                                                as="f"
+                                                hint-placeholder-count="10"
+                                            >
+                                                <div
+                                                    style="
+                                                        text-align: center;
+                                                        font-family: 'Space Mono';
+                                                        font-size: 10px;
+                                                        color: #6b5d82;
+                                                    "
+                                                >
+                                                    {{ f }}
+                                                </div>
+                                            </sc-for>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </sc-if>
+
+                        <!-- LIBRARY -->
+                        <sc-if value="{{ isLibrary }}" hint-placeholder-val="{{ false }}">
+                            <div style="padding: 36px 44px 40px; animation: floatUp 0.4s ease">
+                                <div
+                                    style="
+                                        display: flex;
+                                        align-items: flex-end;
+                                        justify-content: space-between;
+                                        margin-bottom: 24px;
+                                    "
+                                >
+                                    <div>
+                                        <div
+                                            style="
+                                                font-size: 12px;
+                                                font-weight: 700;
+                                                letter-spacing: 2px;
+                                                color: #7c5cff;
+                                                margin-bottom: 8px;
+                                            "
+                                        >
+                                            YOUR COLLECTION
+                                        </div>
+                                        <h1
+                                            style="
+                                                font-family: 'Hanken Grotesk';
+                                                font-weight: 900;
+                                                font-size: 40px;
+                                                margin: 0;
+                                                letter-spacing: -1px;
+                                            "
+                                        >
+                                            Library
+                                        </h1>
+                                    </div>
+                                    <div
+                                        onClick="{{ openFile }}"
+                                        style="
+                                            display: flex;
+                                            align-items: center;
+                                            gap: 8px;
+                                            cursor: pointer;
+                                            font-size: 14px;
+                                            font-weight: 700;
+                                            color: #0c0714;
+                                            padding: 11px 18px;
+                                            background: linear-gradient(90deg, #ff2d9b, #ff6b2c);
+                                            border-radius: 11px;
+                                        "
+                                    >
+                                        <svg
+                                            width="17"
+                                            height="17"
+                                            viewBox="0 0 24 24"
+                                            fill="none"
+                                            stroke="#0C0714"
+                                            stroke-width="2.4"
+                                            stroke-linecap="round"
+                                        >
+                                            <path d="M12 5v14M5 12h14" />
+                                        </svg>
+                                        Add music
+                                    </div>
+                                </div>
+                                <div style="display: flex; gap: 8px; margin-bottom: 24px">
+                                    <sc-for list="{{ libTabs }}" as="t" hint-placeholder-count="4">
+                                        <div onClick="{{ t.go }}" style="{{ t.style }}">
+                                            {{ t.label }}
+                                        </div>
+                                    </sc-for>
+                                </div>
+                                <div
+                                    style="
+                                        display: grid;
+                                        grid-template-columns: repeat(
+                                            auto-fill,
+                                            minmax(180px, 1fr)
+                                        );
+                                        gap: 20px;
+                                        margin-bottom: 36px;
+                                    "
+                                >
+                                    <sc-for
+                                        list="{{ playlists }}"
+                                        as="p"
+                                        hint-placeholder-count="6"
+                                    >
+                                        <div
+                                            onClick="{{ p.play }}"
+                                            style="
+                                                cursor: pointer;
+                                                padding: 14px;
+                                                border-radius: 16px;
+                                                background: rgba(255, 255, 255, 0.03);
+                                                border: 1px solid rgba(255, 255, 255, 0.06);
+                                                transition: all 0.18s;
+                                            "
+                                            style-hover="background:rgba(255,255,255,.07);transform:translateY(-3px);"
+                                        >
+                                            <div
+                                                style="aspect-ratio:1;border-radius:12px;background:{{ p.grad }};margin-bottom:12px;box-shadow:0 12px 30px -12px rgba(0,0,0,.7);position:relative;overflow:hidden;"
+                                            >
+                                                <div
+                                                    style="
+                                                        position: absolute;
+                                                        inset: 0;
+                                                        background: linear-gradient(
+                                                            140deg,
+                                                            rgba(255, 255, 255, 0.2),
+                                                            transparent 50%
+                                                        );
+                                                    "
+                                                ></div>
+                                            </div>
+                                            <div style="font-weight: 700; font-size: 15px">
+                                                {{ p.name }}
+                                            </div>
+                                            <div
+                                                style="
+                                                    font-size: 13px;
+                                                    color: #8b7ba6;
+                                                    margin-top: 2px;
+                                                "
+                                            >
+                                                {{ p.count }} tracks
+                                            </div>
+                                        </div>
+                                    </sc-for>
+                                </div>
+                                <div
+                                    style="
+                                        font-size: 11px;
+                                        font-weight: 700;
+                                        letter-spacing: 1.5px;
+                                        color: #6b5d82;
+                                        margin-bottom: 8px;
+                                    "
+                                >
+                                    RECENTLY ADDED
+                                </div>
+                                <div
+                                    style="
+                                        border-radius: 14px;
+                                        overflow: hidden;
+                                        border: 1px solid rgba(255, 255, 255, 0.06);
+                                    "
+                                >
+                                    <sc-for list="{{ songRows }}" as="s" hint-placeholder-count="5">
+                                        <div
+                                            onClick="{{ s.play }}"
+                                            style="{{ s.rowStyle }}"
+                                            style-hover="background:rgba(255,45,155,.08);"
+                                        >
+                                            <div
+                                                style="
+                                                    width: 26px;
+                                                    text-align: center;
+                                                    font-family: 'Space Mono';
+                                                    font-size: 13px;
+                                                    color: #6b5d82;
+                                                "
+                                            >
+                                                {{ s.num }}
+                                            </div>
+                                            <div
+                                                style="width:38px;height:38px;border-radius:8px;background:{{ s.grad }};flex:none;"
+                                            ></div>
+                                            <div style="flex: 1; min-width: 0">
+                                                <div
+                                                    style="
+                                                        font-weight: 600;
+                                                        font-size: 14px;
+                                                        overflow: hidden;
+                                                        text-overflow: ellipsis;
+                                                        white-space: nowrap;
+                                                    "
+                                                >
+                                                    {{ s.title }}
+                                                </div>
+                                                <div style="font-size: 12px; color: #8b7ba6">
+                                                    {{ s.artist }}
+                                                </div>
+                                            </div>
+                                            <div
+                                                style="
+                                                    width: 140px;
+                                                    font-size: 13px;
+                                                    color: #8b7ba6;
+                                                "
+                                            >
+                                                {{ s.composer }}
+                                            </div>
+                                            <div
+                                                style="
+                                                    width: 70px;
+                                                    font-family: 'Space Mono';
+                                                    font-size: 12px;
+                                                    color: #8b7ba6;
+                                                    text-align: right;
+                                                "
+                                            >
+                                                {{ s.dur }}
+                                            </div>
+                                        </div>
+                                    </sc-for>
+                                </div>
+                            </div>
+                        </sc-if>
+
+                        <!-- DISCOVER -->
+                        <sc-if value="{{ isDiscover }}" hint-placeholder-val="{{ false }}">
+                            <div style="padding: 36px 44px 40px; animation: floatUp 0.4s ease">
+                                <div
+                                    style="
+                                        font-size: 12px;
+                                        font-weight: 700;
+                                        letter-spacing: 2px;
+                                        color: #22e0d2;
+                                        margin-bottom: 8px;
+                                    "
+                                >
+                                    CURATED FOR YOU
+                                </div>
+                                <h1
+                                    style="
+                                        font-family: 'Hanken Grotesk';
+                                        font-weight: 900;
+                                        font-size: 40px;
+                                        margin: 0 0 28px;
+                                        letter-spacing: -1px;
+                                    "
+                                >
+                                    Discover
+                                </h1>
+                                <sc-for
+                                    list="{{ discoverRows }}"
+                                    as="row"
+                                    hint-placeholder-count="3"
+                                >
+                                    <div style="margin-bottom: 36px">
+                                        <div
+                                            style="
+                                                font-family: 'Hanken Grotesk';
+                                                font-weight: 800;
+                                                font-size: 22px;
+                                                margin-bottom: 14px;
+                                            "
+                                        >
+                                            {{ row.title }}
+                                        </div>
+                                        <div
+                                            style="
+                                                display: flex;
+                                                gap: 18px;
+                                                overflow-x: auto;
+                                                padding-bottom: 8px;
+                                            "
+                                        >
+                                            <sc-for
+                                                list="{{ row.items }}"
+                                                as="a"
+                                                hint-placeholder-count="5"
+                                            >
+                                                <div
+                                                    onClick="{{ a.play }}"
+                                                    style="
+                                                        width: 176px;
+                                                        flex: none;
+                                                        cursor: pointer;
+                                                    "
+                                                >
+                                                    <div
+                                                        style="aspect-ratio:1;border-radius:14px;background:{{ a.grad }};margin-bottom:10px;box-shadow:0 14px 34px -14px rgba(0,0,0,.7);position:relative;overflow:hidden;"
+                                                    >
+                                                        <div
+                                                            style="
+                                                                position: absolute;
+                                                                inset: 0;
+                                                                background: linear-gradient(
+                                                                    140deg,
+                                                                    rgba(255, 255, 255, 0.2),
+                                                                    transparent 50%
+                                                                );
+                                                            "
+                                                        ></div>
+                                                    </div>
+                                                    <div
+                                                        style="
+                                                            font-weight: 700;
+                                                            font-size: 14px;
+                                                            overflow: hidden;
+                                                            text-overflow: ellipsis;
+                                                            white-space: nowrap;
+                                                        "
+                                                    >
+                                                        {{ a.name }}
+                                                    </div>
+                                                    <div style="font-size: 12px; color: #8b7ba6">
+                                                        {{ a.artist }}
+                                                    </div>
+                                                </div>
+                                            </sc-for>
+                                        </div>
+                                    </div>
+                                </sc-for>
+                            </div>
+                        </sc-if>
+
+                        <!-- WEB RADIO -->
+                        <sc-if value="{{ isRadio }}" hint-placeholder-val="{{ false }}">
+                            <div style="padding: 36px 44px 40px; animation: floatUp 0.4s ease">
+                                <div
+                                    style="
+                                        font-size: 12px;
+                                        font-weight: 700;
+                                        letter-spacing: 2px;
+                                        color: #ff6b2c;
+                                        margin-bottom: 8px;
+                                    "
+                                >
+                                    STREAMING WORLDWIDE
+                                </div>
+                                <h1
+                                    style="
+                                        font-family: 'Hanken Grotesk';
+                                        font-weight: 900;
+                                        font-size: 40px;
+                                        margin: 0 0 20px;
+                                        letter-spacing: -1px;
+                                    "
+                                >
+                                    Web Radio
+                                </h1>
+                                <div
+                                    style="
+                                        display: flex;
+                                        gap: 8px;
+                                        flex-wrap: wrap;
+                                        margin-bottom: 26px;
+                                    "
+                                >
+                                    <sc-for
+                                        list="{{ radioGenres }}"
+                                        as="g"
+                                        hint-placeholder-count="6"
+                                    >
+                                        <div style="{{ g.style }}">{{ g.label }}</div>
+                                    </sc-for>
+                                </div>
+                                <div
+                                    style="
+                                        display: grid;
+                                        grid-template-columns: repeat(
+                                            auto-fill,
+                                            minmax(280px, 1fr)
+                                        );
+                                        gap: 16px;
+                                    "
+                                >
+                                    <sc-for list="{{ stations }}" as="r" hint-placeholder-count="6">
+                                        <div
+                                            onClick="{{ r.play }}"
+                                            style="
+                                                display: flex;
+                                                gap: 14px;
+                                                align-items: center;
+                                                padding: 14px;
+                                                border-radius: 14px;
+                                                background: rgba(255, 255, 255, 0.03);
+                                                border: 1px solid rgba(255, 255, 255, 0.06);
+                                                cursor: pointer;
+                                                transition: all 0.18s;
+                                            "
+                                            style-hover="background:rgba(255,255,255,.07);"
+                                        >
+                                            <div
+                                                style="width:54px;height:54px;border-radius:12px;background:{{ r.grad }};flex:none;position:relative;overflow:hidden;"
+                                            >
+                                                <div
+                                                    style="
+                                                        position: absolute;
+                                                        inset: 0;
+                                                        background: linear-gradient(
+                                                            140deg,
+                                                            rgba(255, 255, 255, 0.25),
+                                                            transparent 50%
+                                                        );
+                                                    "
+                                                ></div>
+                                            </div>
+                                            <div style="flex: 1; min-width: 0">
+                                                <div style="font-weight: 700; font-size: 15px">
+                                                    {{ r.name }}
+                                                </div>
+                                                <div style="font-size: 12px; color: #8b7ba6">
+                                                    {{ r.genre }} · {{ r.kbps }} kbps
+                                                </div>
+                                            </div>
+                                            <div
+                                                style="
+                                                    display: flex;
+                                                    align-items: center;
+                                                    gap: 5px;
+                                                    font-size: 11px;
+                                                    font-weight: 700;
+                                                    color: #ff3b3b;
+                                                "
+                                            >
+                                                <span
+                                                    style="
+                                                        width: 7px;
+                                                        height: 7px;
+                                                        border-radius: 50%;
+                                                        background: #ff3b3b;
+                                                        box-shadow: 0 0 8px #ff3b3b;
+                                                    "
+                                                ></span
+                                                >LIVE
+                                            </div>
+                                        </div>
+                                    </sc-for>
+                                </div>
+                            </div>
+                        </sc-if>
+
+                        <!-- LOCAL FILES -->
+                        <sc-if value="{{ isLocal }}" hint-placeholder-val="{{ false }}">
+                            <div style="padding: 36px 44px 40px; animation: floatUp 0.4s ease">
+                                <div
+                                    style="
+                                        font-size: 12px;
+                                        font-weight: 700;
+                                        letter-spacing: 2px;
+                                        color: #c6f135;
+                                        margin-bottom: 8px;
+                                    "
+                                >
+                                    FROM THIS COMPUTER
+                                </div>
+                                <h1
+                                    style="
+                                        font-family: 'Hanken Grotesk';
+                                        font-weight: 900;
+                                        font-size: 40px;
+                                        margin: 0 0 24px;
+                                        letter-spacing: -1px;
+                                    "
+                                >
+                                    Local Files
+                                </h1>
+                                <div
+                                    onClick="{{ openFile }}"
+                                    onDragOver="{{ onDragOver }}"
+                                    onDrop="{{ onDrop }}"
+                                    style="{{ dropStyle }}"
+                                >
+                                    <svg
+                                        width="46"
+                                        height="46"
+                                        viewBox="0 0 24 24"
+                                        fill="none"
+                                        stroke="#C6F135"
+                                        stroke-width="1.6"
+                                        stroke-linecap="round"
+                                        stroke-linejoin="round"
+                                    >
+                                        <path
+                                            d="M12 16V4M7 9l5-5 5 5M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2"
+                                        />
+                                    </svg>
+                                    <div
+                                        style="
+                                            font-family: 'Hanken Grotesk';
+                                            font-weight: 800;
+                                            font-size: 22px;
+                                            margin-top: 14px;
+                                        "
+                                    >
+                                        Drop audio files here
+                                    </div>
+                                    <div style="font-size: 14px; color: #8b7ba6; margin-top: 4px">
+                                        or click to browse · MP3, FLAC, WAV, AAC, OGG, ALAC
+                                    </div>
+                                    <div
+                                        style="
+                                            font-size: 13px;
+                                            color: #c6f135;
+                                            margin-top: 14px;
+                                            font-weight: 600;
+                                        "
+                                    >
+                                        Files loaded here play with the full 10-band EQ &amp; live
+                                        waveform
+                                    </div>
+                                </div>
+                                <div
+                                    style="
+                                        display: flex;
+                                        justify-content: space-between;
+                                        align-items: center;
+                                        margin: 28px 0 8px;
+                                    "
+                                >
+                                    <div
+                                        style="
+                                            font-size: 11px;
+                                            font-weight: 700;
+                                            letter-spacing: 1.5px;
+                                            color: #6b5d82;
+                                        "
+                                    >
+                                        SCANNED LIBRARY · {{ localCount }} FILES
+                                    </div>
+                                    <div style="font-size: 12px; color: #8b7ba6">
+                                        Watching 2 folders
+                                    </div>
+                                </div>
+                                <div
+                                    style="
+                                        border-radius: 14px;
+                                        overflow: hidden;
+                                        border: 1px solid rgba(255, 255, 255, 0.06);
+                                    "
+                                >
+                                    <div
+                                        style="
+                                            display: flex;
+                                            gap: 16px;
+                                            padding: 10px 16px;
+                                            font-size: 11px;
+                                            font-weight: 700;
+                                            letter-spacing: 1px;
+                                            color: #6b5d82;
+                                            background: rgba(255, 255, 255, 0.03);
+                                        "
+                                    >
+                                        <div style="flex: 1">TITLE</div>
+                                        <div style="width: 150px">ARTIST</div>
+                                        <div style="width: 80px">FORMAT</div>
+                                        <div style="width: 70px; text-align: right">TIME</div>
+                                    </div>
+                                    <sc-for
+                                        list="{{ localFiles }}"
+                                        as="l"
+                                        hint-placeholder-count="6"
+                                    >
+                                        <div
+                                            onClick="{{ l.play }}"
+                                            style="
+                                                display: flex;
+                                                gap: 16px;
+                                                align-items: center;
+                                                padding: 11px 16px;
+                                                border-top: 1px solid rgba(255, 255, 255, 0.05);
+                                                cursor: pointer;
+                                                font-size: 14px;
+                                            "
+                                            style-hover="background:rgba(198,241,53,.07);"
+                                        >
+                                            <div
+                                                style="
+                                                    flex: 1;
+                                                    min-width: 0;
+                                                    overflow: hidden;
+                                                    text-overflow: ellipsis;
+                                                    white-space: nowrap;
+                                                    font-weight: 600;
+                                                "
+                                            >
+                                                {{ l.name }}
+                                            </div>
+                                            <div
+                                                style="
+                                                    width: 150px;
+                                                    color: #8b7ba6;
+                                                    overflow: hidden;
+                                                    text-overflow: ellipsis;
+                                                    white-space: nowrap;
+                                                "
+                                            >
+                                                {{ l.artist }}
+                                            </div>
+                                            <div style="width: 80px">
+                                                <span
+                                                    style="
+                                                        font-family: 'Space Mono';
+                                                        font-size: 11px;
+                                                        color: #c6f135;
+                                                        border: 1px solid rgba(198, 241, 53, 0.3);
+                                                        border-radius: 5px;
+                                                        padding: 2px 6px;
+                                                    "
+                                                    >{{ l.fmt }}</span
+                                                >
+                                            </div>
+                                            <div
+                                                style="
+                                                    width: 70px;
+                                                    text-align: right;
+                                                    font-family: 'Space Mono';
+                                                    font-size: 12px;
+                                                    color: #8b7ba6;
+                                                "
+                                            >
+                                                {{ l.dur }}
+                                            </div>
+                                        </div>
+                                    </sc-for>
+                                </div>
+                            </div>
+                        </sc-if>
+
+                        <!-- SPOTIFY -->
+                        <sc-if value="{{ isSpotify }}" hint-placeholder-val="{{ false }}">
+                            <div style="padding: 36px 44px 40px; animation: floatUp 0.4s ease">
+                                <sc-if value="{{ spotifyOff }}" hint-placeholder-val="{{ true }}">
+                                    <div
+                                        style="
+                                            max-width: 560px;
+                                            margin: 40px auto;
+                                            text-align: center;
+                                        "
+                                    >
+                                        <div
+                                            style="
+                                                width: 80px;
+                                                height: 80px;
+                                                border-radius: 50%;
+                                                background: #1db954;
+                                                margin: 0 auto 24px;
+                                                display: flex;
+                                                align-items: center;
+                                                justify-content: center;
+                                                box-shadow: 0 16px 50px -12px rgba(29, 185, 84, 0.6);
+                                            "
+                                        >
+                                            <svg
+                                                width="44"
+                                                height="44"
+                                                viewBox="0 0 24 24"
+                                                fill="none"
+                                                stroke="#0C0714"
+                                                stroke-width="2"
+                                                stroke-linecap="round"
+                                            >
+                                                <circle cx="12" cy="12" r="10" />
+                                                <path
+                                                    d="M7 9c3-1 7-1 10 1M7.5 12.5c2.5-.8 5.5-.6 8 1M8 15.5c2-.6 4-.4 6 .8"
+                                                />
+                                            </svg>
+                                        </div>
+                                        <h1
+                                            style="
+                                                font-family: 'Hanken Grotesk';
+                                                font-weight: 900;
+                                                font-size: 34px;
+                                                margin: 0 0 12px;
+                                            "
+                                        >
+                                            Connect Spotify
+                                        </h1>
+                                        <p
+                                            style="
+                                                font-size: 15px;
+                                                color: #b7a9cc;
+                                                line-height: 1.6;
+                                                margin: 0 0 26px;
+                                            "
+                                        >
+                                            Bring your Spotify playlists, saved songs, and Discover
+                                            Weekly into PRISM — mixed alongside your local library
+                                            and web radio in one place.
+                                        </p>
+                                        <div
+                                            onClick="{{ connectSpotify }}"
+                                            style="
+                                                display: inline-flex;
+                                                align-items: center;
+                                                gap: 10px;
+                                                cursor: pointer;
+                                                font-size: 15px;
+                                                font-weight: 800;
+                                                color: #0c0714;
+                                                padding: 14px 28px;
+                                                background: #1db954;
+                                                border-radius: 30px;
+                                                box-shadow: 0 10px 30px -8px rgba(29, 185, 84, 0.6);
+                                            "
+                                        >
+                                            Connect Account
+                                        </div>
+                                        <div
+                                            style="
+                                                display: flex;
+                                                gap: 26px;
+                                                justify-content: center;
+                                                margin-top: 34px;
+                                                color: #8b7ba6;
+                                                font-size: 13px;
+                                            "
+                                        >
+                                            <div>✓ Your playlists</div>
+                                            <div>✓ Unified search</div>
+                                            <div>✓ EQ on everything</div>
+                                        </div>
+                                    </div>
+                                </sc-if>
+                                <sc-if value="{{ spotifyOn }}" hint-placeholder-val="{{ false }}">
+                                    <div>
+                                        <div
+                                            style="
+                                                display: flex;
+                                                align-items: center;
+                                                gap: 12px;
+                                                margin-bottom: 24px;
+                                            "
+                                        >
+                                            <div
+                                                style="
+                                                    width: 40px;
+                                                    height: 40px;
+                                                    border-radius: 50%;
+                                                    background: #1db954;
+                                                    display: flex;
+                                                    align-items: center;
+                                                    justify-content: center;
+                                                "
+                                            >
+                                                <svg
+                                                    width="24"
+                                                    height="24"
+                                                    viewBox="0 0 24 24"
+                                                    fill="none"
+                                                    stroke="#0C0714"
+                                                    stroke-width="2"
+                                                >
+                                                    <circle cx="12" cy="12" r="10" />
+                                                    <path
+                                                        d="M7 9c3-1 7-1 10 1M8 15.5c2-.6 4-.4 6 .8"
+                                                    />
+                                                </svg>
+                                            </div>
+                                            <div>
+                                                <div
+                                                    style="
+                                                        font-family: 'Hanken Grotesk';
+                                                        font-weight: 900;
+                                                        font-size: 26px;
+                                                    "
+                                                >
+                                                    Spotify
+                                                </div>
+                                                <div
+                                                    style="
+                                                        font-size: 13px;
+                                                        color: #1db954;
+                                                        font-weight: 600;
+                                                    "
+                                                >
+                                                    Connected as alex_music
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div
+                                            style="
+                                                display: grid;
+                                                grid-template-columns: repeat(
+                                                    auto-fill,
+                                                    minmax(180px, 1fr)
+                                                );
+                                                gap: 20px;
+                                            "
+                                        >
+                                            <sc-for
+                                                list="{{ spotifyPlaylists }}"
+                                                as="p"
+                                                hint-placeholder-count="6"
+                                            >
+                                                <div
+                                                    onClick="{{ p.play }}"
+                                                    style="
+                                                        cursor: pointer;
+                                                        padding: 14px;
+                                                        border-radius: 16px;
+                                                        background: rgba(255, 255, 255, 0.03);
+                                                        border: 1px solid rgba(255, 255, 255, 0.06);
+                                                    "
+                                                    style-hover="background:rgba(29,185,84,.08);"
+                                                >
+                                                    <div
+                                                        style="aspect-ratio:1;border-radius:12px;background:{{ p.grad }};margin-bottom:12px;position:relative;overflow:hidden;"
+                                                    >
+                                                        <div
+                                                            style="
+                                                                position: absolute;
+                                                                inset: 0;
+                                                                background: linear-gradient(
+                                                                    140deg,
+                                                                    rgba(255, 255, 255, 0.2),
+                                                                    transparent 50%
+                                                                );
+                                                            "
+                                                        ></div>
+                                                    </div>
+                                                    <div style="font-weight: 700; font-size: 15px">
+                                                        {{ p.name }}
+                                                    </div>
+                                                    <div
+                                                        style="
+                                                            font-size: 13px;
+                                                            color: #8b7ba6;
+                                                            margin-top: 2px;
+                                                        "
+                                                    >
+                                                        {{ p.count }} tracks
+                                                    </div>
+                                                </div>
+                                            </sc-for>
+                                        </div>
+                                    </div>
+                                </sc-if>
+                            </div>
+                        </sc-if>
+
+                        <!-- SETTINGS -->
+                        <sc-if value="{{ isSettings }}" hint-placeholder-val="{{ false }}">
+                            <div
+                                style="
+                                    padding: 36px 44px 40px;
+                                    animation: floatUp 0.4s ease;
+                                    max-width: 760px;
+                                "
+                            >
+                                <div
+                                    style="
+                                        font-size: 12px;
+                                        font-weight: 700;
+                                        letter-spacing: 2px;
+                                        color: #7c5cff;
+                                        margin-bottom: 8px;
+                                    "
+                                >
+                                    PREFERENCES
+                                </div>
+                                <h1
+                                    style="
+                                        font-family: 'Hanken Grotesk';
+                                        font-weight: 900;
+                                        font-size: 40px;
+                                        margin: 0 0 28px;
+                                        letter-spacing: -1px;
+                                    "
+                                >
+                                    Settings
+                                </h1>
+
+                                <div
+                                    style="
+                                        font-size: 11px;
+                                        font-weight: 700;
+                                        letter-spacing: 1.5px;
+                                        color: #6b5d82;
+                                        margin-bottom: 12px;
+                                    "
+                                >
+                                    EQUALIZER PRESETS
+                                </div>
+                                <div
+                                    style="
+                                        display: flex;
+                                        gap: 10px;
+                                        flex-wrap: wrap;
+                                        margin-bottom: 16px;
+                                    "
+                                >
+                                    <sc-for
+                                        list="{{ presetChips }}"
+                                        as="p"
+                                        hint-placeholder-count="8"
+                                    >
+                                        <div onClick="{{ p.go }}" style="{{ p.style }}">
+                                            {{ p.label }}
+                                        </div>
+                                    </sc-for>
+                                </div>
+                                <div
+                                    onClick="{{ openEq }}"
+                                    style="
+                                        display: inline-flex;
+                                        align-items: center;
+                                        gap: 8px;
+                                        cursor: pointer;
+                                        font-size: 13px;
+                                        font-weight: 700;
+                                        color: #ff2d9b;
+                                        margin-bottom: 32px;
+                                    "
+                                >
+                                    <svg
+                                        width="15"
+                                        height="15"
+                                        viewBox="0 0 24 24"
+                                        fill="none"
+                                        stroke="#FF2D9B"
+                                        stroke-width="2"
+                                    >
+                                        <path d="M4 8h10M18 8h2M4 16h2M10 16h10M14 6v4M8 14v4" />
+                                    </svg>
+                                    Fine-tune in the 10-band equalizer →
+                                </div>
+
+                                <div
+                                    style="
+                                        font-size: 11px;
+                                        font-weight: 700;
+                                        letter-spacing: 1.5px;
+                                        color: #6b5d82;
+                                        margin-bottom: 12px;
+                                    "
+                                >
+                                    PLAYBACK
+                                </div>
+                                <div
+                                    style="
+                                        border-radius: 14px;
+                                        overflow: hidden;
+                                        border: 1px solid rgba(255, 255, 255, 0.06);
+                                        margin-bottom: 32px;
+                                    "
+                                >
+                                    <sc-for list="{{ toggles }}" as="t" hint-placeholder-count="4">
+                                        <div
+                                            style="
+                                                display: flex;
+                                                align-items: center;
+                                                justify-content: space-between;
+                                                padding: 15px 18px;
+                                                border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+                                            "
+                                        >
+                                            <div>
+                                                <div style="font-weight: 600; font-size: 15px">
+                                                    {{ t.label }}
+                                                </div>
+                                                <div style="font-size: 12px; color: #8b7ba6">
+                                                    {{ t.desc }}
+                                                </div>
+                                            </div>
+                                            <div
+                                                onClick="{{ t.toggle }}"
+                                                style="{{ t.trackStyle }}"
+                                            >
+                                                <div style="{{ t.knobStyle }}"></div>
+                                            </div>
+                                        </div>
+                                    </sc-for>
+                                </div>
+
+                                <div
+                                    style="
+                                        font-size: 11px;
+                                        font-weight: 700;
+                                        letter-spacing: 1.5px;
+                                        color: #6b5d82;
+                                        margin-bottom: 12px;
+                                    "
+                                >
+                                    AUDIO OUTPUT
+                                </div>
+                                <div
+                                    style="
+                                        display: flex;
+                                        gap: 14px;
+                                        flex-wrap: wrap;
+                                        margin-bottom: 32px;
+                                    "
+                                >
+                                    <div
+                                        style="
+                                            flex: 1;
+                                            min-width: 200px;
+                                            background: rgba(255, 255, 255, 0.03);
+                                            border: 1px solid rgba(255, 255, 255, 0.06);
+                                            border-radius: 12px;
+                                            padding: 14px 16px;
+                                        "
+                                    >
+                                        <div
+                                            style="
+                                                font-size: 12px;
+                                                color: #8b7ba6;
+                                                margin-bottom: 4px;
+                                            "
+                                        >
+                                            Device
+                                        </div>
+                                        <div style="font-weight: 600">Focusrite Scarlett 2i2</div>
+                                    </div>
+                                    <div
+                                        style="
+                                            flex: 1;
+                                            min-width: 200px;
+                                            background: rgba(255, 255, 255, 0.03);
+                                            border: 1px solid rgba(255, 255, 255, 0.06);
+                                            border-radius: 12px;
+                                            padding: 14px 16px;
+                                        "
+                                    >
+                                        <div
+                                            style="
+                                                font-size: 12px;
+                                                color: #8b7ba6;
+                                                margin-bottom: 4px;
+                                            "
+                                        >
+                                            Sample rate
+                                        </div>
+                                        <div style="font-weight: 600">96 kHz · 24-bit</div>
+                                    </div>
+                                </div>
+
+                                <div
+                                    style="
+                                        padding: 18px;
+                                        border-radius: 14px;
+                                        background: linear-gradient(
+                                            90deg,
+                                            rgba(255, 45, 155, 0.1),
+                                            rgba(124, 92, 255, 0.06)
+                                        );
+                                        border: 1px solid rgba(255, 255, 255, 0.08);
+                                        display: flex;
+                                        align-items: center;
+                                        gap: 14px;
+                                    "
+                                >
+                                    <div
+                                        style="
+                                            width: 36px;
+                                            height: 36px;
+                                            border-radius: 9px;
+                                            background: conic-gradient(
+                                                from 0deg,
+                                                #ff2d9b,
+                                                #7c5cff,
+                                                #22e0d2,
+                                                #c6f135,
+                                                #ff2d9b
+                                            );
+                                        "
+                                    ></div>
+                                    <div style="flex: 1">
+                                        <div style="font-weight: 700">
+                                            PRISM is free and open source
+                                        </div>
+                                        <div style="font-size: 13px; color: #b7a9cc">
+                                            GPL-3.0 · Built with the Web Audio API · Star us on
+                                            GitHub
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </sc-if>
+                    </div>
+                </div>
+
+                <!-- MINI PLAYER -->
+                <div
+                    style="
+                        height: 76px;
+                        flex: none;
+                        display: flex;
+                        align-items: center;
+                        gap: 18px;
+                        padding: 0 20px;
+                        background: rgba(10, 6, 18, 0.7);
+                        backdrop-filter: blur(20px);
+                        border-top: 1px solid rgba(255, 255, 255, 0.07);
+                    "
+                >
+                    <div
+                        onClick="{{ goNow }}"
+                        style="
+                            display: flex;
+                            align-items: center;
+                            gap: 13px;
+                            width: 250px;
+                            cursor: pointer;
+                        "
+                    >
+                        <div
+                            style="width:48px;height:48px;border-radius:10px;background:{{ art }};flex:none;position:relative;overflow:hidden;"
+                        >
+                            <div
+                                style="
+                                    position: absolute;
+                                    inset: 0;
+                                    background: linear-gradient(
+                                        140deg,
+                                        rgba(255, 255, 255, 0.25),
+                                        transparent 50%
+                                    );
+                                "
+                            ></div>
+                        </div>
+                        <div style="min-width: 0">
+                            <div
+                                style="
+                                    font-weight: 700;
+                                    font-size: 14px;
+                                    overflow: hidden;
+                                    text-overflow: ellipsis;
+                                    white-space: nowrap;
+                                "
+                            >
+                                {{ title }}
+                            </div>
+                            <div
+                                style="
+                                    font-size: 12px;
+                                    color: #8b7ba6;
+                                    overflow: hidden;
+                                    text-overflow: ellipsis;
+                                    white-space: nowrap;
+                                "
+                            >
+                                {{ artist }}
+                            </div>
+                        </div>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 16px">
+                        <svg
+                            onClick="{{ prev }}"
+                            style="cursor: pointer"
+                            width="20"
+                            height="20"
+                            viewBox="0 0 24 24"
+                            fill="#C9BBDD"
+                        >
+                            <path d="M6 6h2v12H6zM20 6v12l-9-6z" />
+                        </svg>
+                        <div
+                            onClick="{{ togglePlay }}"
+                            style="
+                                width: 42px;
+                                height: 42px;
+                                border-radius: 50%;
+                                background: #f3ecfb;
+                                display: flex;
+                                align-items: center;
+                                justify-content: center;
+                                cursor: pointer;
+                            "
+                        >
+                            <sc-if value="{{ playing }}" hint-placeholder-val="{{ false }}"
+                                ><svg width="20" height="20" viewBox="0 0 24 24" fill="#0C0714">
+                                    <rect x="6" y="5" width="4" height="14" rx="1" />
+                                    <rect x="14" y="5" width="4" height="14" rx="1" /></svg
+                            ></sc-if>
+                            <sc-if value="{{ paused }}" hint-placeholder-val="{{ true }}"
+                                ><svg width="20" height="20" viewBox="0 0 24 24" fill="#0C0714">
+                                    <path d="M8 5v14l11-7z" /></svg
+                            ></sc-if>
+                        </div>
+                        <svg
+                            onClick="{{ next }}"
+                            style="cursor: pointer"
+                            width="20"
+                            height="20"
+                            viewBox="0 0 24 24"
+                            fill="#C9BBDD"
+                        >
+                            <path d="M16 6h2v12h-2zM4 6l9 6-9 6z" />
+                        </svg>
+                    </div>
+                    <div style="flex: 1; height: 44px">
+                        <canvas ref="{{ miniWaveRef }}" style="width: 100%; height: 100%"></canvas>
+                    </div>
+                    <div
+                        onClick="{{ openEq }}"
+                        style="
+                            display: flex;
+                            align-items: center;
+                            gap: 7px;
+                            cursor: pointer;
+                            font-size: 12px;
+                            font-weight: 700;
+                            color: #ff2d9b;
+                            padding: 8px 14px;
+                            border: 1px solid rgba(255, 45, 155, 0.35);
+                            border-radius: 20px;
+                        "
+                    >
+                        <svg
+                            width="14"
+                            height="14"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="#FF2D9B"
+                            stroke-width="2"
+                        >
+                            <path d="M4 8h10M18 8h2M4 16h2M10 16h10M14 6v4M8 14v4" />
+                        </svg>
+                        EQ
+                    </div>
+                </div>
+
+                <!-- EQ OVERLAY -->
+                <sc-if value="{{ eqOpen }}" hint-placeholder-val="{{ false }}">
+                    <div
+                        onClick="{{ closeEq }}"
+                        style="
+                            position: absolute;
+                            inset: 0;
+                            z-index: 50;
+                            background: rgba(6, 4, 12, 0.72);
+                            backdrop-filter: blur(6px);
+                            display: flex;
+                            align-items: flex-end;
+                            justify-content: center;
+                            animation: floatUp 0.25s ease;
+                        "
+                    >
+                        <div
+                            onClick="{{ stop }}"
+                            style="
+                                width: 100%;
+                                max-width: 860px;
+                                margin: 0 auto;
+                                background: linear-gradient(180deg, #1b1030, #120a20);
+                                border: 1px solid rgba(255, 255, 255, 0.1);
+                                border-radius: 22px 22px 0 0;
+                                padding: 26px 32px 34px;
+                                box-shadow: 0 -30px 80px -20px rgba(0, 0, 0, 0.8);
+                            "
+                        >
+                            <div
+                                style="
+                                    display: flex;
+                                    align-items: center;
+                                    justify-content: space-between;
+                                    margin-bottom: 6px;
+                                "
+                            >
+                                <div>
+                                    <div
+                                        style="
+                                            font-family: 'Hanken Grotesk';
+                                            font-weight: 900;
+                                            font-size: 24px;
+                                        "
+                                    >
+                                        10-Band Equalizer
+                                    </div>
+                                    <div style="font-size: 13px; color: #8b7ba6">
+                                        Graphic EQ · applied live to playback
+                                    </div>
+                                </div>
+                                <div style="display: flex; align-items: center; gap: 14px">
+                                    <div
+                                        onClick="{{ resetEq }}"
+                                        style="
+                                            cursor: pointer;
+                                            font-size: 13px;
+                                            font-weight: 700;
+                                            color: #8b7ba6;
+                                            padding: 8px 14px;
+                                            border: 1px solid rgba(255, 255, 255, 0.14);
+                                            border-radius: 20px;
+                                        "
+                                    >
+                                        Reset
+                                    </div>
+                                    <div
+                                        onClick="{{ closeEq }}"
+                                        style="
+                                            cursor: pointer;
+                                            width: 34px;
+                                            height: 34px;
+                                            border-radius: 50%;
+                                            background: rgba(255, 255, 255, 0.08);
+                                            display: flex;
+                                            align-items: center;
+                                            justify-content: center;
+                                        "
+                                    >
+                                        <svg
+                                            width="15"
+                                            height="15"
+                                            viewBox="0 0 14 14"
+                                            stroke="#F3ECFB"
+                                            stroke-width="1.8"
+                                        >
+                                            <path d="M1 1l12 12M13 1L1 13" />
+                                        </svg>
+                                    </div>
+                                </div>
+                            </div>
+                            <div
+                                style="
+                                    display: flex;
+                                    gap: 8px;
+                                    flex-wrap: wrap;
+                                    margin: 18px 0 24px;
+                                "
+                            >
+                                <sc-for list="{{ presetChips }}" as="p" hint-placeholder-count="8"
+                                    ><div onClick="{{ p.go }}" style="{{ p.style }}">
+                                        {{ p.label }}
+                                    </div></sc-for
+                                >
+                            </div>
+                            <div style="display: flex; justify-content: space-between; gap: 6px">
+                                <sc-for list="{{ bands }}" as="b" hint-placeholder-count="10">
+                                    <div
+                                        style="
+                                            flex: 1;
+                                            display: flex;
+                                            flex-direction: column;
+                                            align-items: center;
+                                            gap: 10px;
+                                        "
+                                    >
+                                        <div
+                                            style="font-family:'Space Mono';font-size:11px;color:{{ b.valColor }};font-weight:700;"
+                                        >
+                                            {{ b.valLabel }}
+                                        </div>
+                                        <div
+                                            onPointerDown="{{ b.down }}"
+                                            onPointerMove="{{ b.move }}"
+                                            style="
+                                                position: relative;
+                                                width: 100%;
+                                                max-width: 34px;
+                                                height: 190px;
+                                                background: rgba(0, 0, 0, 0.35);
+                                                border-radius: 20px;
+                                                cursor: ns-resize;
+                                                overflow: hidden;
+                                                touch-action: none;
+                                            "
+                                        >
+                                            <div
+                                                style="
+                                                    position: absolute;
+                                                    left: 50%;
+                                                    top: 50%;
+                                                    width: 2px;
+                                                    height: 1px;
+                                                    background: rgba(255, 255, 255, 0.15);
+                                                    transform: translateX(-50%);
+                                                "
+                                            ></div>
+                                            <div style="{{ b.fillStyle }}"></div>
+                                            <div style="{{ b.knobStyle }}"></div>
+                                        </div>
+                                        <div
+                                            style="
+                                                font-family: 'Space Mono';
+                                                font-size: 11px;
+                                                color: #8b7ba6;
+                                            "
+                                        >
+                                            {{ b.freq }}
+                                        </div>
+                                    </div>
+                                </sc-for>
+                            </div>
+                        </div>
+                    </div>
+                </sc-if>
+            </div>
+        </x-dc>
+        <script
+            type="text/x-dc"
+            data-dc-script
+            data-props='{"$preview":{"width":1180,"height":760}}'
+        >
+            class Component extends DCLogic {
+              bigWaveRef = React.createRef();
+              specRef = React.createRef();
+              miniWaveRef = React.createRef();
+              audioRef = React.createRef();
+              fileRef = React.createRef();
+              curTimeRef = React.createRef();
+
+              state = {
+                screen: 'now', playing: false, eqOpen: false, cur: 0,
+                eq: [0,0,0,0,0,0,0,0,0,0], preset: 'Flat', volume: 0.8,
+                shuffle: false, repeat: false, hasReal: false,
+                libTab: 'Playlists', spotifyConnected: false,
+                tog: { gapless: true, crossfade: false, normalize: true, exclusive: false }
+              };
+              t = 0; progress = 0.28; mags = new Array(10).fill(0.15); wave = new Array(160).fill(0); energy = 0.05; dragging = -1;
+              centerFreqs = [32,64,125,250,500,1000,2000,4000,8000,16000];
+
+              TRACKS = [
+                { title:'Nocturne in E-flat', artist:'Yuki Tanaka', composer:'Frédéric Chopin', album:'Reveries', dur:344, grad:'linear-gradient(140deg,#FF2D9B,#7C5CFF)' },
+                { title:'Midnight Circuits', artist:'VOID SIGNAL', composer:'A. Moreau', album:'Neon Depths', dur:252, grad:'linear-gradient(140deg,#22E0D2,#7C5CFF)' },
+                { title:'Copper Light', artist:'Ilsa Bergström', composer:'Ilsa Bergström', album:'Slow Machines', dur:298, grad:'linear-gradient(140deg,#FF6B2C,#FF2D9B)' },
+                { title:'Grand Fugue', artist:'Berlin Philharmonic', composer:'L. van Beethoven', album:'Late Quartets', dur:611, grad:'linear-gradient(140deg,#C6F135,#22E0D2)' },
+                { title:'Amber Static', artist:'Halogen', composer:'M. Okafor', album:'Warm Noise', dur:224, grad:'linear-gradient(140deg,#7C5CFF,#FF2D9B)' }
+              ];
+              FREQS = ['32','64','125','250','500','1k','2k','4k','8k','16k'];
+              PRESETS = {
+                Flat:[0,0,0,0,0,0,0,0,0,0], Rock:[5,4,2,0,-1,0,2,3,4,4], Pop:[-1,1,3,4,3,1,0,-1,-1,-1],
+                Jazz:[4,3,1,2,-1,-1,0,1,3,4], Classical:[4,3,2,0,0,0,-1,-1,2,3], 'Bass Boost':[7,6,5,3,1,0,0,0,0,0],
+                Vocal:[-2,-1,0,2,4,5,4,2,0,-1], Electronic:[5,4,1,0,-2,1,0,2,4,5]
+              };
+
+              componentDidMount() {
+                this.last = performance.now();
+                this.raf = requestAnimationFrame(this.loop);
+              }
+              componentWillUnmount() { cancelAnimationFrame(this.raf); }
+
+              curTrack() {
+                const t = this.TRACKS[this.state.cur];
+                if (this.state.hasReal && this.realName) return { ...t, title:this.realName, artist:this.realArtist||'Local File', composer:this.realComposer||'Unknown', album:'Local Files' };
+                return t;
+              }
+              dur() { if (this.state.hasReal && this.audioRef.current && this.audioRef.current.duration) return this.audioRef.current.duration; return this.curTrack().dur; }
+              fmt(s) { s = Math.max(0, Math.floor(s||0)); return Math.floor(s/60) + ':' + String(s%60).padStart(2,'0'); }
+
+              fit(c) {
+                if (!c) return null;
+                const dpr = window.devicePixelRatio || 1;
+                const w = c.clientWidth, h = c.clientHeight;
+                if (w === 0 || h === 0) return null;
+                if (c.width !== Math.round(w*dpr) || c.height !== Math.round(h*dpr)) { c.width = Math.round(w*dpr); c.height = Math.round(h*dpr); }
+                const g = c.getContext('2d'); g.setTransform(dpr,0,0,dpr,0,0);
+                g.clearRect(0,0,w,h); return { g, w, h };
+              }
+
+              loop = (now) => {
+                const dt = Math.min(0.05, (now - this.last)/1000); this.last = now;
+                this.t += dt;
+                const targetE = this.state.playing ? 1 : 0.04;
+                this.energy += (targetE - this.energy) * Math.min(1, dt*4);
+
+                // gather data
+                if (this.analyser) {
+                  this.analyser.getByteFrequencyData(this.freqData);
+                  this.analyser.getByteTimeDomainData(this.timeData);
+                  const n = this.freqData.length;
+                  for (let i=0;i<10;i++){
+                    const lo = Math.floor(Math.pow(n, i/10)), hi = Math.max(lo+1, Math.floor(Math.pow(n,(i+1)/10)));
+                    let s=0,c=0; for(let k=lo;k<hi&&k<n;k++){s+=this.freqData[k];c++;}
+                    const v = c? (s/c)/255 : 0;
+                    this.mags[i] += (v - this.mags[i]) * 0.4;
+                  }
+                  for (let i=0;i<this.wave.length;i++){ const idx=Math.floor(i/this.wave.length*this.timeData.length); this.wave[i]=(this.timeData[idx]-128)/128; }
+                } else {
+                  for (let i=0;i<10;i++){
+                    const base = 0.28 + 0.72*Math.abs(Math.sin(this.t*(0.8+i*0.33)+i*1.3))*(0.7+0.3*Math.sin(this.t*2.3+i));
+                    const eqF = Math.max(0.25, Math.min(2.2, Math.pow(10, this.state.eq[i]/20)));
+                    const target = Math.min(1, base*this.energy*eqF);
+                    this.mags[i] += (target - this.mags[i]) * 0.18;
+                  }
+                  for (let i=0;i<this.wave.length;i++){
+                    const x=i/this.wave.length;
+                    let v=0.55*Math.sin(x*Math.PI*2*3+this.t*4)+0.28*Math.sin(x*Math.PI*2*7+this.t*6.5)+0.16*Math.sin(x*Math.PI*2*13+this.t*9);
+                    this.wave[i]=v*this.energy;
+                  }
+                }
+
+                // progress
+                if (this.state.playing) {
+                  if (this.state.hasReal && this.audioRef.current && this.audioRef.current.duration) {
+                    this.progress = this.audioRef.current.currentTime / this.audioRef.current.duration;
+                  } else {
+                    this.progress += dt / this.dur();
+                    if (this.progress >= 1) { this.progress = 0; this.next(); }
+                  }
+                  if (this.curTimeRef.current) this.curTimeRef.current.textContent = this.fmt(this.progress*this.dur());
+                }
+
+                this.drawWave(this.bigWaveRef.current, true);
+                this.drawWave(this.miniWaveRef.current, false);
+                this.drawSpec(this.specRef.current);
+                this.raf = requestAnimationFrame(this.loop);
+              };
+
+              drawWave(c, big) {
+                const f = this.fit(c); if (!f) return; const {g,w,h}=f;
+                const mid = h/2, amp = h*0.42, prog = this.progress;
+                const grad = g.createLinearGradient(0,0,w,0);
+                grad.addColorStop(0,'#FF2D9B'); grad.addColorStop(0.5,'#7C5CFF'); grad.addColorStop(1,'#22E0D2');
+                const N = this.wave.length;
+                // played background
+                if (big) { g.fillStyle='rgba(255,45,155,.08)'; g.fillRect(0,0,w*prog,h); }
+                g.lineWidth = big?2.5:2; g.strokeStyle=grad; g.shadowColor='#FF2D9B'; g.shadowBlur=big?14:6;
+                g.beginPath();
+                for(let i=0;i<N;i++){ const x=i/(N-1)*w; const y=mid+this.wave[i]*amp; i?g.lineTo(x,y):g.moveTo(x,y); }
+                g.stroke(); g.shadowBlur=0;
+                if (big){ const px=w*prog; g.fillStyle='#fff'; g.shadowColor='#fff'; g.shadowBlur=12; g.beginPath(); g.arc(px,mid+this.wave[Math.floor(prog*(N-1))]*amp,4,0,7); g.fill(); g.shadowBlur=0; }
+              }
+
+              drawSpec(c) {
+                const f = this.fit(c); if (!f) return; const {g,w,h}=f;
+                const n=10, gap=w*0.02, bw=(w-gap*(n-1))/n;
+                for(let i=0;i<n;i++){
+                  const x=i*(bw+gap); const bh=Math.max(3, this.mags[i]*h);
+                  const grad=g.createLinearGradient(0,h,0,h-bh);
+                  grad.addColorStop(0,'#FF2D9B'); grad.addColorStop(0.5,'#7C5CFF'); grad.addColorStop(1,'#22E0D2');
+                  g.fillStyle=grad; this.rr(g,x,h-bh,bw,bh,Math.min(6,bw/2)); g.fill();
+                  g.fillStyle='rgba(255,255,255,.12)'; this.rr(g,x,0,bw,h,Math.min(6,bw/2)); g.fill();
+                  const grad2=g.createLinearGradient(0,h,0,h-bh); grad2.addColorStop(0,'#FF2D9B'); grad2.addColorStop(0.5,'#7C5CFF'); grad2.addColorStop(1,'#22E0D2');
+                  g.fillStyle=grad2; this.rr(g,x,h-bh,bw,bh,Math.min(6,bw/2)); g.fill();
+                }
+              }
+              rr(g,x,y,w,h,r){ g.beginPath(); g.moveTo(x+r,y); g.arcTo(x+w,y,x+w,y+h,r); g.arcTo(x+w,y+h,x,y+h,r); g.arcTo(x,y+h,x,y,r); g.arcTo(x,y,x+w,y,r); g.closePath(); }
+
+              // ---- audio ----
+              ensureCtx() {
+                if (this.ctx) return;
+                const AC = window.AudioContext || window.webkitAudioContext;
+                this.ctx = new AC();
+                this.srcNode = this.ctx.createMediaElementSource(this.audioRef.current);
+                this.filters = this.centerFreqs.map((fq)=>{ const b=this.ctx.createBiquadFilter(); b.type='peaking'; b.frequency.value=fq; b.Q.value=1.1; b.gain.value=0; return b; });
+                let node=this.srcNode; this.filters.forEach(fl=>{node.connect(fl);node=fl;});
+                this.analyser=this.ctx.createAnalyser(); this.analyser.fftSize=2048;
+                node.connect(this.analyser); this.analyser.connect(this.ctx.destination);
+                this.freqData=new Uint8Array(this.analyser.frequencyBinCount);
+                this.timeData=new Uint8Array(this.analyser.fftSize);
+                this.applyEq();
+              }
+              applyEq() { if (this.filters) this.filters.forEach((f,i)=>{ f.gain.value = this.state.eq[i]; }); }
+
+              onPick = (e) => { const files=[...(e.target.files||[])]; if (files.length) this.loadFile(files[0]); };
+              openFile = () => { this.fileRef.current && this.fileRef.current.click(); };
+              onDragOver = (e) => { e.preventDefault(); };
+              onDrop = (e) => { e.preventDefault(); const f=e.dataTransfer&&e.dataTransfer.files&&e.dataTransfer.files[0]; if(f) this.loadFile(f); };
+              loadFile(file) {
+                const a=this.audioRef.current; a.src=URL.createObjectURL(file); a.volume=this.state.volume;
+                this.ensureCtx(); if (this.ctx.state==='suspended') this.ctx.resume();
+                this.realName = file.name.replace(/\.[^.]+$/,''); this.realArtist='Local File'; this.realComposer='—';
+                a.play().catch(()=>{});
+                this.progress=0; this.setState({ playing:true, hasReal:true, screen:'now' });
+              }
+
+              togglePlay = () => {
+                const next=!this.state.playing;
+                if (this.state.hasReal && this.audioRef.current) { if (this.ctx&&this.ctx.state==='suspended') this.ctx.resume(); next?this.audioRef.current.play().catch(()=>{}):this.audioRef.current.pause(); }
+                this.setState({ playing:next });
+              };
+              next = () => { if(this.state.hasReal&&this.audioRef.current) this.audioRef.current.pause(); this.progress=0; this.setState(s=>({ cur:(s.cur+1)%this.TRACKS.length, hasReal:false, playing:true })); };
+              prev = () => { if(this.state.hasReal&&this.audioRef.current) this.audioRef.current.pause(); this.progress=0; this.setState(s=>({ cur:(s.cur-1+this.TRACKS.length)%this.TRACKS.length, hasReal:false, playing:true })); };
+              playTrack = (i) => { if(this.state.hasReal&&this.audioRef.current) this.audioRef.current.pause(); this.progress=0; this.setState({ cur:i%this.TRACKS.length, hasReal:false, playing:true, screen:'now' }); };
+              seek = (e) => { const r=e.currentTarget.getBoundingClientRect(); const f=Math.max(0,Math.min(1,(e.clientX-r.left)/r.width)); this.progress=f; if(this.state.hasReal&&this.audioRef.current&&this.audioRef.current.duration) this.audioRef.current.currentTime=f*this.audioRef.current.duration; };
+              setVol = (e) => { const r=e.currentTarget.getBoundingClientRect(); const v=Math.max(0,Math.min(1,(e.clientX-r.left)/r.width)); if(this.audioRef.current) this.audioRef.current.volume=v; this.setState({ volume:v }); };
+
+              toggleShuffle=()=>this.setState(s=>({shuffle:!s.shuffle}));
+              toggleRepeat=()=>this.setState(s=>({repeat:!s.repeat}));
+              openEq=()=>this.setState({eqOpen:true});
+              closeEq=()=>this.setState({eqOpen:false});
+              stop=(e)=>e.stopPropagation();
+              goNow=()=>this.setState({screen:'now'});
+              resetEq=()=>{ this.setState({eq:[0,0,0,0,0,0,0,0,0,0],preset:'Flat'}, this.applyEq); };
+              setPreset=(name)=>{ this.setState({eq:[...this.PRESETS[name]],preset:name}, this.applyEq); };
+              connectSpotify=()=>this.setState({spotifyConnected:true});
+
+              bandFromEvent(i,e){ const r=e.currentTarget.getBoundingClientRect(); let t=(e.clientY-r.top)/r.height; t=Math.max(0,Math.min(1,t)); const v=Math.round(((1-t)*24-12)*2)/2; const eq=[...this.state.eq]; eq[i]=v; this.setState({eq,preset:'Custom'},this.applyEq); }
+              bandDown=(i)=>(e)=>{ e.currentTarget.setPointerCapture(e.pointerId); this.dragging=i; this.bandFromEvent(i,e); };
+              bandMove=(i)=>(e)=>{ if(this.dragging===i) this.bandFromEvent(i,e); };
+
+              navRow(key,label,d){ const active=this.state.screen===key; return { key,label,d,active,
+                color: active?'#FF2D9B':'#7E6F97',
+                rowStyle:'display:flex;align-items:center;gap:12px;padding:11px 12px;border-radius:11px;cursor:pointer;font-size:14px;font-weight:600;letter-spacing:.2px;transition:all .15s;user-select:none;'+(active?'background:linear-gradient(90deg,rgba(255,45,155,.2),rgba(124,92,255,.08));color:#fff;box-shadow:inset 0 0 0 1px rgba(255,45,155,.35);':'color:#9384AB;'),
+                go:()=>this.setState({screen:key}) }; }
+
+              chip(label,active,onClick){ return { label, style:'cursor:pointer;font-size:13px;font-weight:700;padding:8px 15px;border-radius:20px;transition:all .15s;user-select:none;'+(active?'background:#FF2D9B;color:#0C0714;':'background:rgba(255,255,255,.05);color:#B7A9CC;border:1px solid rgba(255,255,255,.08);'), go:onClick }; }
+
+              renderVals() {
+                const ct = this.curTrack();
+                const grads = ['linear-gradient(140deg,#FF2D9B,#7C5CFF)','linear-gradient(140deg,#22E0D2,#7C5CFF)','linear-gradient(140deg,#FF6B2C,#FF2D9B)','linear-gradient(140deg,#C6F135,#22E0D2)','linear-gradient(140deg,#7C5CFF,#FF2D9B)','linear-gradient(140deg,#22E0D2,#C6F135)'];
+
+                const bands = this.centerFreqs.map((fq,i)=>{
+                  const v=this.state.eq[i]; const pct=(v+12)/24; const topPct=(1-pct)*100;
+                  const isPos=v>=0; const centerY=50;
+                  const fillTop=isPos?topPct:centerY, fillH=Math.abs((1-pct)*100-centerY);
+                  return { i, freq:this.FREQS[i], val:v,
+                    valLabel:(v>0?'+':'')+v, valColor:v>0?'#C6F135':(v<0?'#FF6B2C':'#8B7BA6'),
+                    fillStyle:'position:absolute;left:0;right:0;top:'+fillTop+'%;height:'+fillH+'%;background:linear-gradient(180deg,#FF2D9B,#7C5CFF);opacity:.55;',
+                    knobStyle:'position:absolute;left:50%;top:'+topPct+'%;transform:translate(-50%,-50%);width:26px;height:12px;border-radius:6px;background:#F3ECFB;box-shadow:0 2px 8px rgba(0,0,0,.5),0 0 0 2px rgba(255,45,155,.5);',
+                    down:this.bandDown(i), move:this.bandMove(i) };
+                });
+
+                const presetChips = Object.keys(this.PRESETS).map(name=>this.chip(name, this.state.preset===name, ()=>this.setPreset(name)));
+                const libTabs = ['Playlists','Artists','Albums','Songs'].map(t=>this.chip(t, this.state.libTab===t, ()=>this.setState({libTab:t})));
+                const radioGenres = ['All','Jazz','Electronic','Classical','Ambient','News','Lo-fi','Rock'].map((g,i)=>this.chip(g, i===0, ()=>{}));
+
+                const playlists = [
+                  {name:'Late Night Focus',count:42,grad:grads[0]},{name:'Vinyl Warmth',count:28,grad:grads[2]},
+                  {name:'Symphonies',count:64,grad:grads[3]},{name:'Synth Horizons',count:37,grad:grads[1]},
+                  {name:'Morning Coffee',count:19,grad:grads[5]},{name:'Deep Work',count:53,grad:grads[4]}
+                ].map(p=>({...p, play:()=>this.playTrack(0)}));
+
+                const songRows = this.TRACKS.map((t,i)=>({ num:String(i+1).padStart(2,'0'), title:t.title, artist:t.artist, composer:t.composer, grad:t.grad, dur:this.fmt(t.dur), play:()=>this.playTrack(i),
+                  rowStyle:'display:flex;gap:16px;align-items:center;padding:11px 14px;cursor:pointer;transition:background .15s;'+(i?'border-top:1px solid rgba(255,255,255,.05);':'') }));
+
+                const discoverRows = [
+                  { title:'New for you', items:[{name:'Reveries',artist:'Yuki Tanaka'},{name:'Neon Depths',artist:'VOID SIGNAL'},{name:'Slow Machines',artist:'Ilsa Bergström'},{name:'Warm Noise',artist:'Halogen'},{name:'Late Quartets',artist:'Berlin Phil.'}] },
+                  { title:'Because you played Chopin', items:[{name:'Préludes',artist:'C. Debussy'},{name:'Gymnopédies',artist:'E. Satie'},{name:'Nocturnes',artist:'J. Field'},{name:'Études',artist:'F. Liszt'},{name:'Barcarolle',artist:'G. Fauré'}] },
+                  { title:'Trending in Electronic', items:[{name:'Voltage',artist:'Kessler'},{name:'Halcyon',artist:'Aire'},{name:'Datastream',artist:'Nulltype'},{name:'Prism',artist:'Meridian'},{name:'Overdrive',artist:'FM-88'}] }
+                ].map(row=>({ title:row.title, items:row.items.map((a,i)=>({...a, grad:grads[i%grads.length], play:()=>this.playTrack(i)})) }));
+
+                const stations = [
+                  {name:'SomaFM Groove Salad',genre:'Ambient',kbps:256,grad:grads[1]},{name:'FIP Jazz',genre:'Jazz',kbps:192,grad:grads[3]},
+                  {name:'Nightwave Plaza',genre:'Vaporwave',kbps:128,grad:grads[0]},{name:'Radio Paradise',genre:'Eclectic',kbps:320,grad:grads[2]},
+                  {name:'KEXP Seattle',genre:'Indie',kbps:256,grad:grads[4]},{name:'Classical KUSC',genre:'Classical',kbps:192,grad:grads[5]}
+                ].map(r=>({...r, play:()=>this.setState({playing:true})}));
+
+                const localFiles = [
+                  {name:'01 - Nocturne in E-flat.flac',artist:'Yuki Tanaka',fmt:'FLAC',dur:'5:44'},
+                  {name:'Midnight Circuits.mp3',artist:'VOID SIGNAL',fmt:'MP3',dur:'4:12'},
+                  {name:'copper_light_master.wav',artist:'Ilsa Bergström',fmt:'WAV',dur:'4:58'},
+                  {name:'Beethoven - Grosse Fuge.flac',artist:'Berlin Phil.',fmt:'FLAC',dur:'10:11'},
+                  {name:'amber_static.aac',artist:'Halogen',fmt:'AAC',dur:'3:44'},
+                  {name:'warm_noise_side_b.ogg',artist:'Halogen',fmt:'OGG',dur:'6:02'}
+                ].map((l,i)=>({...l, play:()=>this.playTrack(i%this.TRACKS.length)}));
+
+                const spotifyPlaylists = [
+                  {name:'Discover Weekly',count:30,grad:grads[0]},{name:'Release Radar',count:30,grad:grads[1]},
+                  {name:'Liked Songs',count:847,grad:grads[3]},{name:'Daily Mix 1',count:50,grad:grads[2]},
+                  {name:'On Repeat',count:30,grad:grads[4]},{name:'Chill Lo-fi',count:120,grad:grads[5]}
+                ].map(p=>({...p, play:()=>this.playTrack(1)}));
+
+                const tdefs = [
+                  {key:'gapless',label:'Gapless playback',desc:'Seamless transitions between tracks'},
+                  {key:'crossfade',label:'Crossfade',desc:'Blend the end and start of songs'},
+                  {key:'normalize',label:'Volume normalization',desc:'Even out loudness across the library'},
+                  {key:'exclusive',label:'Exclusive output mode',desc:'Bit-perfect, bypass the OS mixer'}
+                ];
+                const toggles = tdefs.map(t=>{ const on=this.state.tog[t.key]; return { label:t.label, desc:t.desc,
+                  trackStyle:'width:46px;height:26px;border-radius:20px;cursor:pointer;transition:all .2s;position:relative;'+(on?'background:#FF2D9B;':'background:rgba(255,255,255,.14);'),
+                  knobStyle:'position:absolute;top:3px;left:'+(on?'23px':'3px')+';width:20px;height:20px;border-radius:50%;background:#fff;transition:left .2s;',
+                  toggle:()=>this.setState(s=>({tog:{...s.tog,[t.key]:!s.tog[t.key]}})) }; });
+
+                const vol = Math.round(this.state.volume*100);
+
+                return {
+                  navPlay:[this.navRow('now','Now Playing','M3 12h2l2-7 3 15 3-11 2 6h4')],
+                  navLib:[this.navRow('library','Library','M4 5h5v14H4zM11 5h5v14h-5zM18 6l3 12'), this.navRow('discover','Discover','M12 3a9 9 0 100 18 9 9 0 000-18zM15 9l-2 4-4 2 2-4z')],
+                  navSrc:[this.navRow('radio','Web Radio','M5 6a10 10 0 000 12M19 6a10 10 0 010 12M8 9a5 5 0 000 6M16 9a5 5 0 010 6M12 11.5a.5.5 0 100 1 .5.5 0 000-1z'), this.navRow('local','Local Files','M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z'), this.navRow('spotify','Spotify','M12 3a9 9 0 100 18 9 9 0 000-18zM7 10c3-1 7-1 10 1M8 15c2-.6 4-.4 6 .8')],
+                  settingsItem:this.navRow('settings','Settings','M4 8h10M18 8h2M4 16h2M10 16h10M14 6v4M8 14v4'),
+
+                  isNow:this.state.screen==='now', isLibrary:this.state.screen==='library', isDiscover:this.state.screen==='discover',
+                  isRadio:this.state.screen==='radio', isLocal:this.state.screen==='local', isSpotify:this.state.screen==='spotify', isSettings:this.state.screen==='settings',
+                  spotifyOff:!this.state.spotifyConnected, spotifyOn:this.state.spotifyConnected,
+
+                  title:ct.title, artist:ct.artist, composer:ct.composer, album:ct.album, albumUpper:(ct.album||'').toUpperCase(),
+                  art:ct.grad, artInitials:(ct.title||'?').slice(0,2).toUpperCase(),
+                  totalTime:this.fmt(this.dur()),
+                  playing:this.state.playing, paused:!this.state.playing,
+                  eqOpen:this.state.eqOpen,
+                  shuffleColor:this.state.shuffle?'#FF2D9B':'#8B7BA6', repeatColor:this.state.repeat?'#FF2D9B':'#8B7BA6',
+                  playBtnStyle:'width:60px;height:60px;border-radius:50%;background:linear-gradient(135deg,#FF2D9B,#FF6B2C);display:flex;align-items:center;justify-content:center;cursor:pointer;animation:pulseGlow 2.4s ease infinite;',
+                  volFillStyle:'position:absolute;left:0;top:0;height:100%;width:'+vol+'%;background:linear-gradient(90deg,#FF2D9B,#22E0D2);border-radius:20px;',
+                  dropStyle:'border:2px dashed rgba(198,241,53,.4);border-radius:20px;padding:44px 20px;text-align:center;cursor:pointer;background:rgba(198,241,53,.03);transition:all .18s;',
+
+                  freqs:this.FREQS, bands, presetChips, libTabs, radioGenres,
+                  playlists, songRows, discoverRows, stations, localFiles, spotifyPlaylists, toggles,
+                  localCount:localFiles.length,
+
+                  bigWaveRef:this.bigWaveRef, specRef:this.specRef, miniWaveRef:this.miniWaveRef,
+                  audioRef:this.audioRef, fileRef:this.fileRef, curTimeRef:this.curTimeRef,
+                  onPick:this.onPick, openFile:this.openFile, onDragOver:this.onDragOver, onDrop:this.onDrop,
+                  togglePlay:this.togglePlay, next:this.next, prev:this.prev, seek:this.seek, setVol:this.setVol,
+                  toggleShuffle:this.toggleShuffle, toggleRepeat:this.toggleRepeat,
+                  openEq:this.openEq, closeEq:this.closeEq, stop:this.stop, resetEq:this.resetEq, goNow:this.goNow,
+                  connectSpotify:this.connectSpotify
+                };
+              }
+            }
+        </script>
+    </body>
+</html>
