@@ -109,8 +109,12 @@ pub fn init(app_data_dir: PathBuf) -> Result<DbState, String> {
 }
 
 /// Applies any migration the file has not seen, tracked in SQLite's own
-/// `user_version`. Each runs in a transaction so a failure leaves the version
-/// where it was rather than half-applied.
+/// `user_version`. The version stamp is written *inside* each migration's
+/// transaction — `user_version` lives in the database header and is fully
+/// transactional — so DDL and stamp commit or roll back together. Stamping
+/// afterwards would leave a crash window where the `ALTER TABLE`s had
+/// committed but the version had not; the non-idempotent re-run then fails
+/// with "duplicate column name" on every launch and the app never boots.
 fn migrate(conn: &Connection) -> Result<(), String> {
     let mut version: i64 = conn
         .query_row("PRAGMA user_version", [], |row| row.get(0))
@@ -127,10 +131,25 @@ fn migrate(conn: &Connection) -> Result<(), String> {
         if version >= target {
             continue;
         }
-        conn.execute_batch(&format!("BEGIN; {} COMMIT;", sql))
-            .map_err(|e| format!("migration to v{}: {}", target, e))?;
-        conn.pragma_update(None, "user_version", target)
-            .map_err(|e| format!("stamp schema version {}: {}", target, e))?;
+        let result = conn.execute_batch(&format!(
+            "BEGIN; {} PRAGMA user_version = {}; COMMIT;",
+            sql, target
+        ));
+        if let Err(e) = result {
+            // The failed batch never reached its COMMIT, so its transaction
+            // is still open; close it before touching the file again.
+            let _ = conn.execute_batch("ROLLBACK;");
+            // A database wounded by the old split write (columns present,
+            // version behind) fails exactly here. The migrations are
+            // append-only ALTERs, so a duplicate column proves this one
+            // already ran — adopt it rather than refuse to boot forever.
+            if e.to_string().contains("duplicate column name") {
+                conn.pragma_update(None, "user_version", target)
+                    .map_err(|e| format!("stamp schema version {}: {}", target, e))?;
+            } else {
+                return Err(format!("migration to v{}: {}", target, e));
+            }
+        }
         version = target;
     }
 
@@ -351,6 +370,38 @@ mod tests {
         assert_eq!(title, "A");
         assert_eq!(track_number, None);
 
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_database_wounded_by_the_old_split_stamp_still_boots() {
+        // The old code committed a migration's DDL and stamped user_version
+        // as a separate write; a crash between the two left the columns
+        // present with the version behind, and every later launch then died
+        // on "duplicate column name" — permanently unbootable. Such a file
+        // must be adopted, not refused.
+        let dir = temp_dir("wounded");
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        {
+            let conn = Connection::open(dir.join("janis.db")).expect("open");
+            conn.execute_batch(SCHEMA).expect("v1 schema");
+            // Migration to v2 fully applied…
+            conn.execute_batch(MIGRATIONS[0]).expect("v2 ddl");
+            // …but the crash landed before the version stamp.
+            conn.pragma_update(None, "user_version", 1).expect("stamp");
+        }
+
+        let db = init(dir.clone()).expect("init must adopt the applied migration");
+        let conn = db.lock();
+        let version: i64 = conn
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .expect("read version");
+        assert_eq!(version, SCHEMA_VERSION);
+        assert!(
+            columns(&conn, "tracks").contains(&"loudness_lufs".to_string()),
+            "the migrations after the adopted one still run"
+        );
         drop(conn);
         let _ = std::fs::remove_dir_all(&dir);
     }

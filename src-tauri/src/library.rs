@@ -344,9 +344,20 @@ fn upsert_track(
     Ok(!existed)
 }
 
+/// Files read per database visit during a scan. The walk and the `lofty`
+/// probes are the slow part and run without the lock; each flush then holds
+/// it only for a burst of upserts.
+const SCAN_BATCH: usize = 64;
+
 /// Walks `folder` and upserts every audio file found under it.
-fn scan_folder_into(conn: &rusqlite::Connection, folder_id: i64, folder: &Path) -> ScanReport {
+///
+/// Deliberately does *not* hold the database mutex across the walk: the
+/// audio engine thread takes the same mutex for its short loudness reads and
+/// writes, and a multi-minute walk holding it would starve the engine —
+/// silence and a frozen transport for the duration of the scan.
+fn scan_folder(db: &DbState, folder_id: i64, folder: &Path) -> ScanReport {
     let mut report = ScanReport::default();
+    let mut batch: Vec<(String, ScannedFile)> = Vec::with_capacity(SCAN_BATCH);
     for entry in WalkDir::new(folder)
         .follow_links(false)
         .into_iter()
@@ -358,41 +369,115 @@ fn scan_folder_into(conn: &rusqlite::Connection, folder_id: i64, folder: &Path) 
             continue;
         }
         match read_metadata(path) {
-            Ok(meta) => match upsert_track(conn, Some(folder_id), &path.to_string_lossy(), &meta) {
-                Ok(true) => report.added += 1,
-                Ok(false) => report.updated += 1,
-                Err(e) => {
-                    log::warn!("{}", e);
-                    report.skipped += 1;
+            Ok(meta) => {
+                batch.push((path.to_string_lossy().into_owned(), meta));
+                if batch.len() >= SCAN_BATCH {
+                    flush_batch(db, Some(folder_id), &mut batch, &mut report);
                 }
-            },
+            }
             Err(e) => {
                 log::warn!("{}", e);
                 report.skipped += 1;
             }
         }
     }
+    flush_batch(db, Some(folder_id), &mut batch, &mut report);
     report
 }
 
-/// Deletes rows whose file vanished from disk. Returns the number removed.
-fn prune_missing(conn: &rusqlite::Connection) -> Result<usize, String> {
-    let paths: Vec<(i64, String)> = conn
-        .prepare("SELECT id, path FROM tracks")
-        .and_then(|mut stmt| {
-            stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
-                .collect()
-        })
-        .map_err(|e| format!("list track paths: {}", e))?;
-    let mut removed = 0;
-    for (id, path) in paths {
-        if !Path::new(&path).exists() {
-            conn.execute("DELETE FROM tracks WHERE id = ?1", [id])
-                .map_err(|e| format!("prune track {}: {}", path, e))?;
-            removed += 1;
+/// Writes one batch of scanned files, taking the lock only for the writes —
+/// and in one transaction, so the burst costs one commit rather than one per
+/// row.
+fn flush_batch(
+    db: &DbState,
+    folder_id: Option<i64>,
+    batch: &mut Vec<(String, ScannedFile)>,
+    report: &mut ScanReport,
+) {
+    if batch.is_empty() {
+        return;
+    }
+    let conn = db.lock();
+    let tx = match conn.unchecked_transaction() {
+        Ok(tx) => tx,
+        Err(e) => {
+            log::warn!("scan batch transaction: {}", e);
+            report.skipped += batch.drain(..).count();
+            return;
+        }
+    };
+    for (path, meta) in batch.drain(..) {
+        match upsert_track(&tx, folder_id, &path, &meta) {
+            Ok(true) => report.added += 1,
+            Ok(false) => report.updated += 1,
+            Err(e) => {
+                log::warn!("{}", e);
+                report.skipped += 1;
+            }
         }
     }
-    Ok(removed)
+    if let Err(e) = tx.commit() {
+        log::warn!("scan batch commit: {}", e);
+    }
+}
+
+/// Deletes rows whose file vanished from disk. Returns the number removed.
+///
+/// "Vanished" requires the place the file lived to still be reachable: a
+/// track is only pruned when its watched folder's root (or, for an ad-hoc
+/// import, its parent directory) is a directory right now and the file is
+/// not in it. Without that guard, a rescan with an external drive ejected
+/// read every row as missing and silently deleted the whole library — along
+/// with the loudness measurements a rescan can never rebuild.
+fn prune_missing(db: &DbState) -> Result<usize, String> {
+    let (tracks, folders) = {
+        let conn = db.lock();
+        let tracks: Vec<(i64, Option<i64>, String)> = conn
+            .prepare("SELECT id, folder_id, path FROM tracks")
+            .and_then(|mut stmt| {
+                stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?
+                    .collect()
+            })
+            .map_err(|e| format!("list track paths: {}", e))?;
+        let folders: Vec<(i64, String)> = conn
+            .prepare("SELECT id, path FROM watched_folders")
+            .and_then(|mut stmt| {
+                stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+                    .collect()
+            })
+            .map_err(|e| format!("list folders: {}", e))?;
+        (tracks, folders)
+    };
+
+    // The filesystem checks run without the lock — stat over a big library
+    // can be slow, and the engine thread shares the mutex.
+    let reachable: std::collections::HashMap<i64, bool> = folders
+        .into_iter()
+        .map(|(id, path)| (id, Path::new(&path).is_dir()))
+        .collect();
+    let doomed: Vec<i64> = tracks
+        .into_iter()
+        .filter(|(_, folder_id, path)| {
+            let path = Path::new(path);
+            let root_reachable = match folder_id {
+                Some(folder_id) => reachable.get(folder_id).copied().unwrap_or(false),
+                None => path.parent().is_some_and(Path::is_dir),
+            };
+            root_reachable && !path.exists()
+        })
+        .map(|(id, _, _)| id)
+        .collect();
+
+    let conn = db.lock();
+    let tx = conn
+        .unchecked_transaction()
+        .map_err(|e| format!("prune transaction: {}", e))?;
+    for id in &doomed {
+        tx.execute("DELETE FROM tracks WHERE id = ?1", [id])
+            .map_err(|e| format!("prune track {}: {}", id, e))?;
+    }
+    tx.commit().map_err(|e| format!("prune commit: {}", e))?;
+    Ok(doomed.len())
 }
 
 #[cfg(test)]
@@ -609,6 +694,88 @@ mod tests {
     }
 
     #[test]
+    fn an_absurdly_large_embedded_cover_is_skipped() {
+        use lofty::config::WriteOptions;
+        use lofty::picture::{MimeType, Picture};
+        use lofty::tag::{Tag, TagType};
+
+        let dir = std::env::temp_dir().join("janis-cover-test");
+        let path = dir.join("huge-art.wav");
+        write_wav(&path);
+
+        let mut tag = Tag::new(TagType::Id3v2);
+        tag.push_picture(Picture::new_unchecked(
+            PictureType::CoverFront,
+            Some(MimeType::Jpeg),
+            None,
+            vec![0u8; MAX_EMBEDDED_COVER_BYTES + 1],
+        ));
+        tag.save_to_path(&path, WriteOptions::default())
+            .expect("write oversized cover");
+
+        assert!(
+            read_cover(path.to_str().expect("utf-8 path")).is_none(),
+            "a picture past the cap must not be ballooned into an IPC payload"
+        );
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn prune_spares_tracks_whose_root_is_unreachable() {
+        let dir = std::env::temp_dir().join("janis-prune-test");
+        let _ = std::fs::remove_dir_all(&dir);
+        let db = crate::persistence::init(dir.clone()).expect("db");
+
+        let live_root = dir.join("live");
+        let kept = live_root.join("kept.wav");
+        write_wav(&kept);
+        let ejected_root = dir.join("ejected");
+
+        {
+            let conn = db.lock();
+            let folder = |id: i64, path: &Path| {
+                conn.execute(
+                    "INSERT INTO watched_folders (id, path) VALUES (?1, ?2)",
+                    rusqlite::params![id, path.to_string_lossy()],
+                )
+                .expect("insert folder");
+            };
+            folder(1, &live_root);
+            folder(2, &ejected_root);
+            let track = |folder_id: i64, path: &Path| {
+                conn.execute(
+                    "INSERT INTO tracks (folder_id, path, title, format)
+                     VALUES (?1, ?2, 'T', 'WAV')",
+                    rusqlite::params![folder_id, path.to_string_lossy()],
+                )
+                .expect("insert track");
+            };
+            track(1, &kept);
+            track(1, &live_root.join("gone.wav"));
+            track(2, &ejected_root.join("on-the-ejected-drive.wav"));
+        }
+
+        let removed = prune_missing(&db).expect("prune");
+
+        assert_eq!(
+            removed, 1,
+            "only the file that vanished from a reachable root is pruned"
+        );
+        let survivors: i64 = db
+            .lock()
+            .query_row("SELECT COUNT(*) FROM tracks", [], |r| r.get(0))
+            .expect("count");
+        assert_eq!(
+            survivors, 2,
+            "the unreachable volume's track must survive — ejecting a drive \
+             and pressing Rescan used to silently delete its whole library"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn a_disc_prefixed_name_survives_the_scanner() {
         let dir = std::env::temp_dir().join("janis-scan-test");
         let path = dir.join("2-11 Reprise.wav");
@@ -709,20 +876,23 @@ pub async fn add_watched_folder(app: AppHandle, path: String) -> Result<ScanRepo
     }
     tauri::async_runtime::spawn_blocking(move || {
         let db = app.state::<DbState>();
-        let conn = db.lock();
-        conn.execute(
-            "INSERT OR IGNORE INTO watched_folders (path) VALUES (?1)",
-            [&path],
-        )
-        .map_err(|e| format!("register folder: {}", e))?;
-        let folder_id: i64 = conn
-            .query_row(
+        // The lock covers only the registration; the walk itself runs
+        // unlocked (see `scan_folder`).
+        let folder_id: i64 = {
+            let conn = db.lock();
+            conn.execute(
+                "INSERT OR IGNORE INTO watched_folders (path) VALUES (?1)",
+                [&path],
+            )
+            .map_err(|e| format!("register folder: {}", e))?;
+            conn.query_row(
                 "SELECT id FROM watched_folders WHERE path = ?1",
                 [&path],
                 |r| r.get(0),
             )
-            .map_err(|e| format!("resolve folder id: {}", e))?;
-        Ok(scan_folder_into(&conn, folder_id, &folder))
+            .map_err(|e| format!("resolve folder id: {}", e))?
+        };
+        Ok(scan_folder(db.inner(), folder_id, &folder))
     })
     .await
     .map_err(|e| format!("scan task: {}", e))?
@@ -743,25 +913,25 @@ pub fn remove_watched_folder(db: tauri::State<'_, DbState>, folder_id: i64) -> R
 pub async fn import_files(app: AppHandle, paths: Vec<String>) -> Result<ScanReport, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let db = app.state::<DbState>();
-        let conn = db.lock();
         let mut report = ScanReport::default();
+        // Same lock discipline as a folder scan: probe files unlocked, write
+        // in bursts.
+        let mut batch: Vec<(String, ScannedFile)> = Vec::with_capacity(SCAN_BATCH);
         for p in paths {
-            let path = Path::new(&p);
-            match read_metadata(path) {
-                Ok(meta) => match upsert_track(&conn, None, &p, &meta) {
-                    Ok(true) => report.added += 1,
-                    Ok(false) => report.updated += 1,
-                    Err(e) => {
-                        log::warn!("{}", e);
-                        report.skipped += 1;
+            match read_metadata(Path::new(&p)) {
+                Ok(meta) => {
+                    batch.push((p, meta));
+                    if batch.len() >= SCAN_BATCH {
+                        flush_batch(db.inner(), None, &mut batch, &mut report);
                     }
-                },
+                }
                 Err(e) => {
                     log::warn!("{}", e);
                     report.skipped += 1;
                 }
             }
         }
+        flush_batch(db.inner(), None, &mut batch, &mut report);
         Ok(report)
     })
     .await
@@ -774,22 +944,32 @@ pub async fn import_files(app: AppHandle, paths: Vec<String>) -> Result<ScanRepo
 pub async fn rescan_library(app: AppHandle) -> Result<ScanReport, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let db = app.state::<DbState>();
-        let conn = db.lock();
-        let folders: Vec<(i64, String)> = conn
-            .prepare("SELECT id, path FROM watched_folders")
-            .and_then(|mut stmt| {
-                stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
-                    .collect()
-            })
-            .map_err(|e| format!("list folders: {}", e))?;
+        let folders: Vec<(i64, String)> = {
+            let conn = db.lock();
+            conn.prepare("SELECT id, path FROM watched_folders")
+                .and_then(|mut stmt| {
+                    stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+                        .collect()
+                })
+                .map_err(|e| format!("list folders: {}", e))?
+        };
         let mut report = ScanReport::default();
         for (id, path) in folders {
-            let sub = scan_folder_into(&conn, id, Path::new(&path));
+            let root = Path::new(&path);
+            if !root.is_dir() {
+                // An ejected drive or offline share. WalkDir would swallow
+                // the error and report an empty, healthy-looking folder;
+                // skipping it keeps the report honest, and `prune_missing`
+                // independently refuses to touch its tracks.
+                log::warn!("watched folder unreachable, skipped: {}", path);
+                continue;
+            }
+            let sub = scan_folder(db.inner(), id, root);
             report.added += sub.added;
             report.updated += sub.updated;
             report.skipped += sub.skipped;
         }
-        report.removed = prune_missing(&conn)?;
+        report.removed = prune_missing(db.inner())?;
         Ok(report)
     })
     .await
@@ -911,6 +1091,14 @@ fn cover_candidates(app: &AppHandle, track_id: i64) -> Vec<String> {
     paths
 }
 
+/// Embedded pictures larger than this are treated as absent. Real sleeve
+/// scans run a few MB; the ID3 size field allows up to 256 MB, and the
+/// base64 IPC payload is ~1.33× the picture — so without a cap one crafted
+/// (or absurdly ripped) file balloons the webview by hundreds of MB. The
+/// remote now-playing path enforces its own `MAX_COVER_BYTES` for the same
+/// reason.
+const MAX_EMBEDDED_COVER_BYTES: usize = 10 * 1024 * 1024;
+
 /// The first embedded picture in a file, preferring the front cover.
 ///
 /// Searches every tag block, not just the primary one: a file can carry both
@@ -923,6 +1111,15 @@ fn read_cover(path: &str) -> Option<CoverArt> {
     let picture = pictures()
         .find(|p| p.pic_type() == PictureType::CoverFront)
         .or_else(|| pictures().next())?;
+
+    if picture.data().len() > MAX_EMBEDDED_COVER_BYTES {
+        log::warn!(
+            "embedded cover in {} is {} bytes; skipped",
+            path,
+            picture.data().len()
+        );
+        return None;
+    }
 
     Some(CoverArt {
         mime: picture
