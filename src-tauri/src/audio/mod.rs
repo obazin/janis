@@ -21,6 +21,7 @@
 //!   plugin takes a lock and writes to a file.
 
 pub mod analyser;
+pub mod codecs;
 pub mod commands;
 pub mod decode;
 pub mod dsp;
@@ -28,6 +29,7 @@ pub mod engine;
 pub mod events;
 pub mod icy;
 pub mod nowplaying;
+pub mod opus;
 pub mod output;
 pub mod params;
 pub mod queue;
