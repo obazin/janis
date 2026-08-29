@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <link rel="icon" href="%sveltekit.assets%/favicon.png" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Janis</title>
+        <script>
+            (function () {
+                try {
+                    var l = localStorage.getItem('janis-language');
+                    if (l !== 'en' && l !== 'fr') l = 'en';
+                    document.documentElement.setAttribute('lang', l);
+                } catch (e) {
+                    document.documentElement.setAttribute('lang', 'en');
+                }
+            })();
+        </script>
+        %sveltekit.head%
+    </head>
+    <body data-sveltekit-preload-data="hover">
+        <div style="display: contents">%sveltekit.body%</div>
+    </body>
+</html>

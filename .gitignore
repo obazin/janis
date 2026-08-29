@@ -1,0 +1,64 @@
+/package
+.env
+.env.*
+!.env.example
+vite.config.js.timestamp-*
+vite.config.ts.timestamp-*
+
+# Node.js dependencies and logs
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+yarn.lock
+
+# Logs
+logs/
+*.log
+
+# SvelteKit build output
+.svelte-kit/
+
+# Vite build output
+dist/
+build/
+
+# Tailwind CSS generated files (if any)
+public/build/
+*.css.map
+
+# Rust
+/target/
+.cargo/
+
+# Tauri-specific files
+/src-tauri/target/
+/src-tauri/gen/
+*.dmg
+*.exe
+*.app
+*.msi
+*.deb
+*.rpm
+
+# OS-generated files
+.DS_Store
+Thumbs.db
+ehthumbs.db
+$RECYCLE.BIN/
+
+# IDE-specific directories
+.vscode/
+.idea/
+
+# Miscellaneous
+*.tmp
+*.swp
+*~
+
+# Provided by chess-flake dev shell (symlinked from nix store on entry)
+.prettierrc.json
+
+# Local env
+.direnv/

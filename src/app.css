@@ -1,0 +1,271 @@
+/* src/app.css — Janis design tokens. Single dark "prism" theme. */
+
+@font-face {
+	font-family: 'Hanken Grotesk';
+	font-style: normal;
+	font-weight: 100 900;
+	src: url('/fonts/HankenGrotesk.ttf') format('truetype-variations');
+}
+@font-face {
+	font-family: 'Familjen Grotesk';
+	font-style: normal;
+	font-weight: 400 700;
+	src: url('/fonts/FamiljenGrotesk.ttf') format('truetype-variations');
+}
+@font-face {
+	font-family: 'Space Mono';
+	font-style: normal;
+	font-weight: 400;
+	src: url('/fonts/SpaceMono-Regular.ttf') format('truetype');
+}
+@font-face {
+	font-family: 'Space Mono';
+	font-style: normal;
+	font-weight: 700;
+	src: url('/fonts/SpaceMono-Bold.ttf') format('truetype');
+}
+
+@import "tailwindcss";
+
+@theme {
+	/* ── Typefaces ──────────────────────────────────────────────────────────── */
+	--font-sans:    'Familjen Grotesk', ui-sans-serif, system-ui, sans-serif;
+	--font-display: 'Hanken Grotesk', ui-sans-serif, system-ui, sans-serif;
+	--font-mono:    'Space Mono', ui-monospace, monospace;
+
+	/* ── App typography scale ──────────────────────────────────────────────── */
+	--text-micro:      10px;  /* text-micro      — spectrum frequency labels */
+	--text-label:      11px;  /* text-label      — uppercase section headers */
+	--text-caption:    12px;  /* text-caption    — eyebrows, secondary info, badges */
+	--text-body:       13px;  /* text-body       — primary content, chips */
+	--text-body-em:    14px;  /* text-body-em    — row titles, buttons */
+	--text-heading-sm: 15px;  /* text-heading-sm — card titles, brand wordmark */
+	--text-heading-md: 22px;  /* text-heading-md — artist/composer names, drop title */
+	--text-heading-lg: 24px;  /* text-heading-lg — overlay/panel titles */
+	--text-display-sm: 34px;  /* text-display-sm — connect-screen title */
+	--text-display:    40px;  /* text-display    — screen h1 */
+	--text-hero:       52px;  /* text-hero       — Now Playing track title */
+
+	/* ── Letter-spacing ─────────────────────────────────────────────────────── */
+	--tracking-eyebrow: 0.17em;   /* tracking-eyebrow — 12px colored eyebrows */
+	--tracking-section: 0.14em;   /* tracking-section — 11px uppercase section headers */
+	--tracking-brand:   0.13em;   /* tracking-brand   — JANIS wordmark */
+	--tracking-pill:    0.04em;   /* tracking-pill    — small badge pills */
+	--tracking-tight:  -0.02em;   /* tracking-tight   — display headings */
+
+	/* ── Font weights ───────────────────────────────────────────────────────── */
+	--font-weight-regular:   400;
+	--font-weight-medium:    500;
+	--font-weight-semibold:  600;
+	--font-weight-bold:      700;
+	--font-weight-extrabold: 800;
+	--font-weight-black:     900;
+
+	/* ── Line heights ───────────────────────────────────────────────────────── */
+	--leading-hero:   1.02;  /* leading-hero   — hero track title */
+	--leading-tight:  1.2;   /* leading-tight  — headings */
+	--leading-snug:   1.35;  /* leading-snug   — UI labels */
+	--leading-normal: 1.5;   /* leading-normal — body copy */
+	--leading-relaxed: 1.6;  /* leading-relaxed — connect-screen paragraph */
+
+	/* ── Border radius ──────────────────────────────────────────────────────── */
+	--radius-btn:   11px;  /* rounded-btn   — buttons, nav rows, search field */
+	--radius-card:  14px;  /* rounded-card  — list containers, station cards */
+	--radius-panel: 16px;  /* rounded-panel — spectrum panel, grid cards */
+	--radius-thumb: 10px;  /* rounded-thumb — mini-player art */
+	--radius-art:   22px;  /* rounded-art   — Now Playing album art, EQ sheet */
+
+	/* ── Shadows ────────────────────────────────────────────────────────────── */
+	--shadow-card:    0 12px 30px -12px oklch(0 0 0 / 0.7);   /* grid-card art */
+	--shadow-tile:    0 14px 34px -14px oklch(0 0 0 / 0.7);   /* discover tiles */
+	--shadow-art:     0 24px 70px -20px oklch(0 0 0 / 0.8);   /* hero album art */
+	--shadow-sheet:   0 -30px 80px -20px oklch(0 0 0 / 0.8);  /* EQ bottom sheet */
+	--shadow-window:  0 40px 120px -30px oklch(0 0 0 / 0.9);  /* app frame */
+
+	/* ── Transition durations ───────────────────────────────────────────────── */
+	--duration-fast:  150ms;  /* duration-fast  — hover feedback, chips, nav */
+	--duration-base:  180ms;  /* duration-base  — cards, drop zone */
+	--duration-slow:  250ms;  /* duration-slow  — overlay entrance */
+	--duration-float: 400ms;  /* duration-float — screen entrance */
+
+	/* ── Z-index ────────────────────────────────────────────────────────────── */
+	--z-index-overlay: 50;    /* z-overlay — EQ sheet scrim */
+
+	/* ── Surfaces ───────────────────────────────────────────────────────────── */
+	--color-canvas:       oklch(0.144 0.029 301.2);   /* #0C0714 window base */
+	--color-canvas-top:   oklch(0.182 0.054 299.9);   /* #160B26 gradient top */
+	--color-panel:        oklch(1 0 0 / 0.03);        /* cards, list rows */
+	--color-panel-hover:  oklch(1 0 0 / 0.07);
+	--color-chip:         oklch(1 0 0 / 0.05);        /* inactive chips */
+	--color-chip-hover:   oklch(1 0 0 / 0.08);
+	--color-titlebar:     oklch(1 0 0 / 0.02);
+	--color-divider:      oklch(1 0 0 / 0.05);        /* row separators, sidebar edge */
+	--color-border:       oklch(1 0 0 / 0.06);        /* card borders */
+	--color-border-strong:   oklch(1 0 0 / 0.08);     /* chip/input borders */
+	--color-border-emphasis: oklch(1 0 0 / 0.12);     /* badge outline, art inset ring */
+	--color-input-bg:     oklch(0 0 0 / 0.35);        /* search field, volume rail base */
+	--color-well:         oklch(0 0 0 / 0.28);        /* waveform well */
+	--color-well-soft:    oklch(0 0 0 / 0.24);        /* spectrum panel */
+	--color-well-deep:    oklch(0 0 0 / 0.35);        /* EQ slider track */
+	--color-rail:         oklch(1 0 0 / 0.12);        /* volume slider rail */
+	--color-scrim:        oklch(0.13 0.02 300 / 0.72);/* overlay backdrop */
+	--color-miniplayer:   oklch(0.14 0.03 300 / 0.7); /* bottom bar (blurred) */
+	--color-eq-sheet-top:    oklch(0.208 0.061 296.5); /* #1B1030 */
+	--color-eq-sheet-bottom: oklch(0.170 0.045 298.2); /* #120A20 */
+
+	/* ── Text ───────────────────────────────────────────────────────────────── */
+	--color-text:           oklch(0.953 0.021 306.8);  /* #F3ECFB */
+	--color-text-secondary: oklch(0.814 0.049 304.0);  /* #C9BBDD */
+	--color-text-soft:      oklch(0.758 0.052 303.4);  /* #B7A9CC */
+	--color-text-muted:     oklch(0.613 0.066 301.5);  /* #8B7BA6 */
+	--color-text-faint:     oklch(0.506 0.060 301.6);  /* #6B5D82 */
+	--color-nav-idle:       oklch(0.641 0.060 302.3);  /* #9384AB */
+
+	/* ── Prism accents ──────────────────────────────────────────────────────── */
+	/* Five brand accents; each screen keys its identity to one of them
+	   (now=accent, library/settings=violet, discover=teal, radio=ember,
+	   local=lime). */
+	--color-accent:    oklch(0.667 0.251 355.4);  /* #FF2D9B pink */
+	--color-violet:    oklch(0.599 0.230 286.2);  /* #7C5CFF */
+	--color-teal:      oklch(0.818 0.139 186.7);  /* #22E0D2 */
+	--color-lime:      oklch(0.897 0.204 122.4);  /* #C6F135 */
+	--color-ember:     oklch(0.704 0.195 40.9);   /* #FF6B2C */
+	--color-live:      oklch(0.655 0.231 26.4);   /* #FF3B3B radio LIVE dot */
+	--color-spotify:   oklch(0.689 0.187 148.9);  /* #1DB954 */
+	--color-on-accent: oklch(0.144 0.029 301.2);  /* dark fg on bright accent fills */
+
+	/* ── Semantic status ────────────────────────────────────────────────────── */
+	--color-success: oklch(0.72 0.16 145);
+	--color-warning: oklch(0.78 0.16 75);
+	--color-error:   oklch(0.66 0.22 25);
+}
+
+@layer base {
+	html, body {
+		height: 100%;
+		overflow: hidden;
+	}
+	body {
+		@apply text-text font-sans text-body select-none;
+		background: linear-gradient(180deg, var(--color-canvas-top), var(--color-canvas));
+	}
+	::selection {
+		background: var(--color-accent);
+		color: var(--color-text);
+	}
+}
+
+@layer components {
+	/* Prism conic identity — logo mark, open-source banner mark. */
+	.bg-prism-conic {
+		background: conic-gradient(
+			from 0deg,
+			var(--color-accent),
+			var(--color-violet),
+			var(--color-teal),
+			var(--color-lime),
+			var(--color-accent)
+		);
+	}
+	/* Primary CTA fill (Add music, play button). */
+	.bg-cta-gradient {
+		background: linear-gradient(90deg, var(--color-accent), var(--color-ember));
+	}
+	.bg-play-gradient {
+		background: linear-gradient(135deg, var(--color-accent), var(--color-ember));
+	}
+	/* Active sidebar row. */
+	.bg-nav-active {
+		background: linear-gradient(
+			90deg,
+			color-mix(in oklch, var(--color-accent) 20%, transparent),
+			color-mix(in oklch, var(--color-violet) 8%, transparent)
+		);
+	}
+	/* Volume fill. */
+	.bg-volume-gradient {
+		background: linear-gradient(90deg, var(--color-accent), var(--color-teal));
+	}
+	/* EQ band fill. */
+	.bg-eq-gradient {
+		background: linear-gradient(180deg, var(--color-accent), var(--color-violet));
+	}
+	/* EQ bottom sheet. */
+	.bg-eq-sheet {
+		background: linear-gradient(180deg, var(--color-eq-sheet-top), var(--color-eq-sheet-bottom));
+	}
+	/* Open-source banner. */
+	.bg-banner-gradient {
+		background: linear-gradient(
+			90deg,
+			color-mix(in oklch, var(--color-accent) 10%, transparent),
+			color-mix(in oklch, var(--color-violet) 6%, transparent)
+		);
+	}
+	/* The spinning conic halo behind the Now Playing art — bleeds 6% past
+	   the tile on every side. */
+	.art-halo {
+		position: absolute;
+		inset: -6%;
+	}
+	/* Radio LIVE dot glow. */
+	.glow-live {
+		box-shadow: 0 0 8px var(--color-live);
+	}
+	/* Gloss sweep laid over generated art tiles. */
+	.art-gloss::after {
+		content: '';
+		position: absolute;
+		inset: 0;
+		background: linear-gradient(140deg, oklch(1 0 0 / 0.22), transparent 50%);
+		pointer-events: none;
+	}
+}
+
+/* ── Animations ─────────────────────────────────────────────────────────── */
+@keyframes spin-slow {
+	to { transform: rotate(360deg); }
+}
+@keyframes pulse-glow {
+	0%, 100% {
+		box-shadow:
+			0 0 0 0 color-mix(in oklch, var(--color-accent) 45%, transparent),
+			0 12px 40px -8px color-mix(in oklch, var(--color-accent) 60%, transparent);
+	}
+	50% {
+		box-shadow:
+			0 0 0 14px transparent,
+			0 12px 40px -8px color-mix(in oklch, var(--color-accent) 60%, transparent);
+	}
+}
+@keyframes float-up {
+	from { opacity: 0; transform: translateY(10px); }
+	to   { opacity: 1; transform: translateY(0); }
+}
+
+.animate-spin-slow { animation: spin-slow 18s linear infinite; }
+.animate-pulse-glow { animation: pulse-glow 2.4s ease infinite; }
+.animate-float-up { animation: float-up var(--duration-float) ease; }
+
+/* ── Thin scrollbar ─────────────────────────────────────────────────────── */
+/* `-webkit-appearance: none` forces the always-visible styled thumb instead
+   of the auto-hiding macOS overlay scrollbar. */
+.mscroll {
+	scrollbar-width: thin;
+	scrollbar-color: color-mix(in oklch, var(--color-accent) 30%, transparent) transparent;
+}
+.mscroll::-webkit-scrollbar {
+	-webkit-appearance: none;
+	width: 8px;
+	height: 8px;
+}
+.mscroll::-webkit-scrollbar-thumb {
+	background: color-mix(in oklch, var(--color-accent) 30%, transparent);
+	border-radius: 20px;
+}
+.mscroll::-webkit-scrollbar-thumb:hover {
+	background: color-mix(in oklch, var(--color-accent) 50%, transparent);
+}
+.mscroll::-webkit-scrollbar-track {
+	background: transparent;
+}

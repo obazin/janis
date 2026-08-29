@@ -1,0 +1,7 @@
+{
+    "identifier": "default",
+    "description": "Webview permissions for the main window. Dialog access is enumerated per command rather than taken from `dialog:default`, so the grant stays pinned to what the frontend actually invokes: `open` (the Add-music file picker and the Add-folder picker). `save`, `ask`, `confirm` and `message` are unused and stay denied. `core:default` carries the event permissions the OS drag-and-drop listener needs.",
+    "local": true,
+    "windows": ["main"],
+    "permissions": ["core:default", "dialog:allow-open", "log:default"]
+}
