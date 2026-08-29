@@ -350,10 +350,47 @@ impl Engine {
                 // Rebuilding the stream is the only way to change device, and
                 // it invalidates the ring, so re-seek to where we were.
                 let position = self.position_secs();
+                let was_playing = self.playing;
                 self.output = None;
                 self.producer = None;
-                if self.ensure_output().is_ok() && self.decoder.is_some() {
-                    self.seek(position);
+                self.analyser = None;
+                match self.ensure_output() {
+                    Ok(()) => {
+                        // The new device brings its own rate and channel
+                        // count; the resampler must follow, or everything
+                        // keeps being converted for the old device — wrong
+                        // speed and pitch, and a scrambled interleave when
+                        // the channel count changed.
+                        if let Some(rate) = self.decoder.as_ref().map(|d| d.format().sample_rate) {
+                            self.rebuild_resampler(rate);
+                        }
+                        // Anything already resampled is shaped for the old
+                        // device.
+                        self.pending_out.clear();
+                        if self.decoder.is_some() && self.mode == Mode::Local {
+                            self.seek(position);
+                        }
+                        // `output::build` returns a stopped stream and no
+                        // other path starts it here (`set_playing` would
+                        // early-return, `playing` never changed) — without
+                        // this, playback freezes with the transport still
+                        // showing playing.
+                        if was_playing {
+                            if let Some(output) = self.output.as_ref() {
+                                if let Err(message) = output.play() {
+                                    self.emit(EngineEvent::Error { message });
+                                }
+                            }
+                        }
+                    }
+                    Err(message) => {
+                        // Surfaced like every other ensure_output failure —
+                        // and the transport stops claiming playback that
+                        // cannot be happening.
+                        self.playing = false;
+                        self.emit(EngineEvent::Error { message });
+                        self.emit_state();
+                    }
                 }
             }
             EngineCommand::Reconnected {
@@ -908,7 +945,7 @@ impl Engine {
         // Deliberately *not* applied here: the outgoing track is still in the
         // ring. The boundary below carries it, and it lands when the join
         // actually reaches the device.
-        self.rebuild_resampler(format.sample_rate);
+        self.retune_resampler_for_join(format.sample_rate);
         self.decoder = Some(decoder);
         self.preloaded = None;
         // The incoming track deserves a meter too. `install_decoder` is
@@ -919,9 +956,12 @@ impl Engine {
 
         // No flush: whatever is still in the ring belongs to the previous
         // track and must be heard. The boundary tells us when the new track
-        // actually starts coming out of the speakers.
+        // actually starts coming out of the speakers. Anything the retune
+        // drained into `pending_out` is still the outgoing track, so the
+        // boundary sits past it.
+        let pending_frames = self.pending_out.len() as u64 / self.device_channels().max(1) as u64;
         self.boundaries.push_back(Boundary {
-            frame: self.frames_written,
+            frame: self.frames_written + pending_frames,
             index: self.queue.index(),
             duration_secs: self.current_duration,
             gain_db: next.gain_db,
@@ -964,6 +1004,27 @@ impl Engine {
         self.analyser = Some(Analyser::new(tap_consumer));
         self.output = Some(output);
         Ok(())
+    }
+
+    /// The resampler policy at a gapless join. A matching resampler is kept —
+    /// its staged frames are the tail of the outgoing track, and keeping them
+    /// is what makes a same-rate album join truly seamless. On a real change
+    /// the old instance is drained into `pending_out` first, so those tail
+    /// frames are heard instead of vanishing with it.
+    fn retune_resampler_for_join(&mut self, source_rate: u32) {
+        let device_rate = self.device_rate();
+        let channels = self.device_channels() as usize;
+        match self.resampler.as_ref() {
+            Some(existing) if existing.matches(source_rate, device_rate, channels) => return,
+            None if source_rate == device_rate && device_rate != 0 => return,
+            _ => {}
+        }
+        if let Some(resampler) = self.resampler.as_mut() {
+            if let Err(message) = resampler.drain(&mut self.pending_out) {
+                self.emit(EngineEvent::Error { message });
+            }
+        }
+        self.rebuild_resampler(source_rate);
     }
 
     fn rebuild_resampler(&mut self, source_rate: u32) {
