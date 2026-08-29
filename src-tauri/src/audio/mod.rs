@@ -27,12 +27,14 @@ pub mod dsp;
 pub mod engine;
 pub mod events;
 pub mod icy;
+pub mod nowplaying;
 pub mod output;
 pub mod params;
 pub mod queue;
 pub mod resample;
 pub mod stream;
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use crossbeam_channel::Sender;
@@ -89,6 +91,10 @@ pub struct AudioEngine {
     commands: Sender<EngineCommand>,
     params: Arc<Params>,
     subscribers: Arc<Subscribers>,
+    /// Bumped whenever what is playing changes. A now-playing poller carries
+    /// the value it started with and stops as soon as it no longer matches,
+    /// which is how a poller for a station the listener has left dies.
+    station_epoch: Arc<AtomicU64>,
     join: Mutex<Option<std::thread::JoinHandle<()>>>,
 }
 
@@ -99,6 +105,19 @@ impl AudioEngine {
 
     pub fn subscribers(&self) -> &Arc<Subscribers> {
         &self.subscribers
+    }
+
+    pub fn station_epoch(&self) -> Arc<AtomicU64> {
+        Arc::clone(&self.station_epoch)
+    }
+
+    /// Claims the next epoch, invalidating any poller still running.
+    pub fn next_station_epoch(&self) -> u64 {
+        self.station_epoch.fetch_add(1, Ordering::Relaxed) + 1
+    }
+
+    pub fn commands(&self) -> Sender<EngineCommand> {
+        self.commands.clone()
     }
 
     /// Queues a command for the engine thread. Never blocks: the channel is
@@ -117,7 +136,14 @@ pub fn init(device_id: Option<String>) -> AudioEngine {
     let params = Arc::new(Params::default());
     let subscribers = Arc::new(Subscribers::default());
 
-    let engine = Engine::new(rx, Arc::clone(&params), Arc::clone(&subscribers), device_id);
+    let station_epoch = Arc::new(AtomicU64::new(0));
+    let engine = Engine::new(
+        rx,
+        Arc::clone(&params),
+        Arc::clone(&subscribers),
+        Arc::clone(&station_epoch),
+        device_id,
+    );
     let join = std::thread::Builder::new()
         .name("janis-audio".into())
         .spawn(move || engine.run())
@@ -127,6 +153,7 @@ pub fn init(device_id: Option<String>) -> AudioEngine {
         commands: tx,
         params,
         subscribers,
+        station_epoch,
         join: Mutex::new(Some(join)),
     }
 }

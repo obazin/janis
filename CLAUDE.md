@@ -58,7 +58,7 @@ Quality gates are the local suites: `pnpm check`, `pnpm test:unit`, `cargo test`
 
 - **Frontend:** Svelte 5 (runes) + SvelteKit 2 + Tailwind v4 + TypeScript
 - **Backend:** Rust via Tauri v2 IPC commands (`tauri-plugin-single-instance`, `tauri-plugin-log`, `tauri-plugin-dialog`)
-- **Audio:** Rust engine — `cpal` (output), `symphonia` (decode), `rubato` (resampling), `biquad` (10 peaking filters), `realfft` (analyser), `rtrb` (lock-free ring), `stream-download` + `icy-metadata` (web radio). `lofty` for tags/properties/cover art. There is no `<audio>` element: every source decodes in Rust
+- **Audio:** Rust engine — `cpal` (output), `symphonia` (decode), `rubato` (resampling), `biquad` (10 peaking filters), `realfft` (analyser), `rtrb` (lock-free ring), `stream-download` + `icy-metadata` (web radio, plus station now-playing APIs). `lofty` for tags/properties/cover art. There is no `<audio>` element: every source decodes in Rust
 - **Persistence:** SQLite (`rusqlite`, bundled) — `janis.db` in the app-data dir holds preferences + the track library
 - **Build:** Vite, adapter-static (SSG — no Node server at runtime)
 

@@ -18,6 +18,7 @@ use tauri::Manager;
 
 use super::engine::EngineCommand;
 use super::events::EngineEvent;
+use super::nowplaying;
 use super::output::{self, AudioDevice};
 use super::queue::QueueEntry;
 use super::AudioEngine;
@@ -88,18 +89,32 @@ pub fn audio_load_queue(
 /// The only async command here: it awaits the HTTP round trip and the initial
 /// prefetch so the engine thread never blocks on the network. It resolves once
 /// the station is buffered, so the frontend can tell connecting from playing.
+///
+/// `now_playing` names the station's metadata endpoint when it has one. The
+/// frontend owns the station list, so it is the frontend that knows.
 #[tauri::command]
 pub async fn audio_play_stream(
     app: tauri::AppHandle,
     station_id: String,
     url: String,
+    now_playing: Option<nowplaying::Source>,
 ) -> Result<(), String> {
     let stream = super::stream::open(&url).await?;
     let engine = app.state::<AudioEngine>();
+
+    // Claim the epoch before starting anything: it retires the previous
+    // station's poller and tags this one so late answers can be discarded.
+    let epoch = engine.next_station_epoch();
     engine.send(EngineCommand::PlayStream {
         station_id,
         stream: Box::new(stream),
-    })
+        has_provider: now_playing.is_some(),
+    })?;
+
+    if let Some(source) = now_playing {
+        nowplaying::spawn(engine.commands(), engine.station_epoch(), epoch, source);
+    }
+    Ok(())
 }
 
 #[tauri::command]
