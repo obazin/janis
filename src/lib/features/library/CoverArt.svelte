@@ -40,9 +40,9 @@
     const coverUrl = $derived(onScreen && trackId !== null ? libraryStore.coverFor(trackId) : null);
 </script>
 
-<!-- The wrapper carries the caller's sizing so the observer has a box to
-     watch; the tile fills it and keeps the same classes for its own rounding
-     and clipping. -->
-<div bind:this={box} class={extra}>
-    <ArtTile {seed} {coverUrl} {initials} {gradIndex} class="size-full {extra}" />
+<!-- The wrapper carries the caller's sizing and rounding, so the observer has
+     a box to watch and the tile simply fills it. `overflow-hidden` here is
+     what clips the art to the wrapper's corners. -->
+<div bind:this={box} class="{extra} overflow-hidden">
+    <ArtTile {seed} {coverUrl} {initials} {gradIndex} class="size-full" />
 </div>

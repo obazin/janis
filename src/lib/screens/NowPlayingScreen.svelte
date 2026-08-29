@@ -64,13 +64,19 @@
                 <div
                     class="art-halo rounded-full bg-prism-conic blur-3xl opacity-50 animate-spin-slow"
                 ></div>
-                <ArtTile
-                    seed={artSeed}
-                    coverUrl={playerStore.coverUrl}
-                    initials={artInitials(title)}
-                    gradIndex={station?.gradIndex}
-                    class="absolute inset-0 rounded-art shadow-art ring-1 ring-inset ring-border-emphasis"
-                />
+                <!-- Positioned on a wrapper, not on the tile: `ArtTile`'s
+                     own root is `relative`, and Tailwind emits `.relative`
+                     after `.absolute`, so passing `absolute` in here would
+                     lose the cascade and collapse the tile to no height. -->
+                <div class="absolute inset-0">
+                    <ArtTile
+                        seed={artSeed}
+                        coverUrl={playerStore.coverUrl}
+                        initials={artInitials(title)}
+                        gradIndex={station?.gradIndex}
+                        class="size-full rounded-art shadow-art ring-1 ring-inset ring-border-emphasis"
+                    />
+                </div>
             </div>
             <div class="flex gap-2.5 flex-wrap justify-center">
                 {#if track}

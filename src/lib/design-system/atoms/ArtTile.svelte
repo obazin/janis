@@ -3,6 +3,11 @@
     // otherwise a deterministic prism gradient derived from `seed`, with an
     // optional initials monogram. Caller sizes it (`class`) — the tile fills
     // its box.
+    //
+    // `class` must not set `position`: this root is `relative` so the art and
+    // the gloss can sit on top of each other, and Tailwind emits `.relative`
+    // after `.absolute`, so an `absolute` passed in would silently lose and
+    // leave the tile with no height. Position a wrapper instead.
     interface Props {
         seed: string;
         coverUrl?: string | null;
