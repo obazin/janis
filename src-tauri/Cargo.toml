@@ -79,6 +79,13 @@ realfft = "3.5"
 rtrb = "0.4"
 # Control-plane channel: IPC commands -> engine thread.
 crossbeam-channel = "0.5"
+# Opus. Symphonia 0.6 has no Opus decoder, so `audio/opus.rs` wraps libopus as
+# one. `opusic-sys` builds libopus from bundled source with cmake — see
+# flake.nix. `symphonia-common` is not re-exported by the `symphonia` facade
+# but carries the OpusHead parser, and is pinned to the same version so the
+# two cannot drift apart.
+opus = "0.4"
+symphonia-common = "0.6.1"
 # Web radio. Buffers an HTTP stream into something `Read + Seek`, which is
 # what Symphonia needs — so a station goes through exactly the same decode,
 # EQ and analyser path as a local file. `default-features = false` keeps

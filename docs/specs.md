@@ -57,7 +57,7 @@ The canonical description of user-facing behavior. Every new feature lands here 
 
 ## Local Files (`/local`)
 
-- Lime eyebrow. Dashed drop zone: click opens the file picker; OS drag-and-drop works window-wide. Formats: MP3, FLAC, WAV, AAC/M4A, OGG/Opus, AIFF.
+- Lime eyebrow. Dashed drop zone: click opens the file picker; OS drag-and-drop works window-wide. Formats: MP3, FLAC, WAV, AAC/M4A, OGG/Vorbis, Opus, AIFF — all decoded in Rust. Opus is mono or stereo; multichannel Opus is not supported.
 - "Scanned library · N files" header with the last scan report (added/updated/skipped), "Add folder" and "Rescan" ghost buttons.
 - Table: title, artist, lime format chip, duration. Click plays from the filtered list.
 - Watched folders list: path, track count, per-folder Remove (cascade-deletes its tracks). Rescan re-walks all folders and prunes files that vanished.

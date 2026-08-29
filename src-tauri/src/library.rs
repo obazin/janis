@@ -20,11 +20,6 @@ use crate::persistence::DbState;
 
 /// Extensions the scanner picks up. This list tracks what the `audio` engine
 /// can decode, not what any browser accepts.
-///
-/// `opus` is the one entry the engine cannot yet play: Symphonia has no Opus
-/// decoder. Such files still scan and appear in the library — dropping them
-/// would delete rows on the next rescan — but playing one reports an error and
-/// skips to the next track until a libopus-backed decoder is wired in.
 const AUDIO_EXTENSIONS: &[&str] = &[
     "mp3", "flac", "wav", "m4a", "aac", "ogg", "opus", "aif", "aiff",
 ];
