@@ -275,4 +275,31 @@ mod tests {
             "history should end at the newest sample, got {last} want {expected}"
         );
     }
+
+    #[test]
+    fn a_wrapped_ring_still_ends_history_on_the_newest_sample() {
+        // The steady-state path in production: the tap ring wraps
+        // continuously, so `read_chunk` hands back two slices. The other
+        // tests fill a fresh ring once and never see a second slice; here
+        // the bursts straddle the ring's end, and processing the slices in
+        // the wrong order would end the history on stale audio.
+        let (mut producer, consumer) = rtrb::RingBuffer::<f32>::new(100);
+        let mut analyser = Analyser::new(consumer);
+
+        let mut newest = 0.0f32;
+        for _ in 0..7 {
+            for _ in 0..60 {
+                newest += 1.0;
+                producer.push(newest).expect("burst fits the ring");
+            }
+            assert_eq!(analyser.drain(), 60);
+        }
+
+        let last = *analyser.history.last().unwrap();
+        assert_eq!(
+            last, newest,
+            "history must end at the newest sample — ending anywhere else \
+             means the wrapped chunk's halves were applied out of order"
+        );
+    }
 }
