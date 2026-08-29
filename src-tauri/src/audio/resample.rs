@@ -11,7 +11,7 @@
 //! in the middle of a track.
 
 use rubato::audioadapter_buffers::direct::InterleavedSlice;
-use rubato::{Fft, FixedSync, Resampler as _};
+use rubato::{Fft, FixedSync, Indexing, Resampler as _};
 
 /// Frames of input consumed per rubato call. 1024 keeps the FFT cheap while
 /// staying well under the ring, so a chunk boundary never starves the device.
@@ -20,6 +20,8 @@ const CHUNK_FRAMES: usize = 1024;
 pub struct Resampler {
     /// `None` when the rates match and samples pass straight through.
     inner: Option<Fft<f32>>,
+    from_rate: u32,
+    to_rate: u32,
     channels: usize,
     /// Interleaved input staged until a full chunk is available.
     staged: Vec<f32>,
@@ -36,6 +38,8 @@ impl Resampler {
         if from_rate == to_rate {
             return Ok(Self {
                 inner: None,
+                from_rate,
+                to_rate,
                 channels,
                 staged: Vec::new(),
                 scratch: Vec::new(),
@@ -56,6 +60,8 @@ impl Resampler {
 
         let scratch_frames = inner.output_frames_max();
         Ok(Self {
+            from_rate,
+            to_rate,
             channels,
             staged: Vec::with_capacity(CHUNK_FRAMES * channels),
             scratch: vec![0.0; scratch_frames * channels],
@@ -66,6 +72,13 @@ impl Resampler {
 
     pub fn is_passthrough(&self) -> bool {
         self.inner.is_none()
+    }
+
+    /// Whether this instance already converts exactly this configuration.
+    /// Lets a track join keep a matching resampler — and with it the staged
+    /// tail of the outgoing track — instead of rebuilding for nothing.
+    pub fn matches(&self, from_rate: u32, to_rate: u32, channels: usize) -> bool {
+        self.from_rate == from_rate && self.to_rate == to_rate && self.channels == channels
     }
 
     /// Converts `input` (interleaved, source rate) and appends the result to
@@ -101,6 +114,42 @@ impl Resampler {
         }
 
         self.staged.drain(..consumed);
+        Ok(())
+    }
+
+    /// Flushes the staged remainder and the filter's internal latency into
+    /// `output`, padding the last chunk with silence.
+    ///
+    /// For the moment the configuration has to change mid-stream — a track
+    /// join where the source rate differs: whatever is staged is the *end of
+    /// the outgoing track* (up to `CHUNK_FRAMES - 1` frames, ~23 ms), and
+    /// dropping it with the old resampler would clip its final note. The
+    /// trailing silence this appends is inaudible next to that.
+    pub fn drain(&mut self, output: &mut Vec<f32>) -> Result<(), String> {
+        let Some(inner) = self.inner.as_mut() else {
+            return Ok(()); // passthrough stages nothing
+        };
+        let staged_frames = self.staged.len() / self.channels;
+        // Two passes: the first pushes the staged tail through (rubato pads
+        // the short chunk with zeros), the second pumps zeros so the frames
+        // still inside the filter's latency come out too.
+        for partial in [staged_frames, 0] {
+            let adapter_in = InterleavedSlice::new(
+                &self.staged[..partial * self.channels],
+                self.channels,
+                partial,
+            )
+            .map_err(|e| format!("resampler drain input shape: {}", e))?;
+            let mut adapter_out =
+                InterleavedSlice::new_mut(&mut self.scratch, self.channels, self.scratch_frames)
+                    .map_err(|e| format!("resampler drain output shape: {}", e))?;
+            let indexing = Indexing::new().partial_len(partial);
+            let (_, frames_out) = inner
+                .process_into_buffer(&adapter_in, &mut adapter_out, Some(&indexing))
+                .map_err(|e| format!("resample drain: {}", e))?;
+            output.extend_from_slice(&self.scratch[..frames_out * self.channels]);
+        }
+        self.staged.clear();
         Ok(())
     }
 }
@@ -201,5 +250,57 @@ mod tests {
     #[test]
     fn zero_channels_is_rejected() {
         assert!(Resampler::new(44_100, 48_000, 0).is_err());
+    }
+
+    #[test]
+    fn matches_compares_the_built_configuration() {
+        let converting = Resampler::new(44_100, 48_000, 2).unwrap();
+        assert!(converting.matches(44_100, 48_000, 2));
+        assert!(
+            !converting.matches(48_000, 48_000, 2),
+            "different source rate"
+        );
+        assert!(
+            !converting.matches(44_100, 96_000, 2),
+            "different device rate"
+        );
+        assert!(
+            !converting.matches(44_100, 48_000, 6),
+            "different channel count"
+        );
+
+        let passthrough = Resampler::new(48_000, 48_000, 2).unwrap();
+        assert!(passthrough.matches(48_000, 48_000, 2));
+        assert!(!passthrough.matches(44_100, 48_000, 2));
+    }
+
+    #[test]
+    fn drain_flushes_the_staged_tail_instead_of_dropping_it() {
+        let mut resampler = Resampler::new(44_100, 48_000, 2).unwrap();
+        let mut output = Vec::new();
+
+        // One and a half chunks of a steady signal: the trailing half chunk
+        // stays staged — it is the end of the outgoing track at a join.
+        resampler
+            .process(&vec![0.5f32; CHUNK_FRAMES * 3], &mut output)
+            .unwrap();
+        let before = output.len();
+
+        resampler.drain(&mut output).unwrap();
+
+        let tail = &output[before..];
+        assert!(!tail.is_empty(), "the staged tail must come out");
+        assert!(
+            tail.iter().any(|s| s.abs() > 0.2),
+            "the tail carries the staged signal, not just padding silence"
+        );
+    }
+
+    #[test]
+    fn drain_on_a_passthrough_is_a_no_op() {
+        let mut resampler = Resampler::new(48_000, 48_000, 2).unwrap();
+        let mut output = Vec::new();
+        resampler.drain(&mut output).unwrap();
+        assert!(output.is_empty());
     }
 }
