@@ -167,11 +167,28 @@ pub fn init(loudness_store: Arc<dyn loudness::Store>, device_id: Option<String>)
 /// Stops the engine thread and waits for it, so the `cpal::Stream` is dropped
 /// while the process is still alive. Without this, CoreAudio can call into
 /// freed memory during teardown.
+///
+/// The wait is bounded: the engine thread can be parked inside a blocking
+/// radio read for up to the stream's read timeout, and this runs on the event
+/// loop thread during `ExitRequested` — an unbounded join there turns "quit
+/// while a station is stalled" into an app that never closes. Past the
+/// deadline the thread is abandoned; that re-opens the teardown hazard above
+/// for that one pathological case, which is the lesser evil.
 pub fn shutdown(engine: &AudioEngine) {
+    const SHUTDOWN_WAIT: std::time::Duration = std::time::Duration::from_secs(3);
+
     let _ = engine.send(EngineCommand::Shutdown);
     if let Ok(mut guard) = engine.join.lock() {
         if let Some(handle) = guard.take() {
-            let _ = handle.join();
+            let deadline = std::time::Instant::now() + SHUTDOWN_WAIT;
+            while !handle.is_finished() && std::time::Instant::now() < deadline {
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            if handle.is_finished() {
+                let _ = handle.join();
+            } else {
+                log::warn!("audio engine did not stop in time; exiting without it");
+            }
         }
     }
 }
