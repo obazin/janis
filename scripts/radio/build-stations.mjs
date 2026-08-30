@@ -5,8 +5,9 @@
 //   1. curated.json — the hand-picked flagship stations (SomaFM, Radio France,
 //      Radio Paradise, …), kept verbatim including their now-playing wiring.
 //   2. The Radio Browser community database (https://www.radio-browser.info),
-//      the most-listened working stations per target country, fetched live,
-//      deduplicated, and mapped onto our i18n genre keys.
+//      the most-listened working stations per target country, plus tag-targeted
+//      top-ups for a few genres (see GENRE_PULLS), fetched live, deduplicated,
+//      and mapped onto our i18n genre keys.
 //
 // The result is static data baked into the app — nothing here runs at runtime.
 // Run it to refresh the catalog:  node scripts/radio/build-stations.mjs
@@ -31,6 +32,19 @@ const CAPS = {
     BE: 30, SE: 30, PT: 30, CH: 25, AT: 25, IE: 25, DK: 25, NO: 25, FI: 25,
     CZ: 25, RO: 25, HU: 20,
 };
+
+// Tag-targeted top-ups for genres the per-country lists leave thin (a country's
+// most-clicked stations skew pop/news). Pulled by exact tag, filtered to the
+// CAPS countries, and labelled with the pulled genre outright.
+const GENRE_PULLS = [
+    { tag: 'blues', genre: 'radio.genre.blues', cap: 45 },
+    { tag: 'funk', genre: 'radio.genre.funk', cap: 35 },
+    { tag: 'jazz', genre: 'radio.genre.jazz', cap: 45 },
+    { tag: 'rock', genre: 'radio.genre.rock', cap: 45 },
+    { tag: 'pop', genre: 'radio.genre.pop', cap: 45 },
+    { tag: 'classical', genre: 'radio.genre.classical', cap: 45 },
+    { tag: 'bossa nova', genre: 'radio.genre.bossanova', cap: 30 },
+];
 
 // Genre scoring: map crowd tags -> our TranslationKey genre set. Order is the
 // tie-break priority (earlier wins ties); score = # of a station's tags that
@@ -119,8 +133,7 @@ function normName(name) {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-async function fetchCountry(cc) {
-    const path = `/json/stations/bycountrycodeexact/${cc}?order=clickcount&reverse=true&hidebroken=true&limit=150`;
+async function fetchApi(path, label) {
     let lastErr;
     for (const base of MIRRORS) {
         try {
@@ -131,8 +144,22 @@ async function fetchCountry(cc) {
             lastErr = e;
         }
     }
-    throw new Error(`fetch ${cc} failed: ${lastErr}`);
+    throw new Error(`fetch ${label} failed: ${lastErr}`);
 }
+
+const fetchCountry = (cc) =>
+    fetchApi(
+        `/json/stations/bycountrycodeexact/${cc}?order=clickcount&reverse=true&hidebroken=true&limit=150`,
+        cc,
+    );
+
+// A deeper pool for tag pulls — most global results fall outside our countries,
+// so cast wide and let the CAPS filter in `absorb` narrow it.
+const fetchTag = (tag) =>
+    fetchApi(
+        `/json/stations/bytagexact/${encodeURIComponent(tag)}?order=clickcount&reverse=true&hidebroken=true&limit=300`,
+        tag,
+    );
 
 async function main() {
     const curated = JSON.parse(readFileSync(join(HERE, 'curated.json'), 'utf8'));
@@ -147,16 +174,20 @@ async function main() {
         out.push(s);
     }
 
-    // 2) fresh Radio Browser pulls per country.
-    for (const cc of Object.keys(CAPS)) {
-        const arr = await fetchCountry(cc);
-        const cap = CAPS[cc];
+    // Dedupe + pick up to `cap` stations from a raw Radio Browser list and add
+    // them to `out`. `fixedCountry` pins the country (a per-country pull);
+    // otherwise it comes from the station and must be one we know (CAPS).
+    // `forceGenre` overrides the tag classifier — used by tag pulls, where the
+    // pulled tag already says what the station is. Returns how many were added.
+    function absorb(arr, { cap, fixedCountry, forceGenre }) {
         const seenNorm = new Map();
         const picked = [];
         for (const s of arr) {
             const name = (s.name || '').trim();
             const url = (s.url_resolved || s.url || '').trim();
+            const country = fixedCountry ?? (s.countrycode || '').toUpperCase();
             if (!name || !url || !/^https?:\/\//i.test(url) || seenUrl.has(url)) continue;
+            if (!CAPS[country]) continue; // keep the catalog within known countries
             const nn = normName(name);
             if (!nn) continue;
             if (seenNorm.has(nn)) {
@@ -171,9 +202,10 @@ async function main() {
             }
             seenUrl.add(url);
             seenNorm.set(nn, picked.length);
-            picked.push({ id: s.stationuuid, name, country: cc, kbps: s.bitrate || 128, url, _tags: s.tags || '' });
+            picked.push({ id: s.stationuuid, name, country, kbps: s.bitrate || 128, url, _tags: s.tags || '' });
             if (picked.length >= cap) break;
         }
+        let added = 0;
         for (const rec of picked) {
             if (seenId.has(rec.id)) continue;
             seenId.add(rec.id);
@@ -181,14 +213,28 @@ async function main() {
                 id: rec.id,
                 name: rec.name,
                 country: rec.country,
-                genreKey: classifyGenre(rec._tags, rec.name),
+                genreKey: forceGenre ?? classifyGenre(rec._tags, rec.name),
                 kbps: sanitizeKbps(rec.kbps),
                 url: rec.url,
                 gradIndex: grad(rec.id),
             });
+            added++;
         }
-        process.stderr.write(`${cc}:${picked.length} `);
+        return added;
+    }
+
+    // 2) fresh Radio Browser pulls per country.
+    for (const cc of Object.keys(CAPS)) {
+        const n = absorb(await fetchCountry(cc), { cap: CAPS[cc], fixedCountry: cc });
+        process.stderr.write(`${cc}:${n} `);
         await sleep(400); // be polite to the mirror
+    }
+
+    // 3) tag-targeted pulls to deepen genres the per-country lists leave thin.
+    for (const { tag, genre, cap } of GENRE_PULLS) {
+        const n = absorb(await fetchTag(tag), { cap, forceGenre: genre });
+        process.stderr.write(`${tag}:${n} `);
+        await sleep(400);
     }
 
     writeFileSync(OUT, JSON.stringify(out, null, 2) + '\n');
