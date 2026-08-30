@@ -23,8 +23,9 @@ The canonical description of user-facing behavior. Every new feature lands here 
 ## Library (`/library`)
 
 - Header: violet eyebrow, title, gradient "Add music" button (multi-file picker).
-- Tabs (chips): **Playlists** (roadmap placeholder), **Artists** (grid, click plays the artist's tracks), **Albums** (grid, click plays the album), **Songs** (numbered rows: art, title/artist, composer, duration; click plays from that row within the filtered list).
-- "Recently added" rows (first 8) under the grid tabs.
+- Tabs (chips): **Playlists** (roadmap placeholder), **Artists** (grid), **Albums** (grid), **Songs** (numbered rows: art, title/artist, composer, duration; click plays from that row within the filtered list).
+- Clicking an album or artist tile browses it rather than playing it: an accent ring marks the selected tile, and the row list below the grid — otherwise "Recently added" — shows that album's tracks (in album running order) or that artist's tracks instead, with a "Back to recently added" link to clear it. Clicking a row plays from that list. Re-clicking the selected tile, or switching tabs, clears the selection back to "Recently added".
+- "Recently added" rows (first 8, newest scan first) under the grid tabs when nothing is selected.
 - Empty library → empty state with "Add folder" CTA. Titlebar search filters every view.
 
 ## Discover (`/discover`)
