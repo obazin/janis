@@ -28,7 +28,7 @@ const MIRRORS = ['https://de1.api.radio-browser.info', 'https://nl1.api.radio-br
 // How many freshly pulled stations to keep per country (the curated seed adds
 // on top). Sums to ~880; with the ~100 curated that lands the catalog near 1000.
 const CAPS = {
-    US: 130, GB: 80, DE: 80, FR: 55, IT: 55, ES: 50, NL: 45, PL: 40, GR: 35,
+    US: 130, GB: 80, DE: 80, FR: 55, IT: 55, ES: 50, BR: 45, NL: 45, PL: 40, GR: 35,
     BE: 30, SE: 30, PT: 30, CH: 25, AT: 25, IE: 25, DK: 25, NO: 25, FI: 25,
     CZ: 25, RO: 25, HU: 20,
 };
