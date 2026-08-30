@@ -1,5 +1,9 @@
 <script lang="ts">
-    import { libraryStore, type AlbumGroup } from '$lib/features/library/LibraryStore.svelte';
+    import {
+        libraryStore,
+        type AlbumGroup,
+        type ArtistGroup,
+    } from '$lib/features/library/LibraryStore.svelte';
     import { playerStore } from '$lib/features/player/PlayerStore.svelte';
     import { fmtTime } from '$lib/features/player/format';
     import { searchQuery } from '$lib/stores/SearchStore';
@@ -25,6 +29,42 @@
     };
 
     let tab = $state<Tab>('albums');
+
+    // Clicking an album or artist tile browses it rather than playing it —
+    // the list below (otherwise "Recently added") shows its tracks until
+    // the selection is cleared or the tab changes. A playlist selection
+    // will join this union once playlists have real data to select.
+    type Selection = { kind: 'album' | 'artist'; key: string; label: string; tracks: Track[] };
+    let selection = $state<Selection | null>(null);
+
+    function selectTab(candidate: Tab) {
+        tab = candidate;
+        selection = null;
+    }
+
+    function toggleSelection(next: Selection) {
+        // Re-clicking the selected tile is how you back out of it, short of
+        // clearing it explicitly or switching tabs.
+        selection = selection?.kind === next.kind && selection.key === next.key ? null : next;
+    }
+
+    function selectAlbum(album: AlbumGroup) {
+        toggleSelection({
+            kind: 'album',
+            key: album.key,
+            label: album.album ?? t('common.unknownAlbum'),
+            tracks: album.tracks,
+        });
+    }
+
+    function selectArtist(artist: ArtistGroup) {
+        toggleSelection({
+            kind: 'artist',
+            key: artist.artist,
+            label: artist.artist,
+            tracks: artist.tracks,
+        });
+    }
 
     function matches(track: Track, query: string): boolean {
         return [
@@ -61,6 +101,10 @@
         libraryStore.artists.filter((a) => a.tracks.some((tr) => filteredTracks.includes(tr))),
     );
     const recentTracks = $derived(filteredTracks.slice(0, 8));
+    // What the list below the grid shows: the selected album/artist's own
+    // tracks, or "Recently added" when nothing is selected.
+    const listTracks = $derived(selection ? selection.tracks : recentTracks);
+    const listHeading = $derived(selection ? selection.label : t('library.recentlyAdded'));
 
     function playFrom(list: readonly Track[], track: Track) {
         playerStore.playQueue([...list], list.indexOf(track));
@@ -97,7 +141,7 @@
                 <Chip
                     label={t(TAB_KEYS[candidate])}
                     active={tab === candidate}
-                    onclick={() => (tab = candidate)}
+                    onclick={() => selectTab(candidate)}
                 />
             {/each}
         </div>
@@ -117,7 +161,8 @@
                         seed="{album.artist ?? ''}-{album.album ?? ''}"
                         coverTrackId={album.tracks[0]?.id ?? null}
                         detail={albumDetail(album)}
-                        onclick={() => playerStore.playQueue(album.tracks, 0)}
+                        active={selection?.kind === 'album' && selection.key === album.key}
+                        onclick={() => selectAlbum(album)}
                     />
                 {/each}
             </div>
@@ -129,7 +174,8 @@
                         subtitle={t('library.tracks', { count: artist.tracks.length })}
                         seed={artist.artist}
                         coverTrackId={artist.tracks[0]?.id ?? null}
-                        onclick={() => playerStore.playQueue(artist.tracks, 0)}
+                        active={selection?.kind === 'artist' && selection.key === artist.artist}
+                        onclick={() => selectArtist(artist)}
                     />
                 {/each}
             </div>
@@ -141,11 +187,26 @@
             </div>
         {/if}
 
-        {#if tab !== 'songs' && recentTracks.length}
-            <SectionLabel class="mb-2">{t('library.recentlyAdded')}</SectionLabel>
+        {#if tab !== 'songs' && listTracks.length}
+            <div class="flex items-center justify-between mb-2">
+                <SectionLabel>{listHeading}</SectionLabel>
+                {#if selection}
+                    <button
+                        class="cursor-pointer text-caption font-bold text-accent transition-opacity duration-fast hover:opacity-80"
+                        onclick={() => (selection = null)}
+                    >
+                        {t('library.backToRecentlyAdded')}
+                    </button>
+                {/if}
+            </div>
             <div class="rounded-card overflow-hidden border border-border">
-                {#each recentTracks as track, i (track.id)}
-                    <TrackRow {track} index={i} onclick={() => playFrom(recentTracks, track)} />
+                {#each listTracks as track, i (track.id)}
+                    <TrackRow
+                        {track}
+                        index={i}
+                        useTrackNumber={selection?.kind === 'album'}
+                        onclick={() => playFrom(listTracks, track)}
+                    />
                 {/each}
             </div>
         {/if}

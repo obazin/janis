@@ -44,6 +44,7 @@
     "library.tab.albums": "Albums",
     "library.tab.songs": "Titres",
     "library.recentlyAdded": "Ajouts récents",
+    "library.backToRecentlyAdded": "Retour aux ajouts récents",
     "library.tracks": "{count} titres",
     "library.playlistsSoon.title": "Les playlists arrivent",
     "library.playlistsSoon.desc": "La création et l'édition de playlists arriveront dans une prochaine version. Parcourez vos albums, artistes et titres en attendant.",
