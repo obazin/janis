@@ -11,6 +11,7 @@
     import Eyebrow from '$lib/design-system/atoms/Eyebrow.svelte';
     import SectionLabel from '$lib/design-system/atoms/SectionLabel.svelte';
     import ToggleRow from '$lib/design-system/molecules/ToggleRow.svelte';
+    import { isMac } from '$lib/utils/platform';
 
     const PLAYBACK_ROWS: { option: PlaybackOption; label: TranslationKey; desc: TranslationKey }[] =
         [
@@ -60,6 +61,18 @@
             />
         {/each}
     </div>
+
+    {#if !isMac()}
+        <SectionLabel class="mb-3">{t('settings.interface')}</SectionLabel>
+        <div class="rounded-card overflow-hidden border border-border mb-8">
+            <ToggleRow
+                label={t('settings.hideTitleBar')}
+                description={t('settings.hideTitleBar.desc')}
+                checked={preferencesStore.hideTitleBar}
+                onToggle={() => preferencesStore.setHideTitleBar(!preferencesStore.hideTitleBar)}
+            />
+        </div>
+    {/if}
 
     <SectionLabel class="mb-3">{t('settings.output')}</SectionLabel>
     <div class="flex gap-3.5 flex-wrap mb-8">
