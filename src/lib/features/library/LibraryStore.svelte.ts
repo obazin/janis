@@ -1,6 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
 import type { Track, WatchedFolder, ScanReport, CoverArt } from '$lib/models/Track';
+import { notificationStore } from '$lib/stores/NotificationStore.svelte';
 
 const AUDIO_EXTENSIONS = ['mp3', 'flac', 'wav', 'm4a', 'aac', 'ogg', 'opus', 'aif', 'aiff'];
 
@@ -56,6 +57,9 @@ class LibraryStore {
     /** Embedded art, keyed by track. `null` means the file carries none. */
     #covers = $state<Map<number, string | null>>(new Map());
     #coverRequests = new Set<number>();
+    // Track ids whose art fetch failed (unreachable file), so tiles can show
+    // an "unavailable" mark rather than a gradient that looks deliberate.
+    #coverFailures = $state<Set<number>>(new Set());
 
     get tracks(): readonly Track[] {
         return this.#tracks;
@@ -155,10 +159,17 @@ class LibraryStore {
                 })
                 .catch((err) => {
                     console.error('get_track_cover failed:', err);
+                    this.#coverFailures = new Set(this.#coverFailures).add(trackId);
+                    notificationStore.error('error.cover', { dedupeKey: 'cover-unavailable' });
                     this.#setCover(trackId, null);
                 });
         }
         return null;
+    }
+
+    /** True when this track's art was expected but its fetch failed. */
+    coverFailedFor(trackId: number): boolean {
+        return this.#coverFailures.has(trackId);
     }
 
     #setCover(trackId: number, url: string | null) {

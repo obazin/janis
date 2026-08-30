@@ -169,5 +169,9 @@
     "player.seek": "Position",
     "common.unknownArtist": "Artiste inconnu",
     "common.unknownAlbum": "Album inconnu",
-    "common.localFile": "Fichier local"
+    "common.localFile": "Fichier local",
+    "error.playback": "Lecture impossible — {message}",
+    "error.radio": "Connexion impossible à {name}",
+    "error.cover": "Illustration indisponible — la source est peut-être injoignable",
+    "notification.dismiss": "Fermer"
 }

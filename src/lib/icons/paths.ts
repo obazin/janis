@@ -26,6 +26,8 @@ export const ICONS = {
     close: 'M6 6l12 12M18 6L6 18',
     folder: 'M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z',
     refresh: 'M21 12a9 9 0 11-2.64-6.36M21 3v6h-6',
+    alert: 'M12 4l9 15H3zM12 10v4M12 16.5h.01',
+    imageOff: 'M4 5h16v14H4zM4 15l4-4 3 3 4-4 5 5M4 4l16 16',
 } as const;
 
 export type IconName = keyof typeof ICONS;

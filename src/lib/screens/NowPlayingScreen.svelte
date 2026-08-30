@@ -13,6 +13,7 @@
     import Eyebrow from '$lib/design-system/atoms/Eyebrow.svelte';
     import SectionLabel from '$lib/design-system/atoms/SectionLabel.svelte';
     import EmptyState from '$lib/design-system/atoms/EmptyState.svelte';
+    import { notificationStore } from '$lib/stores/NotificationStore.svelte';
     import { ICONS } from '$lib/icons/paths';
     import { t } from '$lib/i18n/LanguageStore.svelte';
 
@@ -90,6 +91,9 @@
                         coverUrl={playerStore.coverUrl}
                         initials={artInitials(title)}
                         gradIndex={station?.gradIndex}
+                        unavailable={playerStore.coverFailed}
+                        onImageError={() =>
+                            notificationStore.error('error.cover', { dedupeKey: 'cover-unavailable' })}
                         class="size-full rounded-art shadow-art ring-1 ring-inset ring-border-emphasis"
                     />
                 </div>

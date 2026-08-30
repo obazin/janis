@@ -169,5 +169,9 @@
     "player.seek": "Seek",
     "common.unknownArtist": "Unknown artist",
     "common.unknownAlbum": "Unknown album",
-    "common.localFile": "Local file"
+    "common.localFile": "Local file",
+    "error.playback": "Couldn't play this track — {message}",
+    "error.radio": "Couldn't connect to {name}",
+    "error.cover": "Cover art couldn't load — the source may be unreachable",
+    "notification.dismiss": "Dismiss"
 }

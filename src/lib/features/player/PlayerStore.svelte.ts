@@ -2,6 +2,7 @@ import { invoke } from '@tauri-apps/api/core';
 import type { Track, CoverArt } from '$lib/models/Track';
 import type { Station } from '$lib/models/Station';
 import { audioEngine, type EngineEvent } from './audioEngine';
+import { notificationStore } from '$lib/stores/NotificationStore.svelte';
 
 // The playback store. Rust owns the queue, the transport and the signal path;
 // this is a reactive mirror of the engine plus the bits of presentation the
@@ -31,6 +32,7 @@ class PlayerStore {
     #currentTime = $state(0);
     #duration = $state(0);
     #coverUrl = $state<string | null>(null);
+    #coverFailed = $state(false);
     #sampleRate = $state<number | null>(null);
     #deviceName = $state<string | null>(null);
 
@@ -78,6 +80,10 @@ class PlayerStore {
     /** Art for whatever is playing: the track's own, or the station's. */
     get coverUrl() {
         return this.mode === 'radio' ? this.#streamCover : this.#coverUrl;
+    }
+    /** True when the local track's art was expected but its fetch failed. */
+    get coverFailed() {
+        return this.mode === 'local' && this.#coverFailed;
     }
     /** What the station says it is playing, when it says anything. */
     get streamTitle() {
@@ -233,6 +239,9 @@ class PlayerStore {
                 break;
             case 'error':
                 console.error('audio engine:', event.data.message);
+                notificationStore.error('error.playback', {
+                    params: { message: event.data.message },
+                });
                 break;
         }
     }
@@ -277,6 +286,7 @@ class PlayerStore {
             .playStream(station.id, station.url, station.nowPlaying)
             .catch((err) => {
                 console.error('radio play failed:', err);
+                notificationStore.error('error.radio', { params: { name: station.name } });
                 this.#station = null;
                 this.#stationId = null;
             })
@@ -346,13 +356,17 @@ class PlayerStore {
     async #loadCover(track: Track | undefined) {
         const epoch = ++this.#coverEpoch;
         this.#coverUrl = null;
+        this.#coverFailed = false;
         if (!track) return;
         try {
             const cover = await invoke<CoverArt | null>('get_track_cover', { trackId: track.id });
             if (epoch !== this.#coverEpoch) return;
             this.#coverUrl = cover ? `data:${cover.mime};base64,${cover.dataBase64}` : null;
         } catch (err) {
+            if (epoch !== this.#coverEpoch) return;
             console.error('get_track_cover failed:', err);
+            this.#coverFailed = true;
+            notificationStore.error('error.cover', { dedupeKey: 'cover-unavailable' });
         }
     }
 }

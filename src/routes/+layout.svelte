@@ -16,6 +16,7 @@
     import SidebarNav from '$lib/design-system/organisms/SidebarNav.svelte';
     import MiniPlayer from '$lib/features/player/MiniPlayer.svelte';
     import EqualizerOverlay from '$lib/features/eq/EqualizerOverlay.svelte';
+    import Toaster from '$lib/design-system/organisms/Toaster.svelte';
     import { ICONS } from '$lib/icons/paths';
 
     interface Props {
@@ -102,5 +103,6 @@
         </div>
         <MiniPlayer />
         <EqualizerOverlay />
+        <Toaster />
     </div>
 {/await}
