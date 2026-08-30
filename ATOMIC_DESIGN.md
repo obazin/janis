@@ -247,10 +247,7 @@ extract it into a real component.
 
 **Symptom.** What worked at 30 components becomes opaque at 300.
 
-**Cure.** Maintain a **single inventory document** (see Janis's
-`docs/design-system-inventory.md`) so the system is browsable. Treat new
-components as **internal-first** — let them prove they belong before
-promoting them into the public design-system layer.
+**Cure.** Maintain a **single inventory** so the system is browsable — for Janis, at its current size, that inventory is the Design System section of `CLAUDE.md`, which names every atom, molecule and organism. Treat new components as **internal-first** — let them prove they belong before promoting them into the public design-system layer.
 
 ---
 
@@ -270,16 +267,17 @@ src/lib/
     atoms/      molecules/   organisms/   # Domain-agnostic primitives. Check here first.
 
   features/                               # Capability-shaped domain code (NOT screen-shaped).
-    player/                               # Playback engine + transport + visualisers
-      PlayerStore.svelte.ts               # Feature owns its state.
-      audioGraph.ts  visualizer.ts        # Web Audio graph + shared frame data
-      MiniPlayer.svelte  WaveformCanvas.svelte  SpectrumPanel.svelte  …
+    player/                               # Engine mirror + transport + visualisers
+      PlayerStore.svelte.ts               # Feature owns its state (a mirror of the Rust engine).
+      audioEngine.ts  visualizer.ts       # IPC client for the Rust engine + shared frame data
+      MiniPlayer.svelte  WaveformCanvas.svelte  NowPlayingQueue.svelte  …
     eq/                                   # 10-band EQ
-      EqStore.svelte.ts  presets.ts
-      EqualizerOverlay.svelte  EqBandSlider.svelte
+      EqStore.svelte.ts  presets.ts  bands.ts
+      EqualizerOverlay.svelte  EqBandSlider.svelte  OpenEqButton.svelte
     library/                              # Track library (scan, folders, grouping)
       LibraryStore.svelte.ts
       TrackRow.svelte  LocalRow.svelte  AlbumCard.svelte  ShelfTile.svelte
+      CoverArt.svelte  ArtistSpotlight.svelte
     radio/                                # Curated web-radio stations
       stations.ts  StationCard.svelte
     settings/                             # Playback preferences
@@ -295,11 +293,11 @@ src/lib/
 src/routes/                               # SvelteKit routes — 1-line wrappers around screens.
 ```
 
-**Dependency direction is one-way and acyclic:**
+**Dependency direction between the layers is one-way:**
 
 - `design-system/` depends on nothing.
-- `features/<X>/` depends on `design-system/` first; allowed cross-feature edges (kept minimal, all pointing AT `player/`): `eq → player` (the graph owns the filters), `library → player`, `radio → player` (both hand the player a queue/stream). The `player/` feature itself depends only on `design-system/` and `models/`.
-- `screens/` depends on `features/<any>` + `design-system/`. Screens are the only layer that freely crosses feature boundaries.
+- `features/<X>/` depends on `design-system/` first; allowed cross-feature edges (kept minimal): `library → player`, `radio → player`, `settings → player` — every feature drives playback through the player's engine client — plus the deliberately mutual pair `eq ↔ player`, because the EQ and the player describe one signal path (the EQ store drives the engine's filters; the player's canvases and EQ affordance render EQ state).
+- `screens/` depends on `features/<any>` + `design-system/`. Screens are the only layer that freely crosses feature boundaries — NowPlayingScreen, for instance, resolves library data and hands it to the player's queue card, so the player never imports the library.
 
 This separation is what makes the design system extractable and what
 gives "reuse-first" a physical meaning (scan `design-system/` first,
@@ -360,10 +358,7 @@ Where state lives matters more than how it's implemented:
 | Templates / Layouts   | Boot-time wiring (`bootPromise`)                 |
 | Pages / Screens       | Compose stores + organisms; thin orchestration   |
 
-This is the Svelte translation of "manage state at higher levels and pass
-it down via props". For Janis specifically, see CLAUDE.md rules 15–16 for
-the store-shape policy (setter methods for persistent state, public
-`$state` fields for ephemeral state).
+This is the Svelte translation of "manage state at higher levels and pass it down via props". For Janis specifically, see CLAUDE.md rule 13 for the store-shape policy (setter methods for persistent state, public `$state` fields for ephemeral state).
 
 ### 6.5 Reactivity primitives (Svelte 5 runes)
 
@@ -377,7 +372,7 @@ covers its needs:
 | `let z = $derived.by(() => …)` | Same as `$derived`, but with a function body for non-trivial expressions.                                                       | Organisms, screens                   |
 | `$effect(() => { … })`         | DOM-side effects, subscriptions, imperative APIs. Returns an optional cleanup.                                                  | Organisms, screens, stores           |
 | `setContext` / `getContext`    | Pass values down a subtree without prop drilling — typed via a `Symbol` key.                                                    | Templates / organism trees           |
-| Stores in `*.svelte.ts` files  | Cross-screen reactive state with persistence or side effects. Setter methods are the chokepoint for writes (see Janis rule 15). | Above the screen layer               |
+| Stores in `*.svelte.ts` files  | Cross-screen reactive state with persistence or side effects. Setter methods are the chokepoint for writes (see Janis rule 13). | Above the screen layer               |
 
 **On memoisation.** Svelte's compiled reactivity tracks dependencies at the
 expression level and updates only the DOM nodes that depend on a changed
@@ -399,8 +394,7 @@ tools that fit this role are:
 
 Whichever you pick, the discipline is the same:
 
-- One story per meaningful variant (states, sizes, themes — for Janis, all
-  four `[data-theme]` values).
+- One story per meaningful variant (states and sizes — Janis ships a single dark "prism" theme, so there are no theme variants to cover; see CLAUDE.md rule 4).
 - Cover edge cases (long text, empty state, error state, RTL) before the
   component lands in a page.
 - Co-locate stories with the component file so they evolve together.
@@ -411,10 +405,7 @@ substitute.
 
 ### 6.7 Validation against design
 
-Whenever a component originates from Figma, the design system layer is
-**the contract** between visual intent and code. Use Code Connect mappings
-(`<Component>.figma.ts`) so the Figma MCP server returns the _mapped_
-component rather than re-deriving markup. See `.claude/rules/figma-design-system.md`.
+Whenever a component originates from Figma, the design system layer is **the contract** between visual intent and code. Use Code Connect mappings (`<Component>.figma.ts`) so the Figma MCP server returns the _mapped_ component rather than re-deriving markup. (Janis has no Figma source today; this applies if one is introduced.)
 
 ---
 
@@ -473,22 +464,11 @@ Each feature folder is **capability-shaped** — a coherent unit of
 functionality that screens can compose. Features own their stores +
 tier files. Features do **not** own screens.
 
-- **`player/`** — the playback engine. Store: `PlayerStore.svelte.ts`
-  (queue, transport, volume, two audio elements). Infrastructure:
-  `audioGraph.ts` (the Web Audio EQ/analyser chain), `visualizer.ts`
-  (shared per-frame wave/spectrum data), `format.ts`. Components:
-  `MiniPlayer`, `WaveformCanvas`, `SpectrumPanel`, `TransportControls`,
-  `VolumeSlider`.
-- **`eq/`** — the 10-band EQ. Store: `EqStore.svelte.ts`. Data:
-  `presets.ts`. Components: `EqualizerOverlay` (bottom sheet),
-  `EqBandSlider`.
-- **`library/`** — the track library. Store: `LibraryStore.svelte.ts`
-  (DB mirror + scan actions + album/artist grouping). Components:
-  `TrackRow`, `LocalRow`, `AlbumCard`, `ShelfTile`.
-- **`radio/`** — curated web radio. Data: `stations.ts`. Component:
-  `StationCard`.
-- **`settings/`** — playback preferences. Store:
-  `PreferencesStore.svelte.ts`.
+- **`player/`** — the engine mirror. Store: `PlayerStore.svelte.ts` (queue, transport, volume — a reactive mirror of the Rust engine, which owns the actual audio). Infrastructure: `audioEngine.ts` (the IPC client for the Rust engine), `visualizer.ts` (shared per-frame visual data), `format.ts`. Components: `MiniPlayer`, `WaveformCanvas`, `NowPlayingQueue`, `TransportControls`, `VolumeSlider`.
+- **`eq/`** — the 10-band EQ. Store: `EqStore.svelte.ts`. Data: `presets.ts`, `bands.ts`. Components: `EqualizerOverlay` (bottom sheet), `EqBandSlider`, `OpenEqButton`.
+- **`library/`** — the track library. Store: `LibraryStore.svelte.ts` (DB mirror + scan actions + album/artist grouping). Components: `TrackRow`, `LocalRow`, `AlbumCard`, `ShelfTile`, `CoverArt`, `ArtistSpotlight`.
+- **`radio/`** — curated web radio. Data: `stations.ts`. Component: `StationCard`.
+- **`settings/`** — playback preferences. Store: `PreferencesStore.svelte.ts`.
 
 ### The screens (`src/lib/screens/`)
 
@@ -496,8 +476,7 @@ Compositions that wire features together into user-facing experiences.
 Atomic-design "pages" in the pure sense — they sit ABOVE the atomic
 tiers and consume from them.
 
-- **`NowPlayingScreen`** — hero art + metadata + waveform + transport +
-  spectrum, all fed by the player feature.
+- **`NowPlayingScreen`** — hero art + metadata + waveform + transport + queue card + artist spotlight, fed by the player and library features.
 - **`LibraryScreen`** — tabs over the library feature's groupings, with
   the design system's grid cards.
 - **`DiscoverScreen`** — shelves derived from the library.
@@ -512,14 +491,11 @@ tiers and consume from them.
 
 The mandatory project rules in `CLAUDE.md` enforce the atomic discipline:
 
-- **Rule 9** — every clickable icon button needs a corresponding
-  `IconButtonIdentifier` entry. The enum is the **atom registry**.
-- **Rule 13** — screens are thin containers (i.e. proper pages, not
-  god-components).
-- **Rule 17** — reuse-first. Before writing new markup, search atoms and
-  molecules. A pattern repeated three times inline is a missing atom.
+- **Rule 9** — every clickable icon button needs a corresponding `IconButtonIdentifier` entry. The enum is the **atom registry**.
+- **Rule 11** — screens are thin containers (i.e. proper pages, not god-components).
+- **Rule 15** — reuse-first. Before writing new markup, search atoms and molecules. A pattern repeated three times inline is a missing atom.
 
-The catalogue lives in [`docs/design-system-inventory.md`](docs/design-system-inventory.md).
+The component catalogue lives in the Design System section of `CLAUDE.md`.
 
 ---
 
@@ -530,7 +506,7 @@ The catalogue lives in [`docs/design-system-inventory.md`](docs/design-system-in
 - [ ] Is the API generic enough that **a second, unrelated caller** could
       reuse it without modification?
 - [ ] Does it own only state appropriate to its tier?
-- [ ] Are all user-facing strings going through `t('key')` (Janis rule 12)?
+- [ ] Are all user-facing strings going through `t('key')` (Janis rule 10 — new keys land in both `en.json` and `fr.json`)?
 - [ ] Are all colours, sizes, and durations using semantic tokens — no
       Tailwind magic numbers (Janis rule 3a)?
 - [ ] If it's reusable, is there a `<Component>.figma.ts` mapping?
@@ -563,5 +539,4 @@ pattern, fix the pattern, not the page.
   <https://propelius.tech/blogs/atomic-design-in-react-best-practices/>
   (the source's React-specific advice has been translated to Svelte 5
   idioms throughout this document)
-- Janis-specific application — `CLAUDE.md` (rules 9, 13, 17),
-  `docs/design-system-inventory.md`, `.claude/rules/figma-design-system.md`
+- Janis-specific application — `CLAUDE.md` (rules 9, 11, 15, and the Design System section, which doubles as the component catalogue)

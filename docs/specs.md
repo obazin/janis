@@ -15,7 +15,7 @@ The canonical description of user-facing behavior. Every new feature lands here 
 - Empty state (nothing loaded): icon + "Add music" CTA → file picker.
 - Left column (sticky): album art — embedded cover art when the file has one, else a deterministic prism-gradient tile with title initials — ringed by a slow-spinning conic glow. Below: quality badge ("Hi-Res · FLAC 24/96" — Hi-Res when >16-bit or >48 kHz) and a lime "Lossless" badge for lossless formats. Radio mode shows genre + LIVE badges instead.
 - Right column: pink eyebrow ("NOW PLAYING · FROM {ALBUM}" / "LIVE RADIO · {STATION}"), hero title, artist / composer (teal, only when tagged) / album columns. In radio mode the hero shows the track the station is playing, falling back to the station name, with artist and album columns when known and station + genre beneath. The art tile shows real cover art from stations that publish it.
-- **Waveform** — live time-domain oscilloscope over the playing signal, taken from the engine's analyser after the EQ (synthetic animation only when nothing is playing). Progress wash + playhead dot; click seeks (local tracks only). Time row shows elapsed / total ("Live" for radio).
+- **Waveform** — live time-domain oscilloscope over the playing signal, taken from the engine's analyser after the EQ and gain, so the trace scales with the volume slider (synthetic animation only when nothing is playing). Progress wash + playhead dot; click seeks (local tracks only). Time row shows elapsed / total ("Live" for radio).
 - **Transport** — shuffle (accent when on), prev, gradient pulse play/pause, next, repeat (accent when on); volume rail with pink→teal fill, persisted debounced.
 - **Queue card** — three-way segmented toggle: **Up Next** (remaining queue after the current track, wrapping once), **Playlist** (the full play queue, current track highlighted), **Album** (the current track's album from the library grouping). Rows show art, title/artist and duration; clicking a row plays from it. An "EQ" pill in the card header opens the equalizer overlay.
 - **Artist spotlight** (local tracks with library matches) — two columns under the queue card: up to 4 more tracks by the current artist (click plays within the artist's tracks) and up to 4 of their albums (click plays the album).
@@ -49,10 +49,11 @@ The canonical description of user-facing behavior. Every new feature lands here 
 ## Playback engine
 
 - **Volume normalization** evens out loudness across the library. A track's gain comes from its ReplayGain tags where it has them; otherwise the engine measures the track against EBU R128 while it plays, and remembers the answer for next time — so the library fills itself in as it is listened to. Only a track heard start to finish is recorded; a seek abandons the measurement rather than storing a partial one. The gain is capped so a boost can never clip, and takes effect exactly as each track reaches the speakers, which matters at a gapless join where two tracks are in flight at once.
-- Decoding, the 10-band EQ, the analyser and output all run in Rust. One signal path for every source: file **or web radio stream** → symphonia decode → resample (bypassed when the source already matches the device rate) → ten peaking filters → analyser tap → volume → device.
+- Decoding, the 10-band EQ, the analyser and output all run in Rust. One signal path for every source: file **or web radio stream** → symphonia decode → resample (bypassed when the source already matches the device rate) → ten peaking filters → volume + normalization gain → analyser tap → device. The analyser sees the final signal, so the visualiser scales with the volume slider — that is by design, not a canvas bug.
 - Web radio is buffered over HTTP into the same decoder a file uses, so a station gets the EQ and a real visualiser. A dropped connection is reopened automatically, backing off from a second to half a minute across eight attempts before the station is reported as unreachable — servers restart, and falling silent is the wrong answer to something that fixes itself.
 - **What a station is playing** comes from one of two sources. Stations whose operator publishes a now-playing endpoint (SomaFM, the FIP and France Musique webradios, Mouv', Radio Paradise — 64 of the curated list) are polled for artist, title, album and cover art; Radio France and Radio Paradise supply the artwork, and Radio France says when the track ends so the next poll lands just after it. Everything else falls back to the ICY metadata carried in the stream, parsed into artist and title where its shape allows. A station with a provider ignores ICY: two feeds disagreeing about timing reads worse than either alone.
-- Rust owns the queue and the transport; the frontend mirrors engine state and sends commands. Playback survives a webview reload — the engine replays its state on reconnect.
+- Rust owns the queue and the transport; the frontend mirrors engine state and sends commands. Playback survives a webview reload — the engine replays its state on reconnect, including the queue's track ids and the playing station's id, from which the UI rebuilds what it shows.
+- Pressing Play after a queue has run its course starts the last track again rather than doing nothing, and switching the output device mid-track continues playback on the new device at its own sample rate and channel layout.
 - **Shuffle** walks a real permutation of the queue, so every track is heard once before any repeats, and reshuffles when a repeating queue wraps.
 - The visualiser is fed by the engine at ~60 Hz as a compact binary frame (160 waveform points + 10 band magnitudes).
 
@@ -61,7 +62,7 @@ The canonical description of user-facing behavior. Every new feature lands here 
 - Lime eyebrow. Dashed drop zone: click opens the file picker; OS drag-and-drop works window-wide. Formats: MP3, FLAC, WAV, AAC/M4A, OGG/Vorbis, Opus, AIFF — all decoded in Rust. Opus is mono or stereo; multichannel Opus is not supported.
 - "Scanned library · N files" header with the last scan report (added/updated/skipped), "Add folder" and "Rescan" ghost buttons.
 - Table: title, artist, lime format chip, duration. Click plays from the filtered list.
-- Watched folders list: path, track count, per-folder Remove (cascade-deletes its tracks). Rescan re-walks all folders and prunes files that vanished.
+- Watched folders list: path, track count, per-folder Remove (cascade-deletes its tracks). Rescan re-walks all folders and prunes files that vanished — but only under roots that are still reachable, so rescanning with an external drive ejected leaves that drive's library (and its accumulated loudness measurements) intact.
 
 ## Spotify (`/spotify`)
 
@@ -70,7 +71,7 @@ The canonical description of user-facing behavior. Every new feature lands here 
 ## Settings (`/settings`)
 
 - Violet eyebrow. **Equalizer presets** chips (apply immediately + persist) and a "fine-tune" link opening the EQ sheet.
-- **Playback** toggles: gapless and normalization are live in the engine; crossfade and exclusive output are persisted preferences the engine does not act on yet (descriptions stay factual). Toggling normalization is heard immediately, mid-track.
+- **Playback** toggles: normalization is live in the engine, and toggling it is heard immediately, mid-track. Gapless is always on in the engine — the switch is a persisted preference the engine does not consult yet, like crossfade and exclusive output.
 - **Audio output** cards: the output device the engine opened and its sample rate (both populate once something has played; "System default" / "—" until then).
 - **Language** chips: English / Français. Persisted; `lang` attribute + localStorage FOUC mirror update immediately.
 - Open-source banner (GPL-3.0).
@@ -82,6 +83,6 @@ The canonical description of user-facing behavior. Every new feature lands here 
 ## Persistence (`janis.db`, app-data dir)
 
 - `user_preferences` (single row): volume, EQ gains + preset, four playback switches, language.
-- `watched_folders`: path, added_at. `tracks`: path (unique), folder_id (NULL = ad-hoc import), tags (title/artist/album/composer/album artist/genre/year, track and disc numbers with their totals), duration, format, sample rate, bit depth, channels, lossless, added_at. Upsert by path — rescans never duplicate.
+- `watched_folders`: path, added_at. `tracks`: path (unique), folder_id (NULL = ad-hoc import), tags (title/artist/album/composer/album artist/genre/year, track and disc numbers with their totals), duration, format, sample rate, bit depth, channels, lossless, added_at, the four ReplayGain tag columns (track/album gain and peak) and the measured loudness pair (`loudness_lufs`, `loudness_peak`) the normalization feature fills in as tracks are heard. Upsert by path — rescans never duplicate, and the measured loudness columns live outside the upsert so a rescan cannot wipe them.
 - Schema changes are migrations stamped in SQLite's `user_version`, so an existing library gains new columns instead of silently missing them.
 - The webview has no filesystem access at all: the engine reads audio files directly and cover art crosses IPC as base64, so Tauri's asset protocol is not enabled.
