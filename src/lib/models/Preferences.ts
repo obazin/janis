@@ -9,6 +9,7 @@ export interface Preferences {
     crossfade: boolean;
     normalize: boolean;
     exclusive: boolean;
+    hideTitleBar: boolean;
     language: string;
 }
 

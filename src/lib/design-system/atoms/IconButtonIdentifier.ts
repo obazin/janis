@@ -13,4 +13,7 @@ export enum IconButtonIdentifier {
     EqClose = 'eq-close',
     LocalRemoveFolder = 'local-remove-folder',
     LocalRescan = 'local-rescan',
+    WindowMinimize = 'window-minimize',
+    WindowMaximize = 'window-maximize',
+    WindowClose = 'window-close',
 }

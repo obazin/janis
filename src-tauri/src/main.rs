@@ -14,6 +14,28 @@ mod persistence;
 use tauri::Manager;
 
 fn main() {
+    // GTK only applies decorations before a window is realized.
+    let mut context = tauri::generate_context!();
+    let main_window_config = context
+        .config_mut()
+        .app
+        .windows
+        .iter_mut()
+        .find(|window| window.label == "main")
+        .map(|window| {
+            window.create = false;
+            window.clone()
+        })
+        .expect("main window config");
+    #[cfg(debug_assertions)]
+    let main_window_config = {
+        let mut config = main_window_config;
+        if let Some(dev_url) = context.config().build.dev_url.clone() {
+            config.url = tauri::WebviewUrl::External(dev_url);
+        }
+        config
+    };
+
     tauri::Builder::default()
         // FIRST plugin, deliberately: a second Janis launch is handed to the
         // running instance (which focuses its window) before any state or
@@ -26,10 +48,12 @@ fn main() {
         }))
         .plugin(tauri_plugin_log::Builder::default().build())
         .plugin(tauri_plugin_dialog::init())
-        .setup(|app| {
+        .setup(move |app| {
             let app_data_dir = app.path().app_data_dir()?;
             let db = persistence::init(app_data_dir).map_err(std::io::Error::other)?;
-            app.manage(db);
+            let hide_title_bar = persistence::read_preferences(&db.lock())
+                .map(|prefs| prefs.hide_title_bar)
+                .unwrap_or(false);
             // The engine thread starts here and outlives every screen — the
             // output device itself is opened lazily on first play, so a
             // machine with no sound card still boots. The `Subscribers` sink is
@@ -40,8 +64,19 @@ fn main() {
                 std::sync::Arc::new(library::LoudnessStore(app.handle().clone())),
                 std::sync::Arc::clone(&subscribers),
             );
+            app.manage(db);
             app.manage(engine);
             app.manage(subscribers);
+
+            let mut main_window_config = main_window_config.clone();
+            main_window_config.visible = false;
+            if !cfg!(target_os = "macos") && hide_title_bar {
+                main_window_config.decorations = false;
+            }
+            let main_window =
+                tauri::WebviewWindowBuilder::from_config(app.handle(), &main_window_config)?
+                    .build()?;
+            main_window.show()?;
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -49,6 +84,7 @@ fn main() {
             persistence::set_volume,
             persistence::set_eq,
             persistence::set_playback_option,
+            persistence::set_title_bar_hidden,
             persistence::set_language,
             library::list_tracks,
             library::list_watched_folders,
@@ -78,7 +114,7 @@ fn main() {
             audio::commands::audio_set_volume,
             audio::commands::audio_set_eq,
         ])
-        .build(tauri::generate_context!())
+        .build(context)
         .expect("error while building tauri application")
         // `build` + `run` rather than `run(context)`, so the engine thread can
         // be stopped and joined while the process is still alive. Dropping a

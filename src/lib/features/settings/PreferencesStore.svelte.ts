@@ -2,10 +2,8 @@ import { invoke } from '@tauri-apps/api/core';
 import type { Preferences, PlaybackOption } from '$lib/models/Preferences';
 import { audioEngine } from '$lib/features/player/audioEngine';
 
-// The playback switches (gapless / crossfade / normalize / exclusive).
-// Setter-method rune class: a toggle persists via IPC, and the ones the engine
-// acts on are pushed to it as well. Gapless, crossfade and normalization are
-// all live in the engine; exclusive output is still a stored preference only.
+// Persisted playback and window-chrome settings. Playback switches also push
+// into the engine; title-bar changes apply when Janis next opens.
 class PreferencesStore {
     #options = $state<Record<PlaybackOption, boolean>>({
         gapless: true,
@@ -14,8 +12,19 @@ class PreferencesStore {
         exclusive: false,
     });
 
+    #hideTitleBar = $state(false);
+    #frameless = $state(false);
+
     get options(): Readonly<Record<PlaybackOption, boolean>> {
         return this.#options;
+    }
+
+    get hideTitleBar(): boolean {
+        return this.#hideTitleBar;
+    }
+
+    get frameless(): boolean {
+        return this.#frameless;
     }
 
     /** Boot hydration from the preferences row. */
@@ -26,6 +35,8 @@ class PreferencesStore {
             normalize: prefs.normalize,
             exclusive: prefs.exclusive,
         };
+        this.#hideTitleBar = prefs.hideTitleBar;
+        this.#frameless = prefs.hideTitleBar;
         this.#push('gapless', prefs.gapless);
         this.#push('crossfade', prefs.crossfade);
         this.#push('normalize', prefs.normalize);
@@ -38,6 +49,13 @@ class PreferencesStore {
             console.error('set_playback_option failed:', err),
         );
         this.#push(option, enabled);
+    }
+
+    setHideTitleBar(hidden: boolean) {
+        this.#hideTitleBar = hidden;
+        invoke('set_title_bar_hidden', { hidden }).catch((err) =>
+            console.error('set_title_bar_hidden failed:', err),
+        );
     }
 
     /** Tells the engine about a switch it acts on. */

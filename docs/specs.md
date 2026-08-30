@@ -4,10 +4,10 @@ The canonical description of user-facing behavior. Every new feature lands here 
 
 ## App shell
 
-- **Titlebar** — prism logo mark + JANIS wordmark + "Open source" badge; centered search field. The field filters the Library, Local Files and Radio screens live (`searchQuery` channel). On macOS the native traffic lights overlay the left edge (`titleBarStyle: Overlay`); empty areas drag the window.
+- **Titlebar** — prism logo mark + JANIS wordmark + "Open source" badge; centered search field. The field filters the Library, Local Files and Radio screens live (`searchQuery` channel). On macOS the native traffic lights overlay the left edge (`titleBarStyle: Overlay`); empty areas drag the window. Elsewhere the Interface setting can remove the native frame, moving minimize, maximize/restore and close into the right side of this header.
 - **Sidebar** — three sections (Playing / Library / Sources) + Settings pinned at the bottom. Active row: pink→violet wash + accent ring. Navigation goes through `navigateTo()`; routes mirror screen names.
 - **Mini player** — persistent bottom bar: current art + title/artist (click → Now Playing), prev/play/next, live mini waveform, EQ button. Playback continues across all screens (task lifecycle independent of UI).
-- **Boot** — `+layout.svelte` awaits `get_preferences` + the library before rendering anything, so screens always see hydrated stores. Volume, EQ, playback switches and language persist in `janis.db`.
+- **Boot** — `+layout.svelte` awaits `get_preferences` + the library before rendering anything, so screens always see hydrated stores. Volume, EQ, playback switches, the title-bar frame switch and language persist in `janis.db`.
 - **OS drag-and-drop** — dropping audio files anywhere in the window imports them (Tauri drag-drop event; paths go to `import_files`).
 - **Error toasts** — failures surface, they never fail silently. A `Toaster` mounted in the shell shows an error toast (click to dismiss, auto-dismisses) whenever playback fails (the engine reports an unplayable/unreachable track), a radio station won't connect, or cover art can't load — the last case is deduplicated by key, so a disconnected source (e.g. a NAS going offline mid-session) raises one toast, not one per track. Messages carry a translation key, not resolved text, so a toast re-renders in the active language. Cover tiles whose art was expected but failed to load show a muted "unavailable" mark rather than the normal gradient, so a failed load reads differently from art that simply doesn't exist.
 
@@ -75,8 +75,8 @@ The canonical description of user-facing behavior. Every new feature lands here 
 
 - Violet eyebrow. **Equalizer presets** chips (apply immediately + persist) and a "fine-tune" link opening the EQ sheet.
 - **Playback** toggles: normalization, gapless and crossfade are all live in the engine, on by default; exclusive output is still a persisted preference the engine does not act on yet. Toggling normalization is heard immediately, mid-track. Gapless and crossfade take effect from the next track boundary (crossfade turned off mid-fade stops it immediately instead of letting it finish).
+- **Interface** (not macOS, which already uses the overlay titlebar): Hide title bar removes the native frame the next time Janis opens. Minimize, maximize/restore and close move into the app header.
 - **Audio output** cards: the output device the engine opened and its sample rate (both populate once something has played; "System default" / "—" until then).
-- **Language** chips: English / Français. Persisted; `lang` attribute + localStorage FOUC mirror update immediately.
 - Open-source banner (GPL-3.0).
 
 ## 10-band Equalizer (overlay)
@@ -85,7 +85,7 @@ The canonical description of user-facing behavior. Every new feature lands here 
 
 ## Persistence (`janis.db`, app-data dir)
 
-- `user_preferences` (single row): volume, EQ gains + preset, four playback switches, language.
+- `user_preferences` (single row): volume, EQ gains + preset, four playback switches, title-bar frame switch, language.
 - `watched_folders`: path, added_at. `tracks`: path (unique), folder_id (NULL = ad-hoc import), tags (title/artist/album/composer/album artist/genre/year, track and disc numbers with their totals), duration, format, sample rate, bit depth, channels, lossless, added_at, the four ReplayGain tag columns (track/album gain and peak) and the measured loudness pair (`loudness_lufs`, `loudness_peak`) the normalization feature fills in as tracks are heard. Upsert by path — rescans never duplicate, and the measured loudness columns live outside the upsert so a rescan cannot wipe them.
 - Schema changes are migrations stamped in SQLite's `user_version`, so an existing library gains new columns instead of silently missing them.
 - The webview has no filesystem access at all: the engine reads audio files directly and cover art crosses IPC as base64, so Tauri's asset protocol is not enabled.
