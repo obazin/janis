@@ -1,5 +1,6 @@
 <script lang="ts">
-    import { STATIONS, GENRE_FILTERS } from '$lib/features/radio/stations';
+    import { STATIONS, GENRE_FILTERS, COUNTRY_FILTERS } from '$lib/features/radio/stations';
+    import { countryFlag, countryLabelKey } from '$lib/features/radio/countries';
     import { radioViewStore } from '$lib/features/radio/RadioViewStore.svelte';
     import StationCard from '$lib/features/radio/StationCard.svelte';
     import { playerStore } from '$lib/features/player/PlayerStore.svelte';
@@ -8,9 +9,14 @@
     import Eyebrow from '$lib/design-system/atoms/Eyebrow.svelte';
     import { t } from '$lib/i18n/LanguageStore.svelte';
 
-    // The genre filter lives in `radioViewStore`, not screen-local `$state`
-    // — this screen component is destroyed and recreated on every
-    // navigation, and the filter is meant to survive that (CLAUDE.md rule 12).
+    // The genre and country filters live in `radioViewStore`, not screen-local
+    // `$state` — this screen component is destroyed and recreated on every
+    // navigation, and the filters are meant to survive that (CLAUDE.md rule 12).
+
+    // "All" first, then countries most-populated first (COUNTRY_FILTERS order).
+    const countryChips = $derived(['all', ...COUNTRY_FILTERS]);
+    const countryLabel = (code: string) =>
+        code === 'all' ? t('radio.country.all') : `${countryFlag(code)} ${t(countryLabelKey(code))}`;
 
     // "All" first, then genres by their label in the active language.
     const genreChips = $derived([
@@ -22,6 +28,7 @@
     const stations = $derived(
         STATIONS.filter(
             (s) =>
+                (radioViewStore.country === 'all' || s.country === radioViewStore.country) &&
                 (radioViewStore.genre === 'radio.genre.all' ||
                     s.genreKey === radioViewStore.genre) &&
                 (!query ||
@@ -36,6 +43,15 @@
     <h1 class="font-display font-black text-display tracking-tight m-0 mb-5">
         {t('radio.title')}
     </h1>
+    <div class="flex gap-2 flex-wrap mb-3">
+        {#each countryChips as code (code)}
+            <Chip
+                label={countryLabel(code)}
+                active={radioViewStore.country === code}
+                onclick={() => (radioViewStore.country = code)}
+            />
+        {/each}
+    </div>
     <div class="flex gap-2 flex-wrap mb-6.5">
         {#each genreChips as key (key)}
             <Chip
