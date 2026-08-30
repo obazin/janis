@@ -7,6 +7,7 @@
     import WaveformCanvas from './WaveformCanvas.svelte';
     import OpenEqButton from '$lib/features/eq/OpenEqButton.svelte';
     import { navigateTo } from '$lib/stores/NavigationStore.svelte';
+    import { notificationStore } from '$lib/stores/NotificationStore.svelte';
     import { ICONS } from '$lib/icons/paths';
     import { t } from '$lib/i18n/LanguageStore.svelte';
 
@@ -39,6 +40,9 @@
             seed={artSeed}
             coverUrl={playerStore.coverUrl}
             gradIndex={playerStore.station?.gradIndex}
+            unavailable={playerStore.coverFailed}
+            onImageError={() =>
+                notificationStore.error('error.cover', { dedupeKey: 'cover-unavailable' })}
             class="size-12 rounded-thumb flex-none"
         />
         <div class="min-w-0">

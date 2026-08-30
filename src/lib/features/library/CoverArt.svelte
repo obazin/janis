@@ -38,11 +38,14 @@
     });
 
     const coverUrl = $derived(onScreen && trackId !== null ? libraryStore.coverFor(trackId) : null);
+    const unavailable = $derived(
+        onScreen && trackId !== null ? libraryStore.coverFailedFor(trackId) : false,
+    );
 </script>
 
 <!-- The wrapper carries the caller's sizing and rounding, so the observer has
      a box to watch and the tile simply fills it. `overflow-hidden` here is
      what clips the art to the wrapper's corners. -->
 <div bind:this={box} class="{extra} overflow-hidden">
-    <ArtTile {seed} {coverUrl} {initials} {gradIndex} class="size-full" />
+    <ArtTile {seed} {coverUrl} {initials} {gradIndex} {unavailable} class="size-full" />
 </div>

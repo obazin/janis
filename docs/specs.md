@@ -9,6 +9,7 @@ The canonical description of user-facing behavior. Every new feature lands here 
 - **Mini player** — persistent bottom bar: current art + title/artist (click → Now Playing), prev/play/next, live mini waveform, EQ button. Playback continues across all screens (task lifecycle independent of UI).
 - **Boot** — `+layout.svelte` awaits `get_preferences` + the library before rendering anything, so screens always see hydrated stores. Volume, EQ, playback switches and language persist in `janis.db`.
 - **OS drag-and-drop** — dropping audio files anywhere in the window imports them (Tauri drag-drop event; paths go to `import_files`).
+- **Error toasts** — failures surface, they never fail silently. A `Toaster` mounted in the shell shows an error toast (click to dismiss, auto-dismisses) whenever playback fails (the engine reports an unplayable/unreachable track), a radio station won't connect, or cover art can't load — the last case is deduplicated by key, so a disconnected source (e.g. a NAS going offline mid-session) raises one toast, not one per track. Messages carry a translation key, not resolved text, so a toast re-renders in the active language. Cover tiles whose art was expected but failed to load show a muted "unavailable" mark rather than the normal gradient, so a failed load reads differently from art that simply doesn't exist.
 
 ## Now Playing (`/now-playing`)
 
