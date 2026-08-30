@@ -1,14 +1,15 @@
-// Shared per-frame visual data for the waveform + spectrum canvases.
+// Shared per-frame visual data for the waveform canvases.
 //
 // The engine pushes a 170-byte frame roughly sixty times a second: 160
 // waveform points then ten band magnitudes, already windowed, FFT'd, folded
-// and smoothed in Rust. The byte encoding matches what `AnalyserNode` used to
-// hand back (128 is silence in the trace, 0–255 across the band range), so the
-// canvases draw exactly what they drew before.
+// and smoothed in Rust. In the byte encoding, 128 is silence in the trace and
+// the band range spans 0–255. Every playing source feeds it — radio decodes
+// through the same engine path as a local file, so a station gets a real
+// trace, and a flat one means the frame channel is broken, not "expected".
 //
-// With no frame — nothing loaded, paused, or radio, which still plays outside
-// the engine — both fall back to a synthetic animation whose energy eases
-// toward zero, so the canvases never care which source fed them.
+// With no frame — nothing loaded, or paused — the canvases fall back to a
+// synthetic animation whose energy eases toward zero, so they never care
+// which source fed them.
 //
 // Every canvas runs its own rAF loop and calls `tick(now)`; the first call
 // of a frame does the work, later calls are no-ops.

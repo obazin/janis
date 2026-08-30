@@ -37,8 +37,9 @@ log = "0.4.29"
 # library version. `janis.db` holds the track library and user preferences.
 rusqlite = { version = "0.31", features = ["bundled"] }
 # Tag + audio-properties reading for every format Janis plays (MP3, FLAC,
-# WAV, AAC/ALAC in MP4, OGG/Opus, AIFF, WavPack). Also serves embedded cover
-# art for the Now Playing screen.
+# WAV, AAC/ALAC in MP4, OGG/Opus, AIFF — the list `AUDIO_EXTENSIONS` in
+# library.rs is authoritative). Also serves embedded cover art for the Now
+# Playing screen.
 lofty = "0.22"
 # Recursive folder walk for the library scanner.
 walkdir = "2"
