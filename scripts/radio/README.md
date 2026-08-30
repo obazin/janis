@@ -20,7 +20,8 @@ It fetches live from a Radio Browser mirror (with a fallback and a polite delay 
 ## Tuning
 
 - **Countries and volume** — edit `CAPS` at the top: the key is an ISO 3166-1 alpha-2 code, the value is how many fresh stations to keep for it. The curated seed adds on top.
-- **Genre mapping** — `GENRE_RULES` is an ordered list of `[genreKey, [tag keywords]]`. Each station scores one point per tag that matches a keyword; the highest score wins, ties break by list order; a station that matches nothing falls back to `radio.genre.variety`.
+- **Genre top-ups** — `GENRE_PULLS` deepens genres the per-country lists leave thin. Each entry `{ tag, genre, cap }` pulls the most-clicked stations for an exact Radio Browser tag, keeps up to `cap` of them (from the `CAPS` countries only), and labels them with `genre` outright. Add an entry to boost a genre.
+- **Genre mapping** — `GENRE_RULES` is an ordered list of `[genreKey, [tag keywords]]` used for the per-country pulls. Each station scores one point per tag that matches a keyword; the highest score wins, ties break by list order; a station that matches nothing falls back to `radio.genre.variety`.
 
 ## When the mapping introduces a new key
 
