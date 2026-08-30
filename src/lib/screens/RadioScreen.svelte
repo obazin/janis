@@ -1,6 +1,6 @@
 <script lang="ts">
     import { STATIONS, GENRE_FILTERS, COUNTRY_FILTERS } from '$lib/features/radio/stations';
-    import { countryFlag, countryLabelKey } from '$lib/features/radio/countries';
+    import { countryLabelKey } from '$lib/features/radio/countries';
     import { radioViewStore } from '$lib/features/radio/RadioViewStore.svelte';
     import StationCard from '$lib/features/radio/StationCard.svelte';
     import { playerStore } from '$lib/features/player/PlayerStore.svelte';
@@ -16,7 +16,7 @@
     // "All" first, then countries most-populated first (COUNTRY_FILTERS order).
     const countryChips = $derived(['all', ...COUNTRY_FILTERS]);
     const countryLabel = (code: string) =>
-        code === 'all' ? t('radio.country.all') : `${countryFlag(code)} ${t(countryLabelKey(code))}`;
+        code === 'all' ? t('radio.country.all') : t(countryLabelKey(code));
 
     // "All" first, then genres by their label in the active language.
     const genreChips = $derived([

@@ -1,7 +1,6 @@
 <script lang="ts">
     import type { Station } from '$lib/models/Station';
     import ArtTile from '$lib/design-system/atoms/ArtTile.svelte';
-    import { countryFlag } from '$lib/features/radio/countries';
     import { t } from '$lib/i18n/LanguageStore.svelte';
 
     interface Props {
@@ -28,7 +27,6 @@
     <div class="flex-1 min-w-0">
         <div class="font-bold text-heading-sm truncate">{station.name}</div>
         <div class="text-caption text-text-muted">
-            {countryFlag(station.country)}
             {t(station.genreKey)} · {t('radio.kbps', { kbps: station.kbps })}
         </div>
     </div>
