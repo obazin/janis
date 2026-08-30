@@ -42,12 +42,13 @@ rusqlite = { version = "0.31", features = ["bundled"] }
 walkdir = "2"
 
 # The whole audio path — engine, web radio, and audio-file metadata parsing —
-# lives in this standalone MIT crate. Janis imports only its facade: none of
-# the audio/metadata crates (cpal, symphonia, lofty, stream-download, opus, …)
-# are direct dependencies here any more. Janis's dev-profile `opt-level = 2`
-# override below still applies to it (and its transitive deps) as a path
-# dependency, so realtime DSP stays fast.
-audio-stack-rs = { path = "../../audio-stack-rs" }
+# lives in this standalone MIT crate (https://github.com/obazin/audio-stack-rs).
+# Janis imports only its facade: none of the audio/metadata crates (cpal,
+# symphonia, lofty, stream-download, opus, …) are direct dependencies here any
+# more. Pinned to a tag; `Cargo.lock` records the exact commit. Janis's
+# dev-profile `opt-level = 2` override below still applies to it (and its
+# transitive deps), so realtime DSP stays fast.
+audio-stack-rs = { git = "https://github.com/obazin/audio-stack-rs", tag = "v0.1.0" }
 
 [features]
 # This feature is used for production builds or when a dev server is not specified, DO NOT REMOVE!!

@@ -267,6 +267,7 @@ checksum = "1254ebf6529f3763c491acfb5ab6e960809e3c75a38584cc664f8c5667fb7107"
 [[package]]
 name = "audio-stack-rs"
 version = "0.1.0"
+source = "git+https://github.com/obazin/audio-stack-rs?tag=v0.1.0#4148f57a185d413f3b202694439998fb007db806"
 dependencies = [
  "base64 0.22.1",
  "biquad",
