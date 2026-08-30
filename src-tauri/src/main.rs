@@ -32,11 +32,16 @@ fn main() {
             app.manage(db);
             // The engine thread starts here and outlives every screen — the
             // output device itself is opened lazily on first play, so a
-            // machine with no sound card still boots.
-            app.manage(audio::init(
+            // machine with no sound card still boots. The `Subscribers` sink is
+            // shared: the engine sends through it, and `audio_subscribe` swaps
+            // its channels when the webview (re)connects.
+            let subscribers = std::sync::Arc::new(audio::Subscribers::default());
+            let engine = audio::init(
                 std::sync::Arc::new(library::LoudnessStore(app.handle().clone())),
-                None,
-            ));
+                std::sync::Arc::clone(&subscribers),
+            );
+            app.manage(engine);
+            app.manage(subscribers);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

@@ -36,71 +36,18 @@ log = "0.4.29"
 # `bundled` ships SQLite with the binary so we don't depend on the system
 # library version. `janis.db` holds the track library and user preferences.
 rusqlite = { version = "0.31", features = ["bundled"] }
-# Tag + audio-properties reading for every format Janis plays (MP3, FLAC,
-# WAV, AAC/ALAC in MP4, OGG/Opus, AIFF — the list `AUDIO_EXTENSIONS` in
-# library.rs is authoritative). Also serves embedded cover art for the Now
-# Playing screen.
-lofty = "0.22"
-# Recursive folder walk for the library scanner.
+# Recursive folder walk for the library scanner (the one filesystem concern
+# Janis keeps — everything the scanner reads *from* each file comes back
+# through the audio-stack facade).
 walkdir = "2"
-# Embedded cover art crosses IPC as a base64 payload.
-base64 = "0.22"
 
-# ── Audio engine ────────────────────────────────────────────────────────────
-# Cross-platform device I/O: CoreAudio, WASAPI, ALSA. Owns the realtime
-# callback — the only thread allowed to touch the output buffer.
-cpal = "0.18"
-# Decoding + demuxing. Non-default features are opt-in, so every container and
-# codec the library scanner accepts is enabled explicitly here; `opt-simd`
-# turns on the SSE/AVX/NEON kernels.
-symphonia = { version = "0.6", features = [
-    "aac",
-    "adpcm",
-    "aiff",
-    "alac",
-    "all-meta",
-    "flac",
-    "isomp4",
-    "mp3",
-    "ogg",
-    "opt-simd",
-    "pcm",
-    "vorbis",
-    "wav",
-] }
-# Sample-rate conversion, bypassed entirely when the file already matches the
-# device rate (the common case, and the only way to stay bit-transparent).
-rubato = "5"
-# The ten peaking filters of the EQ, one bank per channel.
-biquad = "0.6"
-# Real-input FFT for the spectrum bands — half the work of a complex FFT.
-realfft = "3.5"
-# Lock-free SPSC ring: decoder thread produces, realtime callback consumes.
-# Realtime-safe by construction (no allocation, no mutex in the callback).
-rtrb = "0.4"
-# Control-plane channel: IPC commands -> engine thread.
-crossbeam-channel = "0.5"
-# Opus. Symphonia 0.6 has no Opus decoder, so `audio/opus.rs` wraps libopus as
-# one. `opusic-sys` builds libopus from bundled source with cmake — see
-# flake.nix. `symphonia-common` is not re-exported by the `symphonia` facade
-# but carries the OpusHead parser, and is pinned to the same version so the
-# two cannot drift apart.
-# EBU R128 loudness, for files whose tags carry no ReplayGain. Pure Rust, so
-# it adds nothing to the build the way libopus does.
-ebur128 = "0.1"
-opus = "0.4"
-symphonia-common = "0.6.1"
-# Web radio. Buffers an HTTP stream into something `Read + Seek`, which is
-# what Symphonia needs — so a station goes through exactly the same decode,
-# EQ and analyser path as a local file. `default-features = false` keeps
-# reqwest off native-tls (and so off OpenSSL on Linux).
-stream-download = { version = "0.24", default-features = false, features = [
-    "reqwest",
-    "reqwest-rustls",
-    "temp-storage",
-] }
-# Icecast/Shoutcast in-band track titles, stripped out of the audio stream.
-icy-metadata = { version = "0.6", features = ["reqwest"] }
+# The whole audio path — engine, web radio, and audio-file metadata parsing —
+# lives in this standalone MIT crate. Janis imports only its facade: none of
+# the audio/metadata crates (cpal, symphonia, lofty, stream-download, opus, …)
+# are direct dependencies here any more. Janis's dev-profile `opt-level = 2`
+# override below still applies to it (and its transitive deps) as a path
+# dependency, so realtime DSP stays fast.
+audio-stack-rs = { path = "../../audio-stack-rs" }
 
 [features]
 # This feature is used for production builds or when a dev server is not specified, DO NOT REMOVE!!
