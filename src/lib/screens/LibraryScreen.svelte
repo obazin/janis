@@ -4,6 +4,12 @@
         type AlbumGroup,
         type ArtistGroup,
     } from '$lib/features/library/LibraryStore.svelte';
+    import {
+        libraryViewStore,
+        LIBRARY_TABS,
+        type LibraryTab,
+        type LibrarySelection,
+    } from '$lib/features/library/LibraryViewStore.svelte';
     import { playerStore } from '$lib/features/player/PlayerStore.svelte';
     import { fmtTime } from '$lib/features/player/format';
     import { searchQuery } from '$lib/stores/SearchStore';
@@ -19,33 +25,30 @@
     import { t } from '$lib/i18n/LanguageStore.svelte';
     import type { TranslationKey } from '$lib/i18n/types';
 
-    const TABS = ['playlists', 'artists', 'albums', 'songs'] as const;
-    type Tab = (typeof TABS)[number];
-    const TAB_KEYS: Record<Tab, TranslationKey> = {
+    const TAB_KEYS: Record<LibraryTab, TranslationKey> = {
         playlists: 'library.tab.playlists',
         artists: 'library.tab.artists',
         albums: 'library.tab.albums',
         songs: 'library.tab.songs',
     };
 
-    let tab = $state<Tab>('albums');
+    // Tab and selection live in `libraryViewStore`, not screen-local `$state`
+    // — this screen component is destroyed and recreated on every
+    // navigation, and a selection is meant to survive that (CLAUDE.md rule
+    // 12): leaving Library for another screen and coming back should still
+    // show the album or artist you were browsing.
 
-    // Clicking an album or artist tile browses it rather than playing it —
-    // the list below (otherwise "Recently added") shows its tracks until
-    // the selection is cleared or the tab changes. A playlist selection
-    // will join this union once playlists have real data to select.
-    type Selection = { kind: 'album' | 'artist'; key: string; label: string; tracks: Track[] };
-    let selection = $state<Selection | null>(null);
-
-    function selectTab(candidate: Tab) {
-        tab = candidate;
-        selection = null;
+    function selectTab(candidate: LibraryTab) {
+        libraryViewStore.tab = candidate;
+        libraryViewStore.selection = null;
     }
 
-    function toggleSelection(next: Selection) {
+    function toggleSelection(next: NonNullable<LibrarySelection>) {
         // Re-clicking the selected tile is how you back out of it, short of
         // clearing it explicitly or switching tabs.
-        selection = selection?.kind === next.kind && selection.key === next.key ? null : next;
+        const current = libraryViewStore.selection;
+        libraryViewStore.selection =
+            current?.kind === next.kind && current.key === next.key ? null : next;
     }
 
     function selectAlbum(album: AlbumGroup) {
@@ -103,8 +106,12 @@
     const recentTracks = $derived(filteredTracks.slice(0, 8));
     // What the list below the grid shows: the selected album/artist's own
     // tracks, or "Recently added" when nothing is selected.
-    const listTracks = $derived(selection ? selection.tracks : recentTracks);
-    const listHeading = $derived(selection ? selection.label : t('library.recentlyAdded'));
+    const listTracks = $derived(
+        libraryViewStore.selection ? libraryViewStore.selection.tracks : recentTracks,
+    );
+    const listHeading = $derived(
+        libraryViewStore.selection ? libraryViewStore.selection.label : t('library.recentlyAdded'),
+    );
 
     function playFrom(list: readonly Track[], track: Track) {
         playerStore.playQueue([...list], list.indexOf(track));
@@ -137,22 +144,22 @@
         />
     {:else}
         <div class="flex gap-2 mb-6">
-            {#each TABS as candidate (candidate)}
+            {#each LIBRARY_TABS as candidate (candidate)}
                 <Chip
                     label={t(TAB_KEYS[candidate])}
-                    active={tab === candidate}
+                    active={libraryViewStore.tab === candidate}
                     onclick={() => selectTab(candidate)}
                 />
             {/each}
         </div>
 
-        {#if tab === 'playlists'}
+        {#if libraryViewStore.tab === 'playlists'}
             <EmptyState
                 icon={ICONS.library}
                 title={t('library.playlistsSoon.title')}
                 description={t('library.playlistsSoon.desc')}
             />
-        {:else if tab === 'albums'}
+        {:else if libraryViewStore.tab === 'albums'}
             <div class="grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-5 mb-9">
                 {#each filteredAlbums as album (album.key)}
                     <AlbumCard
@@ -161,12 +168,13 @@
                         seed="{album.artist ?? ''}-{album.album ?? ''}"
                         coverTrackId={album.tracks[0]?.id ?? null}
                         detail={albumDetail(album)}
-                        active={selection?.kind === 'album' && selection.key === album.key}
+                        active={libraryViewStore.selection?.kind === 'album' &&
+                            libraryViewStore.selection.key === album.key}
                         onclick={() => selectAlbum(album)}
                     />
                 {/each}
             </div>
-        {:else if tab === 'artists'}
+        {:else if libraryViewStore.tab === 'artists'}
             <div class="grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-5 mb-9">
                 {#each filteredArtists as artist (artist.artist)}
                     <AlbumCard
@@ -174,7 +182,8 @@
                         subtitle={t('library.tracks', { count: artist.tracks.length })}
                         seed={artist.artist}
                         coverTrackId={artist.tracks[0]?.id ?? null}
-                        active={selection?.kind === 'artist' && selection.key === artist.artist}
+                        active={libraryViewStore.selection?.kind === 'artist' &&
+                            libraryViewStore.selection.key === artist.artist}
                         onclick={() => selectArtist(artist)}
                     />
                 {/each}
@@ -187,13 +196,13 @@
             </div>
         {/if}
 
-        {#if tab !== 'songs' && listTracks.length}
+        {#if libraryViewStore.tab !== 'songs' && listTracks.length}
             <div class="flex items-center justify-between mb-2">
                 <SectionLabel>{listHeading}</SectionLabel>
-                {#if selection}
+                {#if libraryViewStore.selection}
                     <button
                         class="cursor-pointer text-caption font-bold text-accent transition-opacity duration-fast hover:opacity-80"
-                        onclick={() => (selection = null)}
+                        onclick={() => (libraryViewStore.selection = null)}
                     >
                         {t('library.backToRecentlyAdded')}
                     </button>
@@ -204,7 +213,7 @@
                     <TrackRow
                         {track}
                         index={i}
-                        useTrackNumber={selection?.kind === 'album'}
+                        useTrackNumber={libraryViewStore.selection?.kind === 'album'}
                         onclick={() => playFrom(listTracks, track)}
                     />
                 {/each}
