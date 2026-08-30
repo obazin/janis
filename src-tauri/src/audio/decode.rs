@@ -98,10 +98,13 @@ impl Decoder {
                 base.calc_duration(track.duration?).map(|t| t.as_secs_f64())
             });
 
-        // `gapless` trims the encoder delay and padding that MP3 and AAC carry
-        // at the head and tail of every file — the difference between a
-        // continuous-mix album playing seamlessly and clicking at each join.
-        // It defaults to true; set it explicitly so the intent is on the page.
+        // `gapless` trims the encoder delay and padding that MP3 and AAC
+        // carry at the head and tail of every file. This is decode
+        // correctness, not the engine's Gapless *playback* switch (which
+        // instead chooses whether a track boundary joins in-ring or flushes
+        // to a gap, see `engine::Engine::gapless`) — trimming stays on
+        // unconditionally, because a file with untrimmed padding is wrong
+        // audio regardless of how the listener wants tracks to join.
         let decoder_options = AudioDecoderOptions::default().gapless(true);
         let decoder = super::codecs::get_codecs()
             .make_audio_decoder(audio_params, &decoder_options)

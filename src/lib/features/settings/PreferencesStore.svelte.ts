@@ -4,8 +4,8 @@ import { audioEngine } from '$lib/features/player/audioEngine';
 
 // The playback switches (gapless / crossfade / normalize / exclusive).
 // Setter-method rune class: a toggle persists via IPC, and the ones the engine
-// acts on are pushed to it as well. Gapless is always on in the engine;
-// crossfade and exclusive output are still stored preferences only.
+// acts on are pushed to it as well. Gapless, crossfade and normalization are
+// all live in the engine; exclusive output is still a stored preference only.
 class PreferencesStore {
     #options = $state<Record<PlaybackOption, boolean>>({
         gapless: true,
@@ -26,6 +26,8 @@ class PreferencesStore {
             normalize: prefs.normalize,
             exclusive: prefs.exclusive,
         };
+        this.#push('gapless', prefs.gapless);
+        this.#push('crossfade', prefs.crossfade);
         this.#push('normalize', prefs.normalize);
     }
 
@@ -40,6 +42,12 @@ class PreferencesStore {
 
     /** Tells the engine about a switch it acts on. */
     #push(option: PlaybackOption, enabled: boolean) {
+        if (option === 'gapless') {
+            void audioEngine.setGapless(enabled);
+        }
+        if (option === 'crossfade') {
+            void audioEngine.setCrossfade(enabled);
+        }
         if (option === 'normalize') {
             void audioEngine.setNormalize(enabled);
         }

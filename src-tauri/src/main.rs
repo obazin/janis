@@ -68,6 +68,8 @@ fn main() {
             audio::commands::audio_set_shuffle,
             audio::commands::audio_set_repeat,
             audio::commands::audio_set_normalize,
+            audio::commands::audio_set_gapless,
+            audio::commands::audio_set_crossfade,
             audio::commands::audio_set_volume,
             audio::commands::audio_set_eq,
         ])

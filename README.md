@@ -12,7 +12,7 @@ Built with **Tauri v2** (Rust backend) and **Svelte 5 / SvelteKit 2 / Tailwind v
 - **Web Radio** — curated station list (SomaFM, FIP, Radio Paradise, KEXP, …) with genre filters.
 - **Local Files** — drop zone (real OS drag-and-drop), scanned-library table with format badges, watched-folder management, rescan.
 - **10-band EQ** — bottom-sheet graphic equalizer with presets (Rock, Jazz, Bass Boost, …), applied live to playback, persisted across launches.
-- **Settings** — playback switches (gapless, crossfade, normalization, exclusive output — persisted; wired up progressively), output info, language (English / Français).
+- **Settings** — playback switches (gapless, crossfade and normalization are live in the engine and on by default; exclusive output is persisted only), output info, language (English / Français).
 
 Playlists, Spotify integration and user-added stations are on the roadmap.
 

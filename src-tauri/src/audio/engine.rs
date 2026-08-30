@@ -35,6 +35,9 @@ const RING_SECONDS: f32 = 0.5;
 const PUMP_FRAMES: usize = 2048;
 /// Start opening the next track this long before the current one ends.
 const PRELOAD_SECS: f64 = 5.0;
+/// How long a crossfade overlaps two tracks. Kept under `PRELOAD_SECS` so
+/// the incoming decoder is normally already open by the time this wants it.
+const CROSSFADE_SECS: f64 = 4.0;
 /// How many times to try getting a dropped station back before giving up and
 /// telling the listener.
 const MAX_RECONNECT_ATTEMPTS: u32 = 8;
@@ -75,6 +78,12 @@ pub enum EngineCommand {
     SetShuffle(bool),
     SetRepeat(bool),
     SetNormalize(bool),
+    /// Whether a track boundary joins in-ring with no flush, or flushes to
+    /// a deliberate gap. Ignored while crossfading — that always joins.
+    SetGapless(bool),
+    /// Whether a track boundary overlaps the next track in over
+    /// `CROSSFADE_SECS`. Takes priority over `SetGapless` when both apply.
+    SetCrossfade(bool),
     SetDevice(Option<String>),
     /// A now-playing poller reporting what a station is playing. Carries the
     /// epoch it started under so a late answer about a station the listener
@@ -116,6 +125,34 @@ struct Boundary {
     /// join the two are up to a ring-buffer apart, and applying it early
     /// would play the tail of the outgoing track at the next track's volume.
     gain_db: f64,
+}
+
+/// A crossfade in progress: the next track decoding and mixing into the
+/// ring alongside the tail of the current one, so the join has no silence
+/// and no click.
+///
+/// Deliberately carries no gain of its own — see [`Engine::push_pending`]:
+/// the callback's existing gain (whatever the outgoing track set) keeps
+/// applying to the whole mixed buffer for the crossfade's short span, and
+/// the incoming track's own normalization gain takes over once it is fully
+/// in, via the boundary [`Engine::complete_transition`] pushes. A track
+/// normalized to the target loudness is never far from another, so this is
+/// inaudible in practice and avoids a second gain stage in the mix.
+struct Transition {
+    decoder: Decoder,
+    resampler: Option<Resampler>,
+    entry: QueueEntry,
+    /// Where the queue cursor was before this transition advanced it —
+    /// restored by `cancel_transition` if something supersedes the fade.
+    outgoing_index: usize,
+    duration_secs: f64,
+    /// Device frames the crossfade should span.
+    total_frames: u64,
+    elapsed_frames: u64,
+    decode_buf: Vec<f32>,
+    mapped_buf: Vec<f32>,
+    /// Resampled, not yet mixed into the ring.
+    pending_in: Vec<f32>,
 }
 
 pub struct Engine {
@@ -163,6 +200,16 @@ pub struct Engine {
     has_provider: bool,
     station_epoch: Arc<AtomicU64>,
     resampler: Option<Resampler>,
+
+    /// Whether a track boundary joins in-ring (no flush) or flushes to a
+    /// deliberate gap. Toggled by the Settings switch of the same name.
+    gapless: bool,
+    /// Whether a track boundary overlaps the next track in over
+    /// `CROSSFADE_SECS` instead of joining or gapping. Takes priority over
+    /// `gapless` when both could apply.
+    crossfade: bool,
+    /// A crossfade in progress, if any.
+    transition: Option<Transition>,
 
     /// Total frames handed to the ring since the stream was built.
     frames_written: u64,
@@ -215,6 +262,9 @@ impl Engine {
             has_provider: false,
             station_epoch,
             resampler: None,
+            gapless: true,
+            crossfade: true,
+            transition: None,
             frames_written: 0,
             boundaries: VecDeque::new(),
             current_duration: 0.0,
@@ -259,6 +309,10 @@ impl Engine {
         match command {
             EngineCommand::LoadQueue { entries, index } => {
                 self.finish_measuring(false);
+                // The queue is being replaced wholesale, so a transition's
+                // captured cursor position would point nowhere sensible —
+                // drop it rather than try to restore it.
+                self.transition = None;
                 self.station_id = None;
                 self.now_playing = None;
                 self.reported_title = None;
@@ -291,6 +345,9 @@ impl Engine {
                 // would be fed the station and record the station's loudness
                 // against that track's id.
                 self.finish_measuring(false);
+                // Crossfading is a local-queue concept; switching to radio
+                // abandons whatever was fading in, same as LoadQueue.
+                self.transition = None;
                 self.has_provider = has_provider;
                 self.reconnect_attempt = 0;
                 self.station_url = Some(url);
@@ -313,16 +370,22 @@ impl Engine {
             EngineCommand::Toggle => self.set_playing(!self.playing),
             EngineCommand::Stop => self.stop(),
             EngineCommand::Next => {
+                // A manual skip supersedes any fade in progress — cancel it
+                // (restoring the cursor) before advancing from there, so
+                // "Next" during a crossfade means what it always means.
+                self.cancel_transition();
                 if self.mode == Mode::Local && self.queue.advance().is_some() {
                     self.start_current();
                 }
             }
             EngineCommand::Previous => {
+                self.cancel_transition();
                 if self.mode == Mode::Local && self.queue.back().is_some() {
                     self.start_current();
                 }
             }
             EngineCommand::JumpTo(index) => {
+                self.cancel_transition();
                 if self.mode == Mode::Local && self.queue.jump_to(index).is_some() {
                     self.start_current();
                 }
@@ -344,6 +407,19 @@ impl Engine {
                 // than at the next track.
                 let gain = self.current_gain_db;
                 self.apply_gain(gain);
+            }
+            EngineCommand::SetGapless(enabled) => {
+                // Only ever consulted at the next `advance_or_stop`, so
+                // nothing playing right now needs to change.
+                self.gapless = enabled;
+            }
+            EngineCommand::SetCrossfade(enabled) => {
+                self.crossfade = enabled;
+                if !enabled {
+                    // Predictable: turning it off stops a fade that is
+                    // already under way, rather than letting it finish.
+                    self.cancel_transition();
+                }
             }
             EngineCommand::SetDevice(id) => {
                 self.device_id = id;
@@ -591,6 +667,8 @@ impl Engine {
 
     fn stop(&mut self) {
         self.finish_measuring(false);
+        // Going idle; no cursor to preserve for a cancelled fade.
+        self.transition = None;
         self.playing = false;
         self.mode = Mode::Idle;
         self.station_id = None;
@@ -614,6 +692,10 @@ impl Engine {
         if self.mode != Mode::Local {
             return;
         }
+        // A seek acts on the track the listener is looking at — the
+        // outgoing one, if a crossfade happens to be running — so any fade
+        // in progress is cancelled first (restoring the cursor to it).
+        self.cancel_transition();
         let Some(decoder) = self.decoder.as_mut() else {
             return;
         };
@@ -722,6 +804,9 @@ impl Engine {
     /// Swaps in a freshly opened decoder and resets everything derived from
     /// the old one.
     fn install_decoder(&mut self, decoder: Decoder, gain_db: f64) {
+        // Defensive: every caller already clears this on its own path, but
+        // a decoder swap and a crossfade cannot coexist.
+        self.transition = None;
         let format = decoder.format().clone();
         self.start_measuring(&format);
         self.apply_gain(gain_db);
@@ -857,38 +942,228 @@ impl Engine {
         // Only move on once the tail of this track has actually been handed
         // over — otherwise the last fraction of a second is lost, which is
         // exactly the join gapless is supposed to make seamless.
-        if self.decoder.as_ref().is_some_and(|d| d.is_exhausted()) && self.pending_out.is_empty() {
+        let exhausted =
+            self.decoder.as_ref().is_some_and(|d| d.is_exhausted()) && self.pending_out.is_empty();
+        if exhausted && self.transition.is_some() {
+            self.complete_transition();
+        } else if exhausted {
             self.advance_or_stop();
-        } else {
+        } else if self.transition.is_none() && !self.maybe_start_transition() {
             self.refresh_preload();
         }
 
         read > 0 || pushed
     }
 
-    /// Moves as much of `pending_out` into the ring as fits, keeping the rest.
+    /// Moves as much of `pending_out` into the ring as fits, keeping the
+    /// rest. During a crossfade, mixes it against the incoming track's own
+    /// resampled buffer first — see [`Transition`].
     ///
     /// Always writes a whole number of frames: the ring is a flat stream of
     /// interleaved samples, so committing a partial frame would shift every
     /// later frame's channel alignment and swap the stereo image.
     fn push_pending(&mut self, channels: usize) -> bool {
-        if self.pending_out.is_empty() || channels == 0 {
+        if channels == 0 {
+            return false;
+        }
+        if self.transition.is_some() {
+            self.fill_transition(channels);
+        }
+        if self.pending_out.is_empty() {
             return false;
         }
         let Some(producer) = self.producer.as_mut() else {
             return false;
         };
-        let room = (producer.slots().min(self.pending_out.len()) / channels) * channels;
+
+        let mut room = (producer.slots().min(self.pending_out.len()) / channels) * channels;
+        if let Some(transition) = self.transition.as_ref() {
+            // Never write more than the incoming track has ready — a
+            // partial mix would need frames that do not exist yet.
+            room = room.min((transition.pending_in.len() / channels) * channels);
+        }
         if room == 0 {
             return false;
         }
         let Ok(chunk) = producer.write_chunk_uninit(room) else {
             return false;
         };
-        chunk.fill_from_iter(self.pending_out[..room].iter().copied());
+
+        if let Some(transition) = self.transition.as_mut() {
+            let total = transition.total_frames.max(1) as f32;
+            let start_frame = transition.elapsed_frames;
+            let outgoing = &self.pending_out[..room];
+            let incoming = &transition.pending_in[..room];
+            chunk.fill_from_iter((0..room).map(|i| {
+                let t = ((start_frame + (i / channels) as u64) as f32 / total).min(1.0);
+                let (fade_out, fade_in) = equal_power(t);
+                outgoing[i] * fade_out + incoming[i] * fade_in
+            }));
+            transition.pending_in.drain(..room);
+            transition.elapsed_frames += (room / channels) as u64;
+        } else {
+            chunk.fill_from_iter(self.pending_out[..room].iter().copied());
+        }
+
         self.pending_out.drain(..room);
         self.frames_written += (room / channels) as u64;
         true
+    }
+
+    /// Tops up the incoming track's resampled buffer, mirroring the decode
+    /// → remap → resample steps `pump` runs for the outgoing decoder.
+    fn fill_transition(&mut self, channels: usize) {
+        let mut error = None;
+        if let Some(transition) = self.transition.as_mut() {
+            if transition.pending_in.len() / channels.max(1) < PUMP_FRAMES {
+                let source_channels = (transition.decoder.format().channels as usize).max(1);
+                transition
+                    .decode_buf
+                    .resize(PUMP_FRAMES * source_channels, 0.0);
+                match transition.decoder.read(&mut transition.decode_buf) {
+                    Ok(read) if read > 0 => {
+                        transition.mapped_buf.clear();
+                        remap_channels(
+                            &transition.decode_buf[..read],
+                            source_channels,
+                            channels,
+                            &mut transition.mapped_buf,
+                        );
+                        let mapped = std::mem::take(&mut transition.mapped_buf);
+                        let result = match transition.resampler.as_mut() {
+                            Some(resampler) => {
+                                resampler.process(&mapped, &mut transition.pending_in)
+                            }
+                            None => {
+                                transition.pending_in.extend_from_slice(&mapped);
+                                Ok(())
+                            }
+                        };
+                        transition.mapped_buf = mapped;
+                        if let Err(message) = result {
+                            error = Some(message);
+                        }
+                    }
+                    Ok(_) => {}
+                    Err(message) => error = Some(message),
+                }
+            }
+        }
+        if let Some(message) = error {
+            self.emit(EngineEvent::Error { message });
+        }
+    }
+
+    /// Starts crossfading the next track in, once the current one is close
+    /// enough to its end. Consumes the preloaded decoder when one is ready,
+    /// so this costs no probe on the common path.
+    fn maybe_start_transition(&mut self) -> bool {
+        if !self.crossfade || self.transition.is_some() || self.mode != Mode::Local {
+            return false;
+        }
+        let Some(next) = self.queue.peek_next().cloned() else {
+            return false;
+        };
+        let remaining = self.current_duration - self.position_secs();
+        if remaining > CROSSFADE_SECS {
+            return false;
+        }
+
+        let decoder = match self.preloaded.take() {
+            Some(decoder) => decoder,
+            None => match Decoder::open_file(&next.path) {
+                Ok(decoder) => decoder,
+                Err(message) => {
+                    // Not fatal: the join just falls back to whatever
+                    // `advance_or_stop` does once the outgoing track ends.
+                    log::warn!("crossfade preload failed: {}", message);
+                    return false;
+                }
+            },
+        };
+
+        let format = decoder.format().clone();
+        let device_rate = self.device_rate();
+        let channels = self.device_channels() as usize;
+        let resampler = match open_resampler(format.sample_rate, device_rate, channels) {
+            Ok(resampler) => resampler,
+            Err(message) => {
+                self.emit(EngineEvent::Error { message });
+                return false;
+            }
+        };
+
+        // Spans whatever is actually left of the outgoing track, capped at
+        // the target duration — a track shorter than the crossfade window
+        // still gets a full, click-free fade rather than an abrupt cut.
+        let total_frames =
+            (remaining.clamp(0.05, CROSSFADE_SECS) * device_rate.max(1) as f64) as u64;
+
+        let outgoing_index = self.queue.index();
+        self.queue.advance();
+
+        self.transition = Some(Transition {
+            duration_secs: format.duration_secs.unwrap_or(next.duration_secs),
+            decoder,
+            resampler,
+            entry: next,
+            outgoing_index,
+            total_frames: total_frames.max(1),
+            elapsed_frames: 0,
+            decode_buf: Vec::new(),
+            mapped_buf: Vec::new(),
+            pending_in: Vec::new(),
+        });
+        true
+    }
+
+    /// Finishes an in-progress crossfade: the incoming decoder takes over
+    /// as the decoder of record, indistinguishable from an ordinary track
+    /// that just started — decoding, resampling and (from the boundary
+    /// below) gain all follow the normal single-track path from here.
+    fn complete_transition(&mut self) {
+        let Some(transition) = self.transition.take() else {
+            return;
+        };
+        // The outgoing track played in full — a crossfade overlaps the next
+        // track in, it never cuts the outgoing one short.
+        self.finish_measuring(true);
+
+        self.decoder = Some(transition.decoder);
+        self.resampler = transition.resampler;
+        self.pending_out = transition.pending_in;
+        self.current_duration = transition.duration_secs;
+
+        // See `Transition`'s doc comment: the mix carried no gain of its
+        // own, so this boundary is what hands normalization back to the
+        // callback for the incoming track, exactly as a gapless join does.
+        self.boundaries.push_back(Boundary {
+            frame: self.frames_written,
+            index: self.queue.index(),
+            duration_secs: self.current_duration,
+            gain_db: transition.entry.gain_db,
+        });
+
+        if let Some(format) = self.decoder.as_ref().map(|d| d.format().clone()) {
+            self.start_measuring(&format);
+            self.emit(EngineEvent::Format {
+                sample_rate: format.sample_rate,
+                channels: format.channels,
+                codec: format.codec,
+            });
+        }
+        self.refresh_preload();
+    }
+
+    /// Drops an in-progress crossfade and restores the queue cursor, as if
+    /// it had never started. Called by any command that supersedes a
+    /// transition — a seek, a manual skip, a device change — so those act
+    /// on the track the listener actually asked for rather than the one
+    /// quietly fading in.
+    fn cancel_transition(&mut self) {
+        if let Some(transition) = self.transition.take() {
+            self.queue.jump_to(transition.outgoing_index);
+        }
     }
 
     /// End of a track: hand over to the preloaded decoder without flushing —
@@ -947,38 +1222,47 @@ impl Engine {
             }
         };
 
-        let format = decoder.format().clone();
-        self.current_duration = format.duration_secs.unwrap_or(next.duration_secs);
-        // Deliberately *not* applied here: the outgoing track is still in the
-        // ring. The boundary below carries it, and it lands when the join
-        // actually reaches the device.
-        self.retune_resampler_for_join(format.sample_rate);
-        self.decoder = Some(decoder);
-        self.preloaded = None;
-        // The incoming track deserves a meter too. `install_decoder` is
-        // bypassed on this path to keep the ring intact, and without this
-        // call only the first track of a queue would ever be measured —
-        // every gapless-advanced track would keep gain 0 forever.
-        self.start_measuring(&format);
+        self.current_duration = decoder.format().duration_secs.unwrap_or(next.duration_secs);
 
-        // No flush: whatever is still in the ring belongs to the previous
-        // track and must be heard. The boundary tells us when the new track
-        // actually starts coming out of the speakers. Anything the retune
-        // drained into `pending_out` is still the outgoing track, so the
-        // boundary sits past it.
-        let pending_frames = self.pending_out.len() as u64 / self.device_channels().max(1) as u64;
-        self.boundaries.push_back(Boundary {
-            frame: self.frames_written + pending_frames,
-            index: self.queue.index(),
-            duration_secs: self.current_duration,
-            gain_db: next.gain_db,
-        });
+        if self.gapless {
+            // Deliberately not applied here: the outgoing track is still in
+            // the ring. The boundary below carries it, and it lands when
+            // the join actually reaches the device.
+            let format = decoder.format().clone();
+            self.retune_resampler_for_join(format.sample_rate);
+            self.decoder = Some(decoder);
+            self.preloaded = None;
+            // The incoming track deserves a meter too. `install_decoder` is
+            // bypassed on this path to keep the ring intact, and without
+            // this call only the first track of a queue would ever be
+            // measured — every gapless-advanced track would keep gain 0
+            // forever.
+            self.start_measuring(&format);
 
-        self.emit(EngineEvent::Format {
-            sample_rate: format.sample_rate,
-            channels: format.channels,
-            codec: format.codec,
-        });
+            // No flush: whatever is still in the ring belongs to the
+            // previous track and must be heard. The boundary tells us when
+            // the new track actually starts coming out of the speakers.
+            // Anything the retune drained into `pending_out` is still the
+            // outgoing track, so the boundary sits past it.
+            let pending_frames =
+                self.pending_out.len() as u64 / self.device_channels().max(1) as u64;
+            self.boundaries.push_back(Boundary {
+                frame: self.frames_written + pending_frames,
+                index: self.queue.index(),
+                duration_secs: self.current_duration,
+                gain_db: next.gain_db,
+            });
+
+            self.emit(EngineEvent::Format {
+                sample_rate: format.sample_rate,
+                channels: format.channels,
+                codec: format.codec,
+            });
+        } else {
+            // A deliberate gap: flush the ring and start the incoming track
+            // from silence, rather than the seamless in-ring join above.
+            self.install_decoder(decoder, next.gain_db);
+        }
         self.refresh_preload();
     }
 
@@ -1037,18 +1321,8 @@ impl Engine {
     fn rebuild_resampler(&mut self, source_rate: u32) {
         let device_rate = self.device_rate();
         let channels = self.device_channels() as usize;
-        if source_rate == 0 || device_rate == 0 {
-            self.resampler = None;
-            return;
-        }
-        match Resampler::new(source_rate, device_rate, channels) {
-            Ok(resampler) => {
-                self.resampler = if resampler.is_passthrough() {
-                    None
-                } else {
-                    Some(resampler)
-                }
-            }
+        match open_resampler(source_rate, device_rate, channels) {
+            Ok(resampler) => self.resampler = resampler,
             Err(message) => {
                 self.emit(EngineEvent::Error { message });
                 self.resampler = None;
@@ -1195,6 +1469,33 @@ impl Engine {
     fn emit(&self, event: EngineEvent) {
         self.subscribers.send_event(event);
     }
+}
+
+/// Builds a resampler for one source rate against the device, or `None`
+/// when the rates already match. Shared by the main decode path and a
+/// crossfade transition, which each need their own independent instance.
+fn open_resampler(
+    source_rate: u32,
+    device_rate: u32,
+    channels: usize,
+) -> Result<Option<Resampler>, String> {
+    if source_rate == 0 || device_rate == 0 {
+        return Ok(None);
+    }
+    let resampler = Resampler::new(source_rate, device_rate, channels)?;
+    Ok(if resampler.is_passthrough() {
+        None
+    } else {
+        Some(resampler)
+    })
+}
+
+/// Equal-power crossfade curve: `fade_out` and `fade_in` at `t` (0..=1) sum
+/// their squares to a constant, so the mix does not dip in perceived
+/// loudness at the midpoint the way a straight linear fade would.
+fn equal_power(t: f32) -> (f32, f32) {
+    let angle = t.clamp(0.0, 1.0) * std::f32::consts::FRAC_PI_2;
+    (angle.cos(), angle.sin())
 }
 
 #[cfg(test)]
@@ -1459,6 +1760,257 @@ mod tests {
             engine.measuring.as_ref().map(|(id, _)| *id),
             Some(2),
             "the incoming track gets its own meter at a gapless join"
+        );
+    }
+
+    #[test]
+    fn equal_power_curve_stays_at_constant_power_through_the_fade() {
+        let (out0, in0) = equal_power(0.0);
+        assert!((out0 - 1.0).abs() < 1e-6 && in0.abs() < 1e-6);
+
+        let (out1, in1) = equal_power(1.0);
+        assert!(out1.abs() < 1e-6 && (in1 - 1.0).abs() < 1e-6);
+
+        let (outm, inm) = equal_power(0.5);
+        assert!(
+            (outm * outm + inm * inm - 1.0).abs() < 1e-5,
+            "the squares must sum to one everywhere, or the mix gets \
+             louder or quieter mid-fade: got {outm} and {inm}"
+        );
+
+        assert!(equal_power(-1.0).0 <= 1.0, "out-of-range input must clamp");
+        assert!(equal_power(2.0).1 <= 1.0, "out-of-range input must clamp");
+    }
+
+    /// Writes a decodable one-second WAV to a fresh temp path, returning it
+    /// alongside a `QueueEntry` for `path`.
+    fn wav_track(track_id: i64, dir_name: &str) -> (std::path::PathBuf, QueueEntry) {
+        let dir = std::env::temp_dir().join(dir_name);
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let path = dir.join(format!("{track_id}.wav"));
+        let wav = fixtures::wav_bytes(44_100, 2, &fixtures::tone(44_100, 2, 44_100, 440.0));
+        std::fs::File::create(&path)
+            .and_then(|mut f| f.write_all(&wav))
+            .expect("write test wav");
+        (
+            path.clone(),
+            QueueEntry {
+                track_id,
+                path,
+                duration_secs: 1.0,
+                gain_db: 0.0,
+            },
+        )
+    }
+
+    /// A two-track engine with crossfade on, already playing track 0 with
+    /// `current_duration` short enough that the very next `pump()` call
+    /// falls inside the crossfade window (position stays at 0 with no real
+    /// device advancing `frames_played`, so `remaining == current_duration`
+    /// for as long as the test runs). Returns the ring's consumer so a test
+    /// can read back what was mixed into it.
+    fn crossfading_engine(
+        dir_name: &str,
+    ) -> (
+        Engine,
+        rtrb::Consumer<f32>,
+        std::path::PathBuf,
+        std::path::PathBuf,
+    ) {
+        let (path0, entry0) = wav_track(0, dir_name);
+        let (path1, entry1) = wav_track(1, dir_name);
+
+        let mut engine = bare_engine();
+        engine.mode = Mode::Local;
+        engine.playing = true;
+        engine.crossfade = true;
+        engine.current_duration = 1.0;
+        engine.queue.load(vec![entry0.clone(), entry1], 0);
+        engine.decoder = Some(Decoder::open_file(&entry0.path).expect("wav decodes"));
+
+        let (producer, consumer) = rtrb::RingBuffer::<f32>::new(48_000 * 4);
+        engine.producer = Some(producer);
+
+        (engine, consumer, path0, path1)
+    }
+
+    #[test]
+    fn a_crossfade_starts_immediately_when_already_within_its_window() {
+        let (mut engine, _consumer, path0, path1) =
+            crossfading_engine("janis-crossfade-start-test");
+
+        engine.pump();
+
+        let _ = std::fs::remove_file(&path0);
+        let _ = std::fs::remove_file(&path1);
+        assert!(
+            engine.transition.is_some(),
+            "current_duration (1.0s) is already inside CROSSFADE_SECS, so \
+             the very first pump should start fading the next track in"
+        );
+        assert_eq!(
+            engine.queue.index(),
+            1,
+            "the cursor moves to the incoming track immediately, like a \
+             gapless join — only the UI-visible state is deferred"
+        );
+    }
+
+    #[test]
+    fn a_crossfade_mixes_and_completes_into_the_incoming_track() {
+        let (mut engine, mut consumer, path0, path1) =
+            crossfading_engine("janis-crossfade-complete-test");
+
+        // Generous bound: a one-second tone at 44.1 kHz decodes in a
+        // handful of PUMP_FRAMES-sized reads.
+        for _ in 0..500 {
+            engine.pump();
+            if engine.transition.is_none() && engine.frames_written > 0 {
+                break;
+            }
+        }
+
+        let _ = std::fs::remove_file(&path0);
+        let _ = std::fs::remove_file(&path1);
+
+        assert!(
+            engine.transition.is_none(),
+            "the crossfade must complete once the outgoing track exhausts"
+        );
+        assert_eq!(engine.queue.index(), 1, "the incoming track is now current");
+        assert!(
+            engine.boundaries.iter().any(|b| b.index == 1),
+            "completion pushes a boundary that hands the incoming track \
+             its own gain once the device actually reaches it"
+        );
+
+        let available = consumer.slots();
+        assert!(
+            available > 4_000,
+            "mixed audio should have reached the ring, got {available} samples"
+        );
+        let mixed: Vec<f32> = std::iter::from_fn(|| consumer.pop().ok()).collect();
+        assert!(
+            mixed.iter().any(|&s| s.abs() > 0.01),
+            "the mix must carry audible signal, not silence"
+        );
+        assert!(
+            mixed.iter().all(|&s| s.is_finite() && s.abs() <= 1.5),
+            "mixing two full-scale tones must not produce garbage samples"
+        );
+    }
+
+    #[test]
+    fn seeking_mid_crossfade_cancels_it_and_restores_the_cursor() {
+        let (mut engine, _consumer, path0, path1) = crossfading_engine("janis-crossfade-seek-test");
+        engine.pump();
+        assert!(engine.transition.is_some(), "precondition: fading");
+        assert_eq!(engine.queue.index(), 1);
+
+        engine.seek(0.1);
+
+        let _ = std::fs::remove_file(&path0);
+        let _ = std::fs::remove_file(&path1);
+        assert!(
+            engine.transition.is_none(),
+            "a seek acts on the track being looked at — it must cancel a fade"
+        );
+        assert_eq!(
+            engine.queue.index(),
+            0,
+            "the cursor reverts to the track that was actually seeked"
+        );
+    }
+
+    #[test]
+    fn next_mid_crossfade_cancels_it_before_advancing() {
+        let (mut engine, _consumer, path0, path1) = crossfading_engine("janis-crossfade-next-test");
+        engine.pump();
+        assert!(engine.transition.is_some(), "precondition: fading");
+
+        engine.handle(EngineCommand::Next);
+
+        let _ = std::fs::remove_file(&path0);
+        let _ = std::fs::remove_file(&path1);
+        assert!(
+            engine.transition.is_none(),
+            "Next must not leave a stale fade running underneath it"
+        );
+        // Cancel restores the cursor to 0, then Next's own advance moves it
+        // forward one step — landing back on the same track index the fade
+        // was already heading to, now reached by an ordinary flushed join.
+        assert_eq!(engine.queue.index(), 1);
+        assert!(engine.decoder.is_some());
+    }
+
+    #[test]
+    fn turning_crossfade_off_cancels_a_fade_in_progress() {
+        let (mut engine, _consumer, path0, path1) =
+            crossfading_engine("janis-crossfade-toggle-test");
+        engine.pump();
+        assert!(engine.transition.is_some(), "precondition: fading");
+
+        engine.handle(EngineCommand::SetCrossfade(false));
+
+        let _ = std::fs::remove_file(&path0);
+        let _ = std::fs::remove_file(&path1);
+        assert!(!engine.crossfade);
+        assert!(
+            engine.transition.is_none(),
+            "turning the switch off must stop a fade already under way"
+        );
+        assert_eq!(engine.queue.index(), 0, "the cursor is restored");
+    }
+
+    #[test]
+    fn gapless_off_flushes_between_tracks_instead_of_joining_in_ring() {
+        let dir = "janis-gapless-off-test";
+        let (path, entry) = wav_track(1, dir);
+
+        let mut engine = bare_engine();
+        engine.gapless = false;
+        engine.mode = Mode::Local;
+        engine.frames_written = 12_345; // audio already went out for track 0
+        engine
+            .queue
+            .load(vec![missing_entries(1).remove(0), entry], 0);
+
+        engine.advance_or_stop();
+
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(
+            engine.frames_written, 0,
+            "a non-gapless join flushes and restarts the frame counter, \
+             exactly like install_decoder does for a track started fresh"
+        );
+        assert_eq!(
+            engine.boundaries.front().map(|b| b.frame),
+            Some(0),
+            "the flushed join's boundary sits at the rebased origin"
+        );
+    }
+
+    #[test]
+    fn gapless_on_keeps_the_frame_counter_running_across_the_join() {
+        let dir = "janis-gapless-on-test";
+        let (path, entry) = wav_track(1, dir);
+
+        let mut engine = bare_engine();
+        assert!(engine.gapless, "on by default");
+        engine.mode = Mode::Local;
+        engine.frames_written = 12_345;
+        engine
+            .queue
+            .load(vec![missing_entries(1).remove(0), entry], 0);
+
+        engine.advance_or_stop();
+
+        let _ = std::fs::remove_file(&path);
+        assert!(
+            engine.frames_written >= 12_345,
+            "a gapless join keeps counting from where the ring already was, \
+             it never rebases mid-queue — got {}",
+            engine.frames_written
         );
     }
 
