@@ -187,6 +187,22 @@ pub fn audio_set_normalize(
     engine.send(EngineCommand::SetNormalize(enabled))
 }
 
+#[tauri::command]
+pub fn audio_set_gapless(
+    engine: tauri::State<'_, AudioEngine>,
+    enabled: bool,
+) -> Result<(), String> {
+    engine.send(EngineCommand::SetGapless(enabled))
+}
+
+#[tauri::command]
+pub fn audio_set_crossfade(
+    engine: tauri::State<'_, AudioEngine>,
+    enabled: bool,
+) -> Result<(), String> {
+    engine.send(EngineCommand::SetCrossfade(enabled))
+}
+
 /// Straight to the atomics — see the module note on why this skips the queue.
 #[tauri::command]
 pub fn audio_set_volume(engine: tauri::State<'_, AudioEngine>, volume: f64) -> Result<(), String> {

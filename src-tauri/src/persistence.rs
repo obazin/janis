@@ -24,7 +24,7 @@ CREATE TABLE IF NOT EXISTS user_preferences (
     eq_gains TEXT NOT NULL DEFAULT '[0,0,0,0,0,0,0,0,0,0]',
     eq_preset TEXT NOT NULL DEFAULT 'flat',
     gapless INTEGER NOT NULL DEFAULT 1,
-    crossfade INTEGER NOT NULL DEFAULT 0,
+    crossfade INTEGER NOT NULL DEFAULT 1,
     normalize INTEGER NOT NULL DEFAULT 1,
     exclusive INTEGER NOT NULL DEFAULT 0,
     language TEXT NOT NULL DEFAULT 'en',

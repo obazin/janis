@@ -165,6 +165,18 @@ class AudioEngine {
         return invoke('audio_set_normalize', { enabled });
     }
 
+    /** Whether a track boundary joins in-ring or flushes to a gap. Applies
+     *  from the next track change; ignored while crossfading. */
+    setGapless(enabled: boolean) {
+        return invoke('audio_set_gapless', { enabled });
+    }
+
+    /** Whether a track boundary overlaps the next track in instead of
+     *  joining or gapping. Cancels an in-progress fade when turned off. */
+    setCrossfade(enabled: boolean) {
+        return invoke('audio_set_crossfade', { enabled });
+    }
+
     devices() {
         return invoke<AudioDevice[]>('audio_devices');
     }
