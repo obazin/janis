@@ -1,6 +1,7 @@
 <script lang="ts">
     import type { Snippet } from 'svelte';
     import { playerStore } from './PlayerStore.svelte';
+    import { nowPlayingViewStore, type NowPlayingQueueView } from './NowPlayingViewStore.svelte';
     import { fmtTime } from './format';
     import OpenEqButton from '$lib/features/eq/OpenEqButton.svelte';
     import SectionLabel from '$lib/design-system/atoms/SectionLabel.svelte';
@@ -16,9 +17,10 @@
     // Album data and cover rendering come in from the screen: resolving the
     // album is library-domain work, and screens are the one layer allowed to
     // bridge player and library.
-
-    type View = 'queue' | 'playlist' | 'album';
-    let view = $state<View>('queue');
+    //
+    // The toggle itself lives in `nowPlayingViewStore`, not screen-local
+    // `$state` — this component is destroyed and recreated on every
+    // navigation, and the toggle is meant to survive that (CLAUDE.md rule 12).
 
     interface Props {
         /** The current track's album in running order, resolved by the
@@ -43,7 +45,7 @@
     }
 
     const rows = $derived.by<Row[]>(() => {
-        if (view === 'album') {
+        if (nowPlayingViewStore.view === 'album') {
             return albumTracks.map((track, i) => ({
                 track,
                 // The album's own numbering, so a partially-ripped album shows
@@ -54,7 +56,7 @@
                 isCurrent: track.id === current?.id,
             }));
         }
-        if (view === 'playlist') {
+        if (nowPlayingViewStore.view === 'playlist') {
             return queue.map((track, i) => ({
                 track,
                 display: i + 1,
@@ -79,21 +81,21 @@
     });
 
     const heading = $derived(
-        view === 'album'
+        nowPlayingViewStore.view === 'album'
             ? (current?.album ?? t('common.unknownAlbum'))
-            : view === 'playlist'
+            : nowPlayingViewStore.view === 'playlist'
               ? t('now.queueHeading', { count: queue.length })
               : t('now.upNextHeading', { count: rows.length }),
     );
 
-    const TABS: { id: View; key: TranslationKey }[] = [
+    const TABS: { id: NowPlayingQueueView; key: TranslationKey }[] = [
         { id: 'queue', key: 'now.tabUpNext' },
         { id: 'playlist', key: 'now.tabPlaylist' },
         { id: 'album', key: 'now.tabAlbum' },
     ];
 
     function play(row: Row) {
-        if (view === 'album') {
+        if (nowPlayingViewStore.view === 'album') {
             // The album card can list tracks that are not in the queue at
             // all; playing one replaces the queue with the album.
             playerStore.playQueue(row.list, row.listIndex);
@@ -112,10 +114,10 @@
             {#each TABS as tab (tab.id)}
                 <button
                     class="cursor-pointer text-caption font-bold px-3.25 py-1.5 rounded-md transition-colors duration-fast select-none
-                    {view === tab.id
+                    {nowPlayingViewStore.view === tab.id
                         ? 'bg-accent text-on-accent'
                         : 'text-text-soft hover:text-text-secondary'}"
-                    onclick={() => (view = tab.id)}
+                    onclick={() => (nowPlayingViewStore.view = tab.id)}
                 >
                     {t(tab.key)}
                 </button>

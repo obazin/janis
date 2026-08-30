@@ -1,14 +1,16 @@
 <script lang="ts">
     import { STATIONS, GENRE_FILTERS } from '$lib/features/radio/stations';
+    import { radioViewStore } from '$lib/features/radio/RadioViewStore.svelte';
     import StationCard from '$lib/features/radio/StationCard.svelte';
     import { playerStore } from '$lib/features/player/PlayerStore.svelte';
     import { searchQuery } from '$lib/stores/SearchStore';
     import Chip from '$lib/design-system/atoms/Chip.svelte';
     import Eyebrow from '$lib/design-system/atoms/Eyebrow.svelte';
     import { t } from '$lib/i18n/LanguageStore.svelte';
-    import type { TranslationKey } from '$lib/i18n/types';
 
-    let genre = $state<TranslationKey>('radio.genre.all');
+    // The genre filter lives in `radioViewStore`, not screen-local `$state`
+    // — this screen component is destroyed and recreated on every
+    // navigation, and the filter is meant to survive that (CLAUDE.md rule 12).
 
     // "All" first, then genres by their label in the active language.
     const genreChips = $derived([
@@ -20,7 +22,8 @@
     const stations = $derived(
         STATIONS.filter(
             (s) =>
-                (genre === 'radio.genre.all' || s.genreKey === genre) &&
+                (radioViewStore.genre === 'radio.genre.all' ||
+                    s.genreKey === radioViewStore.genre) &&
                 (!query ||
                     s.name.toLowerCase().includes(query) ||
                     t(s.genreKey).toLowerCase().includes(query)),
@@ -35,7 +38,11 @@
     </h1>
     <div class="flex gap-2 flex-wrap mb-6.5">
         {#each genreChips as key (key)}
-            <Chip label={t(key)} active={genre === key} onclick={() => (genre = key)} />
+            <Chip
+                label={t(key)}
+                active={radioViewStore.genre === key}
+                onclick={() => (radioViewStore.genre = key)}
+            />
         {/each}
     </div>
     <div class="grid grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-4">
