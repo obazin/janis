@@ -1,4 +1,5 @@
 <script lang="ts">
+    import type { TranslationKey } from '$lib/i18n/types';
     import { STATIONS, GENRE_FILTERS, COUNTRY_FILTERS } from '$lib/features/radio/stations';
     import { countryLabelKey } from '$lib/features/radio/countries';
     import { radioViewStore } from '$lib/features/radio/RadioViewStore.svelte';
@@ -12,6 +13,10 @@
     // The genre and country filters live in `radioViewStore`, not screen-local
     // `$state` — this screen component is destroyed and recreated on every
     // navigation, and the filters are meant to survive that (CLAUDE.md rule 12).
+    // Both are multi-select: an empty list means "all", so the "All" chip is a
+    // clear rather than another selectable value.
+
+    const ALL_GENRE: TranslationKey = 'radio.genre.all';
 
     // "All" first, then countries most-populated first (COUNTRY_FILTERS order).
     const countryChips = $derived(['all', ...COUNTRY_FILTERS]);
@@ -24,13 +29,26 @@
         ...GENRE_FILTERS.slice(1).sort((a, b) => t(a).localeCompare(t(b))),
     ]);
 
+    function toggle<T extends string>(list: T[], value: T): T[] {
+        return list.includes(value) ? list.filter((v) => v !== value) : [...list, value];
+    }
+    const toggleCountry = (code: string) =>
+        (radioViewStore.countries = code === 'all' ? [] : toggle(radioViewStore.countries, code));
+    const toggleGenre = (key: TranslationKey) =>
+        (radioViewStore.genres = key === ALL_GENRE ? [] : toggle(radioViewStore.genres, key));
+    const countryActive = (code: string) =>
+        code === 'all' ? radioViewStore.countries.length === 0 : radioViewStore.countries.includes(code);
+    const genreActive = (key: TranslationKey) =>
+        key === ALL_GENRE ? radioViewStore.genres.length === 0 : radioViewStore.genres.includes(key);
+
     const query = $derived($searchQuery.trim().toLowerCase());
     const stations = $derived(
         STATIONS.filter(
             (s) =>
-                (radioViewStore.country === 'all' || s.country === radioViewStore.country) &&
-                (radioViewStore.genre === 'radio.genre.all' ||
-                    s.genreKey === radioViewStore.genre) &&
+                (radioViewStore.countries.length === 0 ||
+                    radioViewStore.countries.includes(s.country)) &&
+                (radioViewStore.genres.length === 0 ||
+                    radioViewStore.genres.includes(s.genreKey)) &&
                 (!query ||
                     s.name.toLowerCase().includes(query) ||
                     t(s.genreKey).toLowerCase().includes(query)),
@@ -47,18 +65,14 @@
         {#each countryChips as code (code)}
             <Chip
                 label={countryLabel(code)}
-                active={radioViewStore.country === code}
-                onclick={() => (radioViewStore.country = code)}
+                active={countryActive(code)}
+                onclick={() => toggleCountry(code)}
             />
         {/each}
     </div>
     <div class="flex gap-2 flex-wrap mb-6.5">
         {#each genreChips as key (key)}
-            <Chip
-                label={t(key)}
-                active={radioViewStore.genre === key}
-                onclick={() => (radioViewStore.genre = key)}
-            />
+            <Chip label={t(key)} active={genreActive(key)} onclick={() => toggleGenre(key)} />
         {/each}
     </div>
     <div class="grid grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-4">
