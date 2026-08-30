@@ -34,16 +34,8 @@
           # macOS reaches CoreAudio through the SDK and needs nothing here.
           audioLibs = pkgs.lib.optionals pkgs.stdenv.isLinux [ pkgs.alsa-lib ];
 
-          # Tauri's Linux stack. macOS builds against the system WebKit, so
-          # the bundle's pkg-config is enough there; Linux links the GTK
-          # world through pkg-config and needs the same libs in both the
-          # devShell (compile + run from the shell) and the package build.
-          #   dbus: tauri-plugin-single-instance reaches DBus through
-          #     `libdbus-sys`.
-          #   glib-networking: webview TLS (a gio module).
-          #   gsettings-desktop-schemas: the GSettings schemas webkit/gtk
-          #     read at runtime — wrapGAppsHook wires them into the package,
-          #     the shellHook below does it for binaries built in the shell.
+          # glib-networking and gsettings-desktop-schemas are runtime pieces
+          # webkit needs (TLS gio module, GSettings schemas), not link libs.
           tauriLinuxLibs =
             with pkgs;
             pkgs.lib.optionals pkgs.stdenv.isLinux [
@@ -56,9 +48,8 @@
               gsettings-desktop-schemas
             ];
 
-          # Binaries built inside the devShell get no wrapper, so the
-          # runtime lookup dirs the GTK stack expects must be exported
-          # directly. Prepended to the bundle's own shellHook: that hook
+          # Shell-built binaries get no wrapper, so the GTK runtime lookup
+          # dirs must be exported here. Prepended: the bundle's own hook
           # exec's into zsh, so anything appended after it would never run.
           tauriLinuxShellEnv = pkgs.lib.optionalString pkgs.stdenv.isLinux ''
             export XDG_DATA_DIRS="${pkgs.lib.makeSearchPath "share/gsettings-schemas" [
@@ -68,14 +59,7 @@
             export GIO_EXTRA_MODULES="${pkgs.glib-networking}/lib/gio/modules''${GIO_EXTRA_MODULES:+:$GIO_EXTRA_MODULES}"
           '';
 
-          # ── The app, for `nix run` / `nix build` ──────────────────────────
-          # Frontend and backend in one derivation: pnpmConfigHook installs
-          # node_modules, cargo-tauri's hook runs `cargo tauri build`, which
-          # drives `pnpm build` (beforeBuildCommand) then the Rust build,
-          # and installs from the deb bundle it produces (binary, .desktop,
-          # icons). Vendored crates (incl. the audio-stack-rs git dep)
-          # come from cargoHash; the pnpm store from pnpmDeps. Keep
-          # `version` in sync with Cargo.toml and tauri.conf.json.
+          # Keep `version` in sync with Cargo.toml and tauri.conf.json.
           janis = pkgs.rustPlatform.buildRustPackage (finalAttrs: {
             pname = "janis";
             version = "0.1.0";
@@ -106,6 +90,7 @@
               pkgs.pnpmConfigHook
               pkgs.wrapGAppsHook3
             ];
+
             buildInputs = tauriLinuxLibs ++ audioLibs;
 
             meta = {
