@@ -43,6 +43,7 @@ export type EngineEvent =
               stationId: string | null;
           };
       }
+    | { event: 'queue'; data: { trackIds: number[] } }
     | { event: 'position'; data: { positionSecs: number; durationSecs: number } }
     | { event: 'trackChanged'; data: { index: number } }
     | {

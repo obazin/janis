@@ -13,7 +13,7 @@
 </script>
 
 <button
-    class="inline-flex items-center gap-2 cursor-pointer text-body-em font-bold text-on-accent px-4.5 py-2.75 transition-transform duration-fast hover:scale-[1.02]
+    class="inline-flex items-center gap-2 cursor-pointer text-body-em font-bold text-on-accent px-4.5 py-2.75 transition-transform duration-fast hover:scale-102
     {variant === 'spotify'
         ? 'bg-spotify rounded-full font-extrabold px-7 py-3.5'
         : 'bg-cta-gradient rounded-btn'}"

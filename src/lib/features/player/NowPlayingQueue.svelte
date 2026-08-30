@@ -1,39 +1,38 @@
 <script lang="ts">
+    import type { Snippet } from 'svelte';
     import { playerStore } from './PlayerStore.svelte';
-    import { libraryStore } from '$lib/features/library/LibraryStore.svelte';
-    import { eqOpen } from '$lib/stores/EqOverlayStore';
     import { fmtTime } from './format';
-    import CoverArt from '$lib/features/library/CoverArt.svelte';
+    import OpenEqButton from '$lib/features/eq/OpenEqButton.svelte';
     import SectionLabel from '$lib/design-system/atoms/SectionLabel.svelte';
     import { ICONS } from '$lib/icons/paths';
     import { t } from '$lib/i18n/LanguageStore.svelte';
     import type { Track } from '$lib/models/Track';
     import type { TranslationKey } from '$lib/i18n/types';
 
-    // Now Playing "what's next" card. Replaces the old SpectrumPanel with a
-    // three-way toggle over the live play queue, the full queue as a
-    // playlist, and the current album — keeping the Open-Equalizer
-    // affordance in its header (the spectrum itself still lives in the
-    // mini-player waveform + the EQ overlay).
+    // Now Playing "what's next" card: a three-way toggle over the live play
+    // queue, the full queue as a playlist, and the current album — with the
+    // Open-Equalizer affordance in its header.
+    //
+    // Album data and cover rendering come in from the screen: resolving the
+    // album is library-domain work, and screens are the one layer allowed to
+    // bridge player and library.
 
     type View = 'queue' | 'playlist' | 'album';
     let view = $state<View>('queue');
 
+    interface Props {
+        /** The current track's album in running order, resolved by the
+         *  screen from the library grouping. */
+        albumTracks: Track[];
+        /** Renders one row's cover art — the art pipeline is the library's. */
+        cover: Snippet<[Track]>;
+    }
+
+    let { albumTracks, cover }: Props = $props();
+
     const queue = $derived(playerStore.queue);
     const current = $derived(playerStore.current);
     const currentIndex = $derived(current ? queue.findIndex((tr) => tr.id === current.id) : -1);
-
-    // The current track's album, already in running order from the library
-    // grouping. Matched on album artist, which is how albums are keyed — on a
-    // compilation the track's own artist is not the album's.
-    const albumTracks = $derived.by<Track[]>(() => {
-        if (!current) return [];
-        const artist = current.albumArtist ?? current.artist;
-        const group = libraryStore.albums.find(
-            (a) => a.album === current.album && a.artist === artist,
-        );
-        return group?.tracks ?? [current];
-    });
 
     interface Row {
         track: Track;
@@ -94,7 +93,16 @@
     ];
 
     function play(row: Row) {
-        playerStore.playQueue(row.list, row.listIndex);
+        if (view === 'album') {
+            // The album card can list tracks that are not in the queue at
+            // all; playing one replaces the queue with the album.
+            playerStore.playQueue(row.list, row.listIndex);
+            return;
+        }
+        // Both queue views show the live queue itself: jump within it rather
+        // than reloading it — a reload re-serializes every entry over IPC and
+        // reshuffles the order the listener was just reading.
+        playerStore.jumpTo(row.listIndex);
     }
 </script>
 
@@ -113,22 +121,7 @@
                 </button>
             {/each}
         </div>
-        <button
-            class="flex items-center gap-1.75 flex-none cursor-pointer text-caption font-bold text-accent px-3 py-1.5 bg-accent/12 rounded-full border border-accent/30 transition-colors duration-fast hover:bg-accent/20"
-            onclick={() => eqOpen.set(true)}
-        >
-            <svg
-                class="size-3.5"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-                stroke-linecap="round"
-            >
-                <path d={ICONS.equalizer} />
-            </svg>
-            {t('now.eq')}
-        </button>
+        <OpenEqButton labelKey="now.eq" />
     </div>
 
     <SectionLabel class="mb-1.5">{heading}</SectionLabel>
@@ -158,11 +151,7 @@
                             </span>
                         {/if}
                     </div>
-                    <CoverArt
-                        trackId={row.track.id}
-                        seed="{row.track.artist ?? ''}-{row.track.album ?? row.track.title}"
-                        class="size-8.5 rounded-lg flex-none"
-                    />
+                    {@render cover(row.track)}
                     <div class="flex-1 min-w-0">
                         <div
                             class="font-semibold text-body truncate {row.isCurrent

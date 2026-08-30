@@ -10,6 +10,7 @@
     import { playerStore } from '$lib/features/player/PlayerStore.svelte';
     import { preferencesStore } from '$lib/features/settings/PreferencesStore.svelte';
     import { libraryStore } from '$lib/features/library/LibraryStore.svelte';
+    import { STATIONS } from '$lib/features/radio/stations';
     import { navigationStore, navigateTo, type Screen } from '$lib/stores/NavigationStore.svelte';
     import AppTitlebar from '$lib/screens/AppTitlebar.svelte';
     import SidebarNav from '$lib/design-system/organisms/SidebarNav.svelte';
@@ -38,6 +39,15 @@
         playerStore.initVolume(prefs.volume);
         preferencesStore.init(prefs);
         await libraryStore.init();
+        // The engine replays its queue and station as bare ids; the objects
+        // they name live in the library and the radio catalog. This layer is
+        // the one allowed to bridge features, so it hands the player its
+        // lookups — after the library is hydrated, so a reloaded webview can
+        // resolve the replayed queue immediately.
+        playerStore.registerLookups({
+            trackById: (id) => libraryStore.trackById(id),
+            stationById: (id) => STATIONS.find((station) => station.id === id),
+        });
         // OS drag-and-drop delivers real paths through Tauri, not the DOM.
         // App-lifetime listener — never unlistened (rule: task lifecycles are
         // independent of UI lifecycles). A registration failure loses the

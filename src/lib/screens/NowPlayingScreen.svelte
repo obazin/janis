@@ -5,6 +5,8 @@
     import WaveformCanvas from '$lib/features/player/WaveformCanvas.svelte';
     import NowPlayingQueue from '$lib/features/player/NowPlayingQueue.svelte';
     import ArtistSpotlight from '$lib/features/library/ArtistSpotlight.svelte';
+    import CoverArt from '$lib/features/library/CoverArt.svelte';
+    import type { Track } from '$lib/models/Track';
     import TransportControls from '$lib/features/player/TransportControls.svelte';
     import ArtTile from '$lib/design-system/atoms/ArtTile.svelte';
     import Badge from '$lib/design-system/atoms/Badge.svelte';
@@ -40,6 +42,20 @@
     const artSeed = $derived(
         track ? `${track.artist ?? ''}-${track.album ?? track.title}` : (station?.id ?? 'janis'),
     );
+
+    // The current track's album, already in running order from the library
+    // grouping. Matched on album artist, which is how albums are keyed — on
+    // a compilation the track's own artist is not the album's. Resolved here
+    // and handed to the queue card, so the player feature never reaches into
+    // the library itself.
+    const albumTracks = $derived.by<Track[]>(() => {
+        if (!track) return [];
+        const artist = track.albumArtist ?? track.artist;
+        const group = libraryStore.albums.find(
+            (a) => a.album === track.album && a.artist === artist,
+        );
+        return group?.tracks ?? [track];
+    });
 </script>
 
 {#if !track && !station}
@@ -183,7 +199,15 @@
 
             <TransportControls />
 
-            <NowPlayingQueue />
+            <NowPlayingQueue {albumTracks}>
+                {#snippet cover(queueTrack)}
+                    <CoverArt
+                        trackId={queueTrack.id}
+                        seed="{queueTrack.artist ?? ''}-{queueTrack.album ?? queueTrack.title}"
+                        class="size-8.5 rounded-lg flex-none"
+                    />
+                {/snippet}
+            </NowPlayingQueue>
 
             {#if track}
                 <ArtistSpotlight artist={track.artist} />

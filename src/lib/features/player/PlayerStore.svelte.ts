@@ -39,6 +39,14 @@ class PlayerStore {
     /** Wall-clock reading of the last `position` event, for interpolation. */
     #positionAt = 0;
 
+    /** The station id the engine last reported, kept so the `Station` object
+     *  can be recovered once (or whenever) the catalog lookup is available. */
+    #stationId: string | null = null;
+    /** Queue track ids replayed by the engine before the library hydrated. */
+    #pendingQueueIds: number[] | null = null;
+    #trackById: ((id: number) => Track | undefined) | null = null;
+    #stationById: ((id: string) => Station | undefined) | null = null;
+
     get queue(): readonly Track[] {
         return this.#queue;
     }
@@ -134,6 +142,39 @@ class PlayerStore {
         await audioEngine.subscribe((event) => this.#apply(event));
     }
 
+    /**
+     * Wired once at boot, after the library has hydrated. The engine outlives
+     * a webview reload and replays its state, but its events carry only ids —
+     * the `Track` and `Station` objects the UI renders live in the library
+     * and the radio catalog. Injecting the lookups keeps this store free of
+     * player → library / player → radio dependencies; `+layout` owns the
+     * wiring, as the one layer that crosses features freely.
+     */
+    registerLookups(lookups: {
+        trackById: (id: number) => Track | undefined;
+        stationById: (id: string) => Station | undefined;
+    }) {
+        this.#trackById = lookups.trackById;
+        this.#stationById = lookups.stationById;
+        this.#resolvePending();
+    }
+
+    #resolvePending() {
+        if (this.#pendingQueueIds && this.#trackById) {
+            const tracks = this.#pendingQueueIds.map((id) => this.#trackById!(id));
+            // All-or-nothing: a hole (a track pruned since the queue was
+            // loaded) would misalign every later index with the engine's.
+            if (tracks.every((track): track is Track => track !== undefined)) {
+                this.#queue = tracks;
+                void this.#loadCover(this.#queue[this.#index]);
+            }
+            this.#pendingQueueIds = null;
+        }
+        if (this.#stationId && !this.#station && this.#stationById) {
+            this.#station = this.#stationById(this.#stationId) ?? null;
+        }
+    }
+
     #apply(event: EngineEvent) {
         switch (event.event) {
             case 'state':
@@ -142,9 +183,31 @@ class PlayerStore {
                 this.#shuffle = event.data.shuffle;
                 this.#repeat = event.data.repeat;
                 this.#playing = event.data.playing;
-                if (event.data.mode !== 'radio') {
+                if (event.data.mode === 'radio') {
+                    // The engine is the authority on which station plays.
+                    // Recovering the object from the id is what keeps a
+                    // reloaded webview — or a mirror whose station was
+                    // cleared by an interleaved local state event — from
+                    // rendering "nothing playing" over live radio.
+                    this.#stationId = event.data.stationId;
+                    if (this.#station?.id !== event.data.stationId) {
+                        this.#station =
+                            (event.data.stationId
+                                ? this.#stationById?.(event.data.stationId)
+                                : null) ?? null;
+                    }
+                } else {
+                    this.#stationId = null;
                     this.#station = null;
                     this.#clearStreamInfo();
+                }
+                break;
+            case 'queue':
+                // Replayed on subscribe. Only a fresh mirror takes it: mid-
+                // session the queue set by `playQueue` is already complete.
+                if (this.#queue.length === 0 && event.data.trackIds.length > 0) {
+                    this.#pendingQueueIds = event.data.trackIds;
+                    this.#resolvePending();
                 }
                 break;
             case 'position':
@@ -178,6 +241,8 @@ class PlayerStore {
     playQueue(tracks: Track[], index: number) {
         if (!tracks.length) return;
         this.#station = null;
+        this.#stationId = null;
+        this.#pendingQueueIds = null;
         this.#clearStreamInfo();
         this.#queue = [...tracks];
         this.#index = Math.min(Math.max(0, index), tracks.length - 1);
@@ -200,6 +265,7 @@ class PlayerStore {
 
     playStation(station: Station) {
         this.#station = station;
+        this.#stationId = station.id;
         this.#clearStreamInfo();
         this.#coverUrl = null;
         this.#currentTime = 0;
@@ -212,6 +278,7 @@ class PlayerStore {
             .catch((err) => {
                 console.error('radio play failed:', err);
                 this.#station = null;
+                this.#stationId = null;
             })
             .finally(() => {
                 this.#connecting = false;
