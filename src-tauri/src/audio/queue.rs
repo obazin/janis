@@ -63,6 +63,13 @@ impl Queue {
         self.entries.len()
     }
 
+    /// Every entry's track id in entry order — the order `index()` refers to,
+    /// not the shuffled playback order. What a reloaded webview needs to
+    /// rebuild its queue mirror.
+    pub fn track_ids(&self) -> Vec<i64> {
+        self.entries.iter().map(|e| e.track_id).collect()
+    }
+
     /// The position of the playing track within `entries` — what the UI
     /// highlights.
     pub fn index(&self) -> usize {

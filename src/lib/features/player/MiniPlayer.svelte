@@ -5,8 +5,7 @@
     import PlayCircle from '$lib/design-system/molecules/PlayCircle.svelte';
     import { IconButtonIdentifier } from '$lib/design-system/atoms/IconButtonIdentifier';
     import WaveformCanvas from './WaveformCanvas.svelte';
-    import { artInitials } from './format';
-    import { eqOpen } from '$lib/stores/EqOverlayStore';
+    import OpenEqButton from '$lib/features/eq/OpenEqButton.svelte';
     import { navigateTo } from '$lib/stores/NavigationStore.svelte';
     import { ICONS } from '$lib/icons/paths';
     import { t } from '$lib/i18n/LanguageStore.svelte';
@@ -75,20 +74,5 @@
     <div class="flex-1 h-11 min-w-0">
         <WaveformCanvas variant="mini" />
     </div>
-    <button
-        class="flex items-center gap-1.75 cursor-pointer text-caption font-bold text-accent px-3.5 py-2 border border-accent/35 rounded-full transition-colors duration-fast hover:bg-accent/12"
-        onclick={() => eqOpen.set(true)}
-    >
-        <svg
-            class="size-3.5"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-            stroke-linecap="round"
-        >
-            <path d={ICONS.equalizer} />
-        </svg>
-        {t('player.eq')}
-    </button>
+    <OpenEqButton labelKey="player.eq" />
 </div>

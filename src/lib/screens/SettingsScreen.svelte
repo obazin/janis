@@ -3,7 +3,7 @@
     import { PRESET_ORDER, PRESET_LABEL_KEYS, type EqPresetName } from '$lib/features/eq/presets';
     import { preferencesStore } from '$lib/features/settings/PreferencesStore.svelte';
     import { playerStore } from '$lib/features/player/PlayerStore.svelte';
-    import { eqOpen } from '$lib/stores/EqOverlayStore';
+    import OpenEqButton from '$lib/features/eq/OpenEqButton.svelte';
     import { languageStore, LANGUAGES, t, type Language } from '$lib/i18n/LanguageStore.svelte';
     import type { PlaybackOption } from '$lib/models/Preferences';
     import type { TranslationKey } from '$lib/i18n/types';
@@ -11,7 +11,6 @@
     import Eyebrow from '$lib/design-system/atoms/Eyebrow.svelte';
     import SectionLabel from '$lib/design-system/atoms/SectionLabel.svelte';
     import ToggleRow from '$lib/design-system/molecules/ToggleRow.svelte';
-    import { ICONS } from '$lib/icons/paths';
 
     const PLAYBACK_ROWS: { option: PlaybackOption; label: TranslationKey; desc: TranslationKey }[] =
         [
@@ -46,21 +45,9 @@
             />
         {/each}
     </div>
-    <button
-        class="inline-flex items-center gap-2 cursor-pointer text-body font-bold text-accent mb-8 transition-opacity duration-fast hover:opacity-80"
-        onclick={() => eqOpen.set(true)}
-    >
-        <svg
-            class="size-3.75"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-        >
-            <path d={ICONS.equalizer} />
-        </svg>
-        {t('settings.fineTune')} →
-    </button>
+    <div class="mb-8">
+        <OpenEqButton labelKey="settings.fineTune" />
+    </div>
 
     <SectionLabel class="mb-3">{t('settings.playback')}</SectionLabel>
     <div class="rounded-card overflow-hidden border border-border mb-8">

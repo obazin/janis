@@ -551,6 +551,13 @@ impl Engine {
                 codec: format.codec,
             });
         }
+        // Before `State`, whose index refers into this queue. The `State`
+        // event alone cannot rebuild a reloaded webview's track list.
+        if !self.queue.is_empty() {
+            self.emit(EngineEvent::Queue {
+                track_ids: self.queue.track_ids(),
+            });
+        }
         self.emit_state();
         self.emit_progress_now();
     }

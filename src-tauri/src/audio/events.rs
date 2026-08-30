@@ -35,6 +35,12 @@ pub enum EngineEvent {
         repeat: bool,
         station_id: Option<String>,
     },
+    /// The queue's track ids, in queue order. Sent on subscribe alongside
+    /// `State`: a reloaded webview can rebuild its `Track` list from the
+    /// library with these, where `State`'s bare index and length cannot —
+    /// without them the mirror renders "nothing playing" over live audio.
+    #[serde(rename_all = "camelCase")]
+    Queue { track_ids: Vec<i64> },
     /// Roughly 10 Hz. The frontend interpolates between these with
     /// `performance.now()`, so the playhead stays smooth without paying for
     /// 60 Hz of IPC.

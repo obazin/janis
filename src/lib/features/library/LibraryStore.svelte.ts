@@ -4,6 +4,14 @@ import type { Track, WatchedFolder, ScanReport, CoverArt } from '$lib/models/Tra
 
 const AUDIO_EXTENSIONS = ['mp3', 'flac', 'wav', 'm4a', 'aac', 'ogg', 'opus', 'aif', 'aiff'];
 
+/**
+ * Covers kept in memory at once. Each is a base64 data URL pinned in the
+ * webview, so a long session scrolling a big library must not retain every
+ * cover it ever showed; past the limit the oldest entries fall out and are
+ * simply refetched if they scroll back in.
+ */
+const COVER_CACHE_LIMIT = 300;
+
 export interface AlbumGroup {
     key: string;
     album: string | null;
@@ -51,6 +59,13 @@ class LibraryStore {
 
     get tracks(): readonly Track[] {
         return this.#tracks;
+    }
+
+    /** Tracks indexed by id, for O(1) lookups over a large library. */
+    readonly #byId = $derived.by(() => new Map(this.#tracks.map((track) => [track.id, track])));
+
+    trackById(id: number): Track | undefined {
+        return this.#byId.get(id);
     }
     get folders(): readonly WatchedFolder[] {
         return this.#folders;
@@ -150,6 +165,15 @@ class LibraryStore {
         // A new Map, not a mutation: `$state` tracks the reference.
         const next = new Map(this.#covers);
         next.set(trackId, url);
+        // Insertion order doubles as age: evict from the front until the
+        // cache is back under its ceiling, and forget the request so the art
+        // can be fetched again if that tile ever comes back.
+        while (next.size > COVER_CACHE_LIMIT) {
+            const oldest: number | undefined = next.keys().next().value;
+            if (oldest === undefined) break;
+            next.delete(oldest);
+            this.#coverRequests.delete(oldest);
+        }
         this.#covers = next;
     }
 
