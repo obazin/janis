@@ -177,6 +177,13 @@ pub struct Engine {
     output: Option<Output>,
     producer: Option<rtrb::Producer<f32>>,
     analyser: Option<Analyser>,
+    /// Set on Pause/Stop while a flush-driven fade is still in flight — the
+    /// stream itself is only actually paused once the callback has serviced
+    /// it. Pausing any earlier freezes the hardware output at whatever
+    /// arbitrary sample the ring last held; the next `play()` then jumps
+    /// straight from that frozen level into new audio with no fade between
+    /// them, which is heard as a click at the moment playback resumes.
+    pending_pause: bool,
 
     decoder: Option<Decoder>,
     /// Opened early so a gapless transition costs no probe or allocation.
@@ -252,6 +259,7 @@ impl Engine {
             output: None,
             producer: None,
             analyser: None,
+            pending_pause: false,
             decoder: None,
             preloaded: None,
             now_playing: None,
@@ -291,6 +299,7 @@ impl Engine {
                 }
             }
 
+            self.service_pending_pause();
             worked |= self.pump();
             self.emit_progress();
             self.push_visual_frame();
@@ -452,6 +461,7 @@ impl Engine {
                         // this, playback freezes with the transport still
                         // showing playing.
                         if was_playing {
+                            self.pending_pause = false;
                             if let Some(output) = self.output.as_ref() {
                                 if let Err(message) = output.play() {
                                     self.emit(EngineEvent::Error { message });
@@ -652,15 +662,17 @@ impl Engine {
             return;
         }
         self.playing = playing;
-        if let Some(output) = self.output.as_ref() {
-            let result = if playing {
-                output.play()
-            } else {
-                output.pause()
-            };
-            if let Err(message) = result {
-                self.emit(EngineEvent::Error { message });
+        if playing {
+            self.pending_pause = false;
+            if let Some(output) = self.output.as_ref() {
+                if let Err(message) = output.play() {
+                    self.emit(EngineEvent::Error { message });
+                }
             }
+        } else {
+            // See `pending_pause`: fade what is already in the ring instead
+            // of freezing the stream on it outright.
+            self.fade_then_pause();
         }
         self.emit_state();
     }
@@ -681,11 +693,29 @@ impl Engine {
         self.preloaded = None;
         self.pending_out.clear();
         self.boundaries.clear();
-        self.params.request_flush();
-        if let Some(output) = self.output.as_ref() {
-            let _ = output.pause();
-        }
+        self.fade_then_pause();
         self.emit_state();
+    }
+
+    /// Requests a flush — which fades whatever is already in the ring to
+    /// silence rather than cutting it off, see [`super::params::Params`] —
+    /// and defers the actual stream pause to [`Self::service_pending_pause`]
+    /// once the callback has serviced it. See `pending_pause`.
+    fn fade_then_pause(&mut self) {
+        self.params.request_flush();
+        self.pending_pause = true;
+    }
+
+    /// Finishes a pause once its fade has completed. Called once per turn of
+    /// the run loop, since the callback (not this thread) is what clears the
+    /// flush flag, typically within one device period.
+    fn service_pending_pause(&mut self) {
+        if self.pending_pause && !self.params.flush_pending() {
+            self.pending_pause = false;
+            if let Some(output) = self.output.as_ref() {
+                let _ = output.pause();
+            }
+        }
     }
 
     fn seek(&mut self, secs: f64) {
@@ -836,6 +866,9 @@ impl Engine {
 
     fn begin_playback(&mut self) {
         self.playing = true;
+        // A fresh decoder means new, wanted audio is about to flow — any
+        // pause `install_decoder`'s own flush is still fading out is moot.
+        self.pending_pause = false;
         if let Some(output) = self.output.as_ref() {
             if let Err(message) = output.play() {
                 self.emit(EngineEvent::Error { message });
@@ -2011,6 +2044,105 @@ mod tests {
             "a gapless join keeps counting from where the ring already was, \
              it never rebases mid-queue — got {}",
             engine.frames_written
+        );
+    }
+
+    #[test]
+    fn pausing_defers_the_actual_stream_pause_until_the_fade_completes() {
+        let mut engine = bare_engine();
+        engine.mode = Mode::Local;
+        engine.playing = true;
+
+        engine.set_playing(false);
+
+        assert!(!engine.playing, "the transport reports paused right away");
+        assert!(
+            engine.params.flush_pending(),
+            "a fade must be requested instead of an instant cutoff"
+        );
+        assert!(
+            engine.pending_pause,
+            "the real stream pause is deferred until the fade is serviced"
+        );
+
+        // No real callback exists in this test to service the fade, so the
+        // pause must not have happened yet.
+        engine.service_pending_pause();
+        assert!(
+            engine.pending_pause,
+            "servicing before the flag clears must not finish the pause early"
+        );
+
+        // Simulate the callback completing the fade, as `process_block`
+        // does for a real device.
+        engine.params.finish_flush();
+        engine.service_pending_pause();
+        assert!(
+            !engine.pending_pause,
+            "once the fade is serviced, the deferred pause resolves"
+        );
+    }
+
+    #[test]
+    fn stopping_defers_the_pause_the_same_way_as_pausing() {
+        let mut engine = bare_engine();
+        engine.mode = Mode::Local;
+        engine.playing = true;
+
+        engine.stop();
+
+        assert!(engine.params.flush_pending(), "stop must also fade first");
+        assert!(engine.pending_pause);
+    }
+
+    #[test]
+    fn resuming_before_a_deferred_pause_resolves_cancels_it() {
+        let mut engine = bare_engine();
+        engine.mode = Mode::Local;
+        engine.playing = true;
+        // A decoder must already be installed, or `set_playing(true)` takes
+        // the "queue ran out, start fresh" branch instead of a plain resume.
+        let wav = fixtures::wav_bytes(44_100, 2, &fixtures::tone(44_100, 2, 44_100, 440.0));
+        let mut hint = symphonia::core::formats::probe::Hint::new();
+        hint.with_extension("wav");
+        engine.decoder =
+            Some(Decoder::open(Box::new(std::io::Cursor::new(wav)), hint).expect("wav decodes"));
+
+        engine.set_playing(false);
+        assert!(engine.pending_pause, "precondition: a pause is pending");
+
+        // The listener changed their mind before the callback ever
+        // serviced the fade — the stream was never actually paused, so
+        // there is nothing left to finish.
+        engine.set_playing(true);
+
+        assert!(engine.playing);
+        assert!(
+            !engine.pending_pause,
+            "resuming must not let a stale pending pause later freeze a \
+             stream that is now playing new audio"
+        );
+    }
+
+    #[test]
+    fn starting_a_fresh_track_cancels_a_pause_still_fading_out() {
+        let dir = "janis-pause-then-play-test";
+        let (path, entry) = wav_track(1, dir);
+
+        let mut engine = bare_engine();
+        engine.mode = Mode::Local;
+        engine.playing = true;
+        engine.pending_pause = true; // a Stop/Pause moments earlier
+        engine.queue.load(vec![entry], 0);
+
+        engine.start_current();
+
+        let _ = std::fs::remove_file(&path);
+        assert!(
+            !engine.pending_pause,
+            "a fresh decoder means new audio is about to flow — a leftover \
+             pending pause from before must not later freeze this stream \
+             once its own flush happens to clear"
         );
     }
 
