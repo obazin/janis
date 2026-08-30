@@ -265,6 +265,30 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1254ebf6529f3763c491acfb5ab6e960809e3c75a38584cc664f8c5667fb7107"
 
 [[package]]
+name = "audio-stack-rs"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "biquad",
+ "cpal",
+ "crossbeam-channel",
+ "ebur128",
+ "icy-metadata",
+ "lofty",
+ "log",
+ "opus",
+ "realfft",
+ "rtrb",
+ "rubato",
+ "serde",
+ "serde_json",
+ "stream-download",
+ "symphonia",
+ "symphonia-common",
+ "tokio",
+]
+
+[[package]]
 name = "audioadapter"
 version = "5.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2098,24 +2122,11 @@ checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
 name = "janis"
 version = "0.1.0"
 dependencies = [
- "base64 0.22.1",
- "biquad",
- "cpal",
- "crossbeam-channel",
- "ebur128",
- "icy-metadata",
- "lofty",
+ "audio-stack-rs",
  "log",
- "opus",
- "realfft",
- "rtrb",
- "rubato",
  "rusqlite",
  "serde",
  "serde_json",
- "stream-download",
- "symphonia",
- "symphonia-common",
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",
