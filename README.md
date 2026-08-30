@@ -18,7 +18,7 @@ Playlists, Spotify integration and user-added stations are on the roadmap.
 
 ## Development
 
-Requires [Nix](https://nixos.org) + [direnv](https://direnv.net) (the dev shell pins Rust, Node 22, pnpm and prettier — see `flake.nix`).
+Requires [Nix](https://nixos.org) + [direnv](https://direnv.net) (the dev shell pins Rust, Node 22, pnpm and prettier, and carries the Linux GTK/webkit stack — see `flake.nix`).
 
 ```bash
 direnv allow          # once — enters the dev shell automatically
@@ -37,6 +37,8 @@ just fmt-rust-check   # rustfmt verification
 ```
 
 `just release` builds the distributable bundle.
+
+`nix run` (or `nix build .#janis`) builds and launches the app through Nix alone — frontend and backend in a single derivation, no dev shell or `pnpm install` required.
 
 ## Architecture in one paragraph
 
