@@ -1,0 +1,1176 @@
+[
+  {
+    "id": "soma-groovesalad",
+    "name": "SomaFM Groove Salad",
+    "country": "US",
+    "genreKey": "radio.genre.ambient",
+    "kbps": 256,
+    "url": "https://ice1.somafm.com/groovesalad-256-mp3",
+    "gradIndex": 0,
+    "nowPlaying": {
+      "provider": "somafm",
+      "key": "groovesalad"
+    }
+  },
+  {
+    "id": "soma-groovesalad2",
+    "name": "SomaFM Groove Salad 2",
+    "country": "US",
+    "genreKey": "radio.genre.ambient",
+    "kbps": 256,
+    "url": "https://ice1.somafm.com/groovesalad2-256-mp3",
+    "gradIndex": 1,
+    "nowPlaying": {
+      "provider": "somafm",
+      "key": "groovesalad2"
+    }
+  },
+  {
+    "id": "soma-gsclassic",
+    "name": "SomaFM Groove Salad Classic",
+    "country": "US",
+    "genreKey": "radio.genre.ambient",
+    "kbps": 160,
+    "url": "https://ice1.somafm.com/gsclassic-128-mp3",
+    "gradIndex": 2,
+    "nowPlaying": {
+      "provider": "somafm",
+      "key": "gsclassic"
+    }
+  },
+  {
+    "id": "soma-dronezone",
+    "name": "SomaFM Drone Zone",
+    "country": "US",
+    "genreKey": "radio.genre.ambient",
+    "kbps": 256,
+    "url": "https://ice1.somafm.com/dronezone-256-mp3",
+    "gradIndex": 3,
+    "nowPlaying": {
+      "provider": "somafm",
+      "key": "dronezone"
+    }
+  },
+  {
+    "id": "soma-dz2",
+    "name": "SomaFM Drone Zone 2",
+    "country": "US",
+    "genreKey": "radio.genre.ambient",
+    "kbps": 128,
+    "url": "https://ice1.somafm.com/dz2-128-mp3",
+    "gradIndex": 4,
+    "nowPlaying": {
+      "provider": "somafm",
+      "key": "dz2"
+    }
+  },
+  {
+    "id": "soma-deepspaceone",
+    "name": "SomaFM Deep Space One",
+    "country": "US",
+    "genreKey": "radio.genre.ambient",
+    "kbps": 128,
+    "url": "https://ice1.somafm.com/deepspaceone-128-mp3",
+    "gradIndex": 5,
+    "nowPlaying": {
+      "provider": "somafm",
+      "key": "deepspaceone"
+    }
+  },
+  {
+    "id": "soma-missioncontrol",
+    "name": "SomaFM Mission Control",
+    "country": "US",
+    "genreKey": "radio.genre.ambient",
+    "kbps": 128,
+    "url": "https://ice1.somafm.com/missioncontrol-128-mp3",
+    "gradIndex": 0,
+    "nowPlaying": {
+      "provider": "somafm",
+      "key": "missioncontrol"
+    }
+  },
+  {
+    "id": "soma-darkzone",
+    "name": "SomaFM The Dark Zone",
+    "country": "US",
+    "genreKey": "radio.genre.ambient",
+    "kbps": 256,
+    "url": "https://ice1.somafm.com/darkzone-256-mp3",
+    "gradIndex": 1,
+    "nowPlaying": {
+      "provider": "somafm",
+      "key": "darkzone"
+    }
+  },
+  {
+    "id": "soma-synphaera",
+    "name": "SomaFM Synphaera",
+    "country": "US",
+    "genreKey": "radio.genre.ambient",
+    "kbps": 256,
+    "url": "https://ice1.somafm.com/synphaera-256-mp3",
+    "gradIndex": 2,
+    "nowPlaying": {
+      "provider": "somafm",
+      "key": "synphaera"
+    }
+  },
+  {
+    "id": "soma-spacestation",
+    "name": "SomaFM Space Station",
+    "country": "US",
+    "genreKey": "radio.genre.electronic",
+    "kbps": 128,
+    "url": "https://ice1.somafm.com/spacestation-128-mp3",
+    "gradIndex": 3,
+    "nowPlaying": {
+      "provider": "somafm",
+      "key": "spacestation"
+    }
+  },
+  {
+    "id": "soma-defcon",
+    "name": "SomaFM DEF CON Radio",
+    "country": "US",
+    "genreKey": "radio.genre.electronic",
+    "kbps": 256,
+    "url": "https://ice1.somafm.com/defcon-256-mp3",
+    "gradIndex": 4,
+    "nowPlaying": {
+      "provider": "somafm",
+      "key": "defcon"
+    }
+  },
+  {
+    "id": "soma-lush",
+    "name": "SomaFM Lush",
+    "country": "US",
+    "genreKey": "radio.genre.chillout",
+    "kbps": 128,
+    "url": "https://ice1.somafm.com/lush-128-mp3",
+    "gradIndex": 5,
+    "nowPlaying": {
+      "provider": "somafm",
+      "key": "lush"
+    }
+  },
+  {
+    "id": "soma-chillits",
+    "name": "SomaFM Chillits",
+    "country": "US",
+    "genreKey": "radio.genre.chillout",
+    "kbps": 320,
+    "url": "https://ice1.somafm.com/chillits-256-mp3",
+    "gradIndex": 0,
+    "nowPlaying": {
+      "provider": "somafm",
+      "key": "chillits"
+    }
+  },
+  {
+    "id": "soma-beatblender",
+    "name": "SomaFM Beat Blender",
+    "country": "US",
+    "genreKey": "radio.genre.house",
+    "kbps": 128,
+    "url": "https://ice1.somafm.com/beatblender-128-mp3",
+    "gradIndex": 1,
+    "nowPlaying": {
+      "provider": "somafm",
+      "key": "beatblender"
+    }
+  },
+  {
+    "id": "soma-thetrip",
+    "name": "SomaFM The Trip",
+    "country": "US",
+    "genreKey": "radio.genre.trance",
+    "kbps": 128,
+    "url": "https://ice1.somafm.com/thetrip-128-mp3",
+    "gradIndex": 2,
+    "nowPlaying": {
+      "provider": "somafm",
+      "key": "thetrip"
+    }
+  },
+  {
+    "id": "soma-cliqhop",
+    "name": "SomaFM cliqhop idm",
+    "country": "US",
+    "genreKey": "radio.genre.idm",
+    "kbps": 256,
+    "url": "https://ice1.somafm.com/cliqhop-256-mp3",
+    "gradIndex": 3,
+    "nowPlaying": {
+      "provider": "somafm",
+      "key": "cliqhop"
+    }
+  },
+  {
+    "id": "soma-dubstep",
+    "name": "SomaFM Dub Step Beyond",
+    "country": "US",
+    "genreKey": "radio.genre.dubstep",
+    "kbps": 256,
+    "url": "https://ice1.somafm.com/dubstep-256-mp3",
+    "gradIndex": 4,
+    "nowPlaying": {
+      "provider": "somafm",
+      "key": "dubstep"
+    }
+  },
+  {
+    "id": "soma-fluid",
+    "name": "SomaFM Fluid",
+    "country": "US",
+    "genreKey": "radio.genre.hiphop",
+    "kbps": 128,
+    "url": "https://ice1.somafm.com/fluid-128-mp3",
+    "gradIndex": 5,
+    "nowPlaying": {
+      "provider": "somafm",
+      "key": "fluid"
+    }
+  },
+  {
+    "id": "soma-vaporwaves",
+    "name": "SomaFM Vaporwaves",
+    "country": "US",
+    "genreKey": "radio.genre.vaporwave",
+    "kbps": 128,
+    "url": "https://ice1.somafm.com/vaporwaves-128-mp3",
+    "gradIndex": 0,
+    "nowPlaying": {
+      "provider": "somafm",
+      "key": "vaporwaves"
+    }
+  },
+  {
+    "id": "soma-u80s",
+    "name": "SomaFM Underground 80s",
+    "country": "US",
+    "genreKey": "radio.genre.eighties",
+    "kbps": 256,
+    "url": "https://ice1.somafm.com/u80s-256-mp3",
+    "gradIndex": 1,
+    "nowPlaying": {
+      "provider": "somafm",
+      "key": "u80s"
+    }
+  },
+  {
+    "id": "soma-poptron",
+    "name": "SomaFM PopTron",
+    "country": "US",
+    "genreKey": "radio.genre.pop",
+    "kbps": 128,
+    "url": "https://ice1.somafm.com/poptron-128-mp3",
+    "gradIndex": 2,
+    "nowPlaying": {
+      "provider": "somafm",
+      "key": "poptron"
+    }
+  },
+  {
+    "id": "soma-indiepop",
+    "name": "SomaFM Indie Pop Rocks!",
+    "country": "US",
+    "genreKey": "radio.genre.indie",
+    "kbps": 128,
+    "url": "https://ice1.somafm.com/indiepop-128-mp3",
+    "gradIndex": 3,
+    "nowPlaying": {
+      "provider": "somafm",
+      "key": "indiepop"
+    }
+  },
+  {
+    "id": "soma-digitalis",
+    "name": "SomaFM Digitalis",
+    "country": "US",
+    "genreKey": "radio.genre.indie",
+    "kbps": 256,
+    "url": "https://ice1.somafm.com/digitalis-256-mp3",
+    "gradIndex": 4,
+    "nowPlaying": {
+      "provider": "somafm",
+      "key": "digitalis"
+    }
+  },
+  {
+    "id": "soma-folkfwd",
+    "name": "SomaFM Folk Forward",
+    "country": "US",
+    "genreKey": "radio.genre.folk",
+    "kbps": 128,
+    "url": "https://ice1.somafm.com/folkfwd-128-mp3",
+    "gradIndex": 5,
+    "nowPlaying": {
+      "provider": "somafm",
+      "key": "folkfwd"
+    }
+  },
+  {
+    "id": "soma-thistle",
+    "name": "SomaFM ThistleRadio",
+    "country": "US",
+    "genreKey": "radio.genre.celtic",
+    "kbps": 128,
+    "url": "https://ice1.somafm.com/thistle-128-mp3",
+    "gradIndex": 0,
+    "nowPlaying": {
+      "provider": "somafm",
+      "key": "thistle"
+    }
+  },
+  {
+    "id": "soma-suburbsofgoa",
+    "name": "SomaFM Suburbs of Goa",
+    "country": "US",
+    "genreKey": "radio.genre.world",
+    "kbps": 128,
+    "url": "https://ice1.somafm.com/suburbsofgoa-128-mp3",
+    "gradIndex": 1,
+    "nowPlaying": {
+      "provider": "somafm",
+      "key": "suburbsofgoa"
+    }
+  },
+  {
+    "id": "soma-bossa",
+    "name": "SomaFM Bossa Beyond",
+    "country": "US",
+    "genreKey": "radio.genre.bossanova",
+    "kbps": 256,
+    "url": "https://ice1.somafm.com/bossa-256-mp3",
+    "gradIndex": 2,
+    "nowPlaying": {
+      "provider": "somafm",
+      "key": "bossa"
+    }
+  },
+  {
+    "id": "soma-tikitime",
+    "name": "SomaFM Tiki Time",
+    "country": "US",
+    "genreKey": "radio.genre.lounge",
+    "kbps": 256,
+    "url": "https://ice1.somafm.com/tikitime-256-mp3",
+    "gradIndex": 3,
+    "nowPlaying": {
+      "provider": "somafm",
+      "key": "tikitime"
+    }
+  },
+  {
+    "id": "soma-illstreet",
+    "name": "SomaFM Illinois Street Lounge",
+    "country": "US",
+    "genreKey": "radio.genre.lounge",
+    "kbps": 128,
+    "url": "https://ice1.somafm.com/illstreet-128-mp3",
+    "gradIndex": 4,
+    "nowPlaying": {
+      "provider": "somafm",
+      "key": "illstreet"
+    }
+  },
+  {
+    "id": "soma-secretagent",
+    "name": "SomaFM Secret Agent",
+    "country": "US",
+    "genreKey": "radio.genre.lounge",
+    "kbps": 128,
+    "url": "https://ice1.somafm.com/secretagent-128-mp3",
+    "gradIndex": 5,
+    "nowPlaying": {
+      "provider": "somafm",
+      "key": "secretagent"
+    }
+  },
+  {
+    "id": "soma-7soul",
+    "name": "SomaFM Seven Inch Soul",
+    "country": "US",
+    "genreKey": "radio.genre.soul",
+    "kbps": 160,
+    "url": "https://ice1.somafm.com/7soul-128-mp3",
+    "gradIndex": 0,
+    "nowPlaying": {
+      "provider": "somafm",
+      "key": "7soul"
+    }
+  },
+  {
+    "id": "soma-insound",
+    "name": "SomaFM The In-Sound",
+    "country": "US",
+    "genreKey": "radio.genre.oldies",
+    "kbps": 256,
+    "url": "https://ice1.somafm.com/insound-256-mp3",
+    "gradIndex": 1,
+    "nowPlaying": {
+      "provider": "somafm",
+      "key": "insound"
+    }
+  },
+  {
+    "id": "soma-seventies",
+    "name": "SomaFM Left Coast 70s",
+    "country": "US",
+    "genreKey": "radio.genre.rock",
+    "kbps": 128,
+    "url": "https://ice1.somafm.com/seventies-128-mp3",
+    "gradIndex": 2,
+    "nowPlaying": {
+      "provider": "somafm",
+      "key": "seventies"
+    }
+  },
+  {
+    "id": "soma-brfm",
+    "name": "SomaFM Black Rock FM",
+    "country": "US",
+    "genreKey": "radio.genre.eclectic",
+    "kbps": 128,
+    "url": "https://ice1.somafm.com/brfm-128-mp3",
+    "gradIndex": 3,
+    "nowPlaying": {
+      "provider": "somafm",
+      "key": "brfm"
+    }
+  },
+  {
+    "id": "soma-covers",
+    "name": "SomaFM Covers",
+    "country": "US",
+    "genreKey": "radio.genre.eclectic",
+    "kbps": 128,
+    "url": "https://ice1.somafm.com/covers-128-mp3",
+    "gradIndex": 4,
+    "nowPlaying": {
+      "provider": "somafm",
+      "key": "covers"
+    }
+  },
+  {
+    "id": "soma-bootliquor",
+    "name": "SomaFM Boot Liquor",
+    "country": "US",
+    "genreKey": "radio.genre.americana",
+    "kbps": 128,
+    "url": "https://ice1.somafm.com/bootliquor-128-mp3",
+    "gradIndex": 5,
+    "nowPlaying": {
+      "provider": "somafm",
+      "key": "bootliquor"
+    }
+  },
+  {
+    "id": "soma-sonicuniverse",
+    "name": "SomaFM Sonic Universe",
+    "country": "US",
+    "genreKey": "radio.genre.jazz",
+    "kbps": 256,
+    "url": "https://ice1.somafm.com/sonicuniverse-256-mp3",
+    "gradIndex": 0,
+    "nowPlaying": {
+      "provider": "somafm",
+      "key": "sonicuniverse"
+    }
+  },
+  {
+    "id": "soma-metal",
+    "name": "SomaFM Metal Detector",
+    "country": "US",
+    "genreKey": "radio.genre.metal",
+    "kbps": 128,
+    "url": "https://ice1.somafm.com/metal-128-mp3",
+    "gradIndex": 1,
+    "nowPlaying": {
+      "provider": "somafm",
+      "key": "metal"
+    }
+  },
+  {
+    "id": "soma-reggae",
+    "name": "SomaFM Heavyweight Reggae",
+    "country": "US",
+    "genreKey": "radio.genre.reggae",
+    "kbps": 320,
+    "url": "https://ice1.somafm.com/reggae-256-mp3",
+    "gradIndex": 2,
+    "nowPlaying": {
+      "provider": "somafm",
+      "key": "reggae"
+    }
+  },
+  {
+    "id": "soma-doomed",
+    "name": "SomaFM Doomed",
+    "country": "US",
+    "genreKey": "radio.genre.industrial",
+    "kbps": 256,
+    "url": "https://ice1.somafm.com/doomed-256-mp3",
+    "gradIndex": 3,
+    "nowPlaying": {
+      "provider": "somafm",
+      "key": "doomed"
+    }
+  },
+  {
+    "id": "soma-n5md",
+    "name": "SomaFM n5MD Radio",
+    "country": "US",
+    "genreKey": "radio.genre.experimental",
+    "kbps": 128,
+    "url": "https://ice1.somafm.com/n5md-128-mp3",
+    "gradIndex": 4,
+    "nowPlaying": {
+      "provider": "somafm",
+      "key": "n5md"
+    }
+  },
+  {
+    "id": "fip",
+    "name": "FIP",
+    "country": "FR",
+    "genreKey": "radio.genre.eclectic",
+    "kbps": 128,
+    "url": "https://icecast.radiofrance.fr/fip-midfi.mp3",
+    "gradIndex": 5,
+    "nowPlaying": {
+      "provider": "radiofrance",
+      "key": "7"
+    }
+  },
+  {
+    "id": "fip-rock",
+    "name": "FIP Rock",
+    "country": "FR",
+    "genreKey": "radio.genre.rock",
+    "kbps": 128,
+    "url": "https://icecast.radiofrance.fr/fiprock-midfi.mp3",
+    "gradIndex": 0,
+    "nowPlaying": {
+      "provider": "radiofrance",
+      "key": "64"
+    }
+  },
+  {
+    "id": "fip-jazz",
+    "name": "FIP Jazz",
+    "country": "FR",
+    "genreKey": "radio.genre.jazz",
+    "kbps": 128,
+    "url": "https://icecast.radiofrance.fr/fipjazz-midfi.mp3",
+    "gradIndex": 1,
+    "nowPlaying": {
+      "provider": "radiofrance",
+      "key": "65"
+    }
+  },
+  {
+    "id": "fip-groove",
+    "name": "FIP Groove",
+    "country": "FR",
+    "genreKey": "radio.genre.funk",
+    "kbps": 128,
+    "url": "https://icecast.radiofrance.fr/fipgroove-midfi.mp3",
+    "gradIndex": 2,
+    "nowPlaying": {
+      "provider": "radiofrance",
+      "key": "66"
+    }
+  },
+  {
+    "id": "fip-monde",
+    "name": "FIP Monde",
+    "country": "FR",
+    "genreKey": "radio.genre.world",
+    "kbps": 128,
+    "url": "https://icecast.radiofrance.fr/fipworld-midfi.mp3",
+    "gradIndex": 3,
+    "nowPlaying": {
+      "provider": "radiofrance",
+      "key": "69"
+    }
+  },
+  {
+    "id": "fip-nouveautes",
+    "name": "FIP Nouveautés",
+    "country": "FR",
+    "genreKey": "radio.genre.indie",
+    "kbps": 128,
+    "url": "https://icecast.radiofrance.fr/fipnouveautes-midfi.mp3",
+    "gradIndex": 4,
+    "nowPlaying": {
+      "provider": "radiofrance",
+      "key": "70"
+    }
+  },
+  {
+    "id": "fip-reggae",
+    "name": "FIP Reggae",
+    "country": "FR",
+    "genreKey": "radio.genre.reggae",
+    "kbps": 128,
+    "url": "https://icecast.radiofrance.fr/fipreggae-midfi.mp3",
+    "gradIndex": 5,
+    "nowPlaying": {
+      "provider": "radiofrance",
+      "key": "71"
+    }
+  },
+  {
+    "id": "fip-electro",
+    "name": "FIP Electro",
+    "country": "FR",
+    "genreKey": "radio.genre.electronic",
+    "kbps": 128,
+    "url": "https://icecast.radiofrance.fr/fipelectro-midfi.mp3",
+    "gradIndex": 0,
+    "nowPlaying": {
+      "provider": "radiofrance",
+      "key": "74"
+    }
+  },
+  {
+    "id": "fip-pop",
+    "name": "FIP Pop",
+    "country": "FR",
+    "genreKey": "radio.genre.pop",
+    "kbps": 128,
+    "url": "https://icecast.radiofrance.fr/fippop-midfi.mp3",
+    "gradIndex": 1
+  },
+  {
+    "id": "fip-hiphop",
+    "name": "FIP Hip-Hop",
+    "country": "FR",
+    "genreKey": "radio.genre.hiphop",
+    "kbps": 128,
+    "url": "https://icecast.radiofrance.fr/fiphiphop-midfi.mp3",
+    "gradIndex": 2
+  },
+  {
+    "id": "fip-metal",
+    "name": "FIP Metal",
+    "country": "FR",
+    "genreKey": "radio.genre.metal",
+    "kbps": 128,
+    "url": "https://icecast.radiofrance.fr/fipmetal-midfi.mp3",
+    "gradIndex": 3,
+    "nowPlaying": {
+      "provider": "radiofrance",
+      "key": "77"
+    }
+  },
+  {
+    "id": "fm-easy-classique",
+    "name": "France Musique Classique Easy",
+    "country": "FR",
+    "genreKey": "radio.genre.classical",
+    "kbps": 128,
+    "url": "https://icecast.radiofrance.fr/francemusiqueeasyclassique-midfi.mp3",
+    "gradIndex": 4,
+    "nowPlaying": {
+      "provider": "radiofrance",
+      "key": "401"
+    }
+  },
+  {
+    "id": "fm-classique-plus",
+    "name": "France Musique Classique Plus",
+    "country": "FR",
+    "genreKey": "radio.genre.classical",
+    "kbps": 128,
+    "url": "https://icecast.radiofrance.fr/francemusiqueclassiqueplus-midfi.mp3",
+    "gradIndex": 5,
+    "nowPlaying": {
+      "provider": "radiofrance",
+      "key": "402"
+    }
+  },
+  {
+    "id": "fm-concerts",
+    "name": "France Musique Concerts",
+    "country": "FR",
+    "genreKey": "radio.genre.classical",
+    "kbps": 128,
+    "url": "https://icecast.radiofrance.fr/francemusiqueconcertsradiofrance-midfi.mp3",
+    "gradIndex": 0,
+    "nowPlaying": {
+      "provider": "radiofrance",
+      "key": "403"
+    }
+  },
+  {
+    "id": "fm-jazz",
+    "name": "France Musique La Jazz",
+    "country": "FR",
+    "genreKey": "radio.genre.jazz",
+    "kbps": 128,
+    "url": "https://icecast.radiofrance.fr/francemusiquelajazz-midfi.mp3",
+    "gradIndex": 1,
+    "nowPlaying": {
+      "provider": "radiofrance",
+      "key": "405"
+    }
+  },
+  {
+    "id": "fm-contemporaine",
+    "name": "France Musique Contemporaine",
+    "country": "FR",
+    "genreKey": "radio.genre.experimental",
+    "kbps": 128,
+    "url": "https://icecast.radiofrance.fr/francemusiquelacontemporaine-midfi.mp3",
+    "gradIndex": 2,
+    "nowPlaying": {
+      "provider": "radiofrance",
+      "key": "406"
+    }
+  },
+  {
+    "id": "fm-ocora",
+    "name": "France Musique Ocora Monde",
+    "country": "FR",
+    "genreKey": "radio.genre.world",
+    "kbps": 128,
+    "url": "https://icecast.radiofrance.fr/francemusiqueocoramonde-midfi.mp3",
+    "gradIndex": 3,
+    "nowPlaying": {
+      "provider": "radiofrance",
+      "key": "404"
+    }
+  },
+  {
+    "id": "fm-baroque",
+    "name": "France Musique La Baroque",
+    "country": "FR",
+    "genreKey": "radio.genre.classical",
+    "kbps": 128,
+    "url": "https://icecast.radiofrance.fr/francemusiquebaroque-midfi.mp3",
+    "gradIndex": 4,
+    "nowPlaying": {
+      "provider": "radiofrance",
+      "key": "408"
+    }
+  },
+  {
+    "id": "fm-opera",
+    "name": "France Musique Opéra",
+    "country": "FR",
+    "genreKey": "radio.genre.classical",
+    "kbps": 128,
+    "url": "https://icecast.radiofrance.fr/francemusiqueopera-midfi.mp3",
+    "gradIndex": 5,
+    "nowPlaying": {
+      "provider": "radiofrance",
+      "key": "409"
+    }
+  },
+  {
+    "id": "fm-films",
+    "name": "France Musique La B.O.",
+    "country": "FR",
+    "genreKey": "radio.genre.soundtrack",
+    "kbps": 128,
+    "url": "https://icecast.radiofrance.fr/francemusiquelabo-midfi.mp3",
+    "gradIndex": 0,
+    "nowPlaying": {
+      "provider": "radiofrance",
+      "key": "407"
+    }
+  },
+  {
+    "id": "mouv",
+    "name": "Mouv'",
+    "country": "FR",
+    "genreKey": "radio.genre.hiphop",
+    "kbps": 128,
+    "url": "https://icecast.radiofrance.fr/mouv-midfi.mp3",
+    "gradIndex": 1,
+    "nowPlaying": {
+      "provider": "radiofrance",
+      "key": "6"
+    }
+  },
+  {
+    "id": "radio-paradise",
+    "name": "Radio Paradise Main Mix",
+    "country": "US",
+    "genreKey": "radio.genre.eclectic",
+    "kbps": 320,
+    "url": "https://stream.radioparadise.com/aac-320",
+    "gradIndex": 2,
+    "nowPlaying": {
+      "provider": "radioparadise",
+      "key": "0"
+    }
+  },
+  {
+    "id": "rp-mellow",
+    "name": "Radio Paradise Mellow Mix",
+    "country": "US",
+    "genreKey": "radio.genre.chillout",
+    "kbps": 320,
+    "url": "https://stream.radioparadise.com/mellow-320",
+    "gradIndex": 3,
+    "nowPlaying": {
+      "provider": "radioparadise",
+      "key": "1"
+    }
+  },
+  {
+    "id": "rp-rock",
+    "name": "Radio Paradise Rock Mix",
+    "country": "US",
+    "genreKey": "radio.genre.rock",
+    "kbps": 320,
+    "url": "https://stream.radioparadise.com/rock-320",
+    "gradIndex": 4,
+    "nowPlaying": {
+      "provider": "radioparadise",
+      "key": "2"
+    }
+  },
+  {
+    "id": "rp-global",
+    "name": "Radio Paradise Global Mix",
+    "country": "US",
+    "genreKey": "radio.genre.world",
+    "kbps": 320,
+    "url": "https://stream.radioparadise.com/global-320",
+    "gradIndex": 5,
+    "nowPlaying": {
+      "provider": "radioparadise",
+      "key": "3"
+    }
+  },
+  {
+    "id": "rp-serenity",
+    "name": "Radio Paradise Serenity",
+    "country": "US",
+    "genreKey": "radio.genre.ambient",
+    "kbps": 64,
+    "url": "https://stream.radioparadise.com/serenity",
+    "gradIndex": 0
+  },
+  {
+    "id": "radio-swiss-jazz",
+    "name": "Radio Swiss Jazz",
+    "country": "CH",
+    "genreKey": "radio.genre.jazz",
+    "kbps": 128,
+    "url": "https://stream.srg-ssr.ch/m/rsj/mp3_128",
+    "gradIndex": 1
+  },
+  {
+    "id": "radio-swiss-classic",
+    "name": "Radio Swiss Classic",
+    "country": "CH",
+    "genreKey": "radio.genre.classical",
+    "kbps": 128,
+    "url": "https://stream.srg-ssr.ch/m/rsc_de/mp3_128",
+    "gradIndex": 2
+  },
+  {
+    "id": "radio-swiss-pop",
+    "name": "Radio Swiss Pop",
+    "country": "CH",
+    "genreKey": "radio.genre.pop",
+    "kbps": 128,
+    "url": "https://stream.srg-ssr.ch/m/rsp/mp3_128",
+    "gradIndex": 3
+  },
+  {
+    "id": "tsf-jazz",
+    "name": "TSF Jazz",
+    "country": "FR",
+    "genreKey": "radio.genre.jazz",
+    "kbps": 128,
+    "url": "https://tsfjazz.ice.infomaniak.ch/tsfjazz-high.mp3",
+    "gradIndex": 4
+  },
+  {
+    "id": "radio-nova",
+    "name": "Radio Nova",
+    "country": "FR",
+    "genreKey": "radio.genre.eclectic",
+    "kbps": 128,
+    "url": "https://novazz.ice.infomaniak.ch/novazz-128.mp3",
+    "gradIndex": 5
+  },
+  {
+    "id": "radio-meuh",
+    "name": "Radio Meuh",
+    "country": "FR",
+    "genreKey": "radio.genre.funk",
+    "kbps": 128,
+    "url": "https://radiomeuh.ice.infomaniak.ch/radiomeuh-128.mp3",
+    "gradIndex": 0
+  },
+  {
+    "id": "jazz-radio",
+    "name": "Jazz Radio",
+    "country": "FR",
+    "genreKey": "radio.genre.jazz",
+    "kbps": 128,
+    "url": "https://jazzradio.ice.infomaniak.ch/jazzradio-high.mp3",
+    "gradIndex": 1
+  },
+  {
+    "id": "radio-fg",
+    "name": "Radio FG",
+    "country": "FR",
+    "genreKey": "radio.genre.house",
+    "kbps": 128,
+    "url": "https://radiofg.impek.com/fg",
+    "gradIndex": 2
+  },
+  {
+    "id": "oui-fm",
+    "name": "OÜI FM",
+    "country": "FR",
+    "genreKey": "radio.genre.rock",
+    "kbps": 128,
+    "url": "https://ouifm.ice.infomaniak.ch/ouifm-high.mp3",
+    "gradIndex": 3
+  },
+  {
+    "id": "latina",
+    "name": "Latina",
+    "country": "FR",
+    "genreKey": "radio.genre.latin",
+    "kbps": 128,
+    "url": "https://start-latina.ice.infomaniak.ch/start-latina-high.mp3",
+    "gradIndex": 4
+  },
+  {
+    "id": "kexp",
+    "name": "KEXP Seattle",
+    "country": "US",
+    "genreKey": "radio.genre.indie",
+    "kbps": 160,
+    "url": "https://kexp.streamguys1.com/kexp160.aac",
+    "gradIndex": 5
+  },
+  {
+    "id": "kcrw-e24",
+    "name": "KCRW Eclectic 24",
+    "country": "US",
+    "genreKey": "radio.genre.eclectic",
+    "kbps": 192,
+    "url": "https://streams.kcrw.com/e24_mp3",
+    "gradIndex": 0
+  },
+  {
+    "id": "wfmu",
+    "name": "WFMU Freeform",
+    "country": "US",
+    "genreKey": "radio.genre.eclectic",
+    "kbps": 128,
+    "url": "https://stream0.wfmu.org/freeform-128k",
+    "gradIndex": 1
+  },
+  {
+    "id": "kusc",
+    "name": "Classical KUSC",
+    "country": "US",
+    "genreKey": "radio.genre.classical",
+    "kbps": 128,
+    "url": "https://playerservices.streamtheworld.com/api/livestream-redirect/KUSCMP128.mp3",
+    "gradIndex": 2
+  },
+  {
+    "id": "wqxr",
+    "name": "WQXR New York",
+    "country": "US",
+    "genreKey": "radio.genre.classical",
+    "kbps": 128,
+    "url": "https://stream.wqxr.org/wqxr-web",
+    "gradIndex": 3
+  },
+  {
+    "id": "jazz-groove",
+    "name": "The Jazz Groove",
+    "country": "US",
+    "genreKey": "radio.genre.jazz",
+    "kbps": 128,
+    "url": "https://east-mp3-128.streamthejazzgroove.com/stream",
+    "gradIndex": 4
+  },
+  {
+    "id": "smoothjazz-global",
+    "name": "SmoothJazz.com Global",
+    "country": "US",
+    "genreKey": "radio.genre.jazz",
+    "kbps": 128,
+    "url": "https://smoothjazz.cdnstream1.com/2585_128.mp3",
+    "gradIndex": 5
+  },
+  {
+    "id": "nts-1",
+    "name": "NTS Radio 1",
+    "country": "GB",
+    "genreKey": "radio.genre.eclectic",
+    "kbps": 256,
+    "url": "https://stream-relay-geo.ntslive.net/stream",
+    "gradIndex": 0
+  },
+  {
+    "id": "nts-2",
+    "name": "NTS Radio 2",
+    "country": "GB",
+    "genreKey": "radio.genre.eclectic",
+    "kbps": 256,
+    "url": "https://stream-relay-geo.ntslive.net/stream2",
+    "gradIndex": 1
+  },
+  {
+    "id": "rinse-fm",
+    "name": "Rinse FM",
+    "country": "GB",
+    "genreKey": "radio.genre.bass",
+    "kbps": 128,
+    "url": "https://admin.stream.rinse.fm/proxy/rinse_uk/stream",
+    "gradIndex": 2
+  },
+  {
+    "id": "dublab",
+    "name": "dublab",
+    "country": "US",
+    "genreKey": "radio.genre.experimental",
+    "kbps": 192,
+    "url": "https://dublab.out.airtime.pro/dublab_a",
+    "gradIndex": 3
+  },
+  {
+    "id": "venice-classic",
+    "name": "Venice Classic Radio",
+    "country": "IT",
+    "genreKey": "radio.genre.classical",
+    "kbps": 128,
+    "url": "https://uk2.streamingpulse.com/ssl/vcr1",
+    "gradIndex": 4
+  },
+  {
+    "id": "nightwave-plaza",
+    "name": "Nightwave Plaza",
+    "country": "US",
+    "genreKey": "radio.genre.vaporwave",
+    "kbps": 128,
+    "url": "https://radio.plaza.one/mp3",
+    "gradIndex": 5
+  },
+  {
+    "id": "nightride-fm",
+    "name": "Nightride FM",
+    "country": "US",
+    "genreKey": "radio.genre.synthwave",
+    "kbps": 320,
+    "url": "https://stream.nightride.fm/nightride.mp3",
+    "gradIndex": 0
+  },
+  {
+    "id": "nightride-chillsynth",
+    "name": "Nightride ChillSynth",
+    "country": "US",
+    "genreKey": "radio.genre.synthwave",
+    "kbps": 320,
+    "url": "https://stream.nightride.fm/chillsynth.mp3",
+    "gradIndex": 1
+  },
+  {
+    "id": "nightride-datawave",
+    "name": "Nightride DataWave",
+    "country": "US",
+    "genreKey": "radio.genre.synthwave",
+    "kbps": 320,
+    "url": "https://stream.nightride.fm/datawave.mp3",
+    "gradIndex": 2
+  },
+  {
+    "id": "ambient-sleeping-pill",
+    "name": "Ambient Sleeping Pill",
+    "country": "US",
+    "genreKey": "radio.genre.ambient",
+    "kbps": 256,
+    "url": "https://radio.stereoscenic.com/asp-h",
+    "gradIndex": 3
+  },
+  {
+    "id": "am-ambient",
+    "name": "A.M. Ambient",
+    "country": "US",
+    "genreKey": "radio.genre.ambient",
+    "kbps": 128,
+    "url": "https://radio.stereoscenic.com/am-h",
+    "gradIndex": 4
+  },
+  {
+    "id": "hirschmilch-chillout",
+    "name": "Hirschmilch Chillout",
+    "country": "DE",
+    "genreKey": "radio.genre.chillout",
+    "kbps": 128,
+    "url": "https://hirschmilch.de:7001/chillout.mp3",
+    "gradIndex": 5
+  },
+  {
+    "id": "hirschmilch-electronic",
+    "name": "Hirschmilch Electronic",
+    "country": "DE",
+    "genreKey": "radio.genre.electronic",
+    "kbps": 128,
+    "url": "https://hirschmilch.de:7001/electronic.mp3",
+    "gradIndex": 0
+  },
+  {
+    "id": "hirschmilch-techno",
+    "name": "Hirschmilch Techno",
+    "country": "DE",
+    "genreKey": "radio.genre.techno",
+    "kbps": 128,
+    "url": "https://hirschmilch.de:7001/techno.mp3",
+    "gradIndex": 1
+  },
+  {
+    "id": "hirschmilch-prog-house",
+    "name": "Hirschmilch Progressive House",
+    "country": "DE",
+    "genreKey": "radio.genre.house",
+    "kbps": 128,
+    "url": "https://hirschmilch.de:7001/prog-house.mp3",
+    "gradIndex": 2
+  },
+  {
+    "id": "hirschmilch-psytrance",
+    "name": "Hirschmilch Psytrance",
+    "country": "DE",
+    "genreKey": "radio.genre.trance",
+    "kbps": 128,
+    "url": "https://hirschmilch.de:7001/psytrance.mp3",
+    "gradIndex": 3
+  },
+  {
+    "id": "sunshine-live",
+    "name": "Sunshine Live",
+    "country": "DE",
+    "genreKey": "radio.genre.techno",
+    "kbps": 192,
+    "url": "https://stream.sunshine-live.de/live/mp3-192",
+    "gradIndex": 4
+  },
+  {
+    "id": "bassdrive",
+    "name": "Bassdrive",
+    "country": "US",
+    "genreKey": "radio.genre.dnb",
+    "kbps": 192,
+    "url": "https://bassdrive.radioca.st/stream",
+    "gradIndex": 5
+  }
+]

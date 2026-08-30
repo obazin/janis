@@ -14,11 +14,13 @@ export type NowPlayingSource = {
     key: string;
 };
 
-// A curated web-radio station. The list ships with the app
-// (`features/radio/stations.ts`); user-added stations are a future feature.
+// A curated web-radio station. The list ships with the app as static data
+// (`features/radio/stations.json`); user-added stations are a future feature.
 export interface Station {
     id: string;
     name: string;
+    /** ISO 3166-1 alpha-2 country code (uppercase) — drives the country filter. */
+    country: string;
     /** i18n key for the genre label — also the genre-filter chip key. */
     genreKey: TranslationKey;
     kbps: number;
