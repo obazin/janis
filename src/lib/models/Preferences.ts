@@ -5,6 +5,7 @@ export interface Preferences {
     volume: number;
     eqGains: number[];
     eqPreset: string;
+    eqLinearPhase: boolean;
     gapless: boolean;
     crossfade: boolean;
     normalize: boolean;

@@ -48,6 +48,7 @@ fn main() {
             persistence::get_preferences,
             persistence::set_volume,
             persistence::set_eq,
+            persistence::set_eq_linear_phase,
             persistence::set_playback_option,
             persistence::set_language,
             library::list_tracks,
@@ -77,6 +78,7 @@ fn main() {
             audio::commands::audio_set_crossfade,
             audio::commands::audio_set_volume,
             audio::commands::audio_set_eq,
+            audio::commands::audio_set_fir_eq,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

@@ -82,10 +82,11 @@ The canonical description of user-facing behavior. Every new feature lands here 
 ## 10-band Equalizer (overlay)
 
 - Bottom sheet over everything (scrim click / Escape / × closes). Preset chips + Reset. Ten vertical bands (32 Hz–16 kHz), ±12 dB in 0.5 dB steps, drag anywhere on the column; value readout colored lime (boost) / ember (cut). Gains apply live to the engine's filters and persist (debounced) with the preset name; hand-moving a band flips the preset to "Custom".
+- **Linear phase** toggle, between the presets and the bands. Off by default, the same ten gains run as realtime biquad filters — zero latency, audible on the next buffer. Turned on, they run instead as a linear-phase FIR in the decode chain: no inter-band phase distortion, at the cost of a constant latency (about 43 ms at 48 kHz) which the row's description names once the engine reports the figure for the open device. The two modes never stack — the FIR takes over from the realtime filters while on — and a change is heard once the already-buffered audio has played rather than instantly. Persisted, and re-read from the engine on subscribe, so a reloaded window recovers the mode from audio that never stopped.
 
 ## Persistence (`janis.db`, app-data dir)
 
-- `user_preferences` (single row): volume, EQ gains + preset, four playback switches, language.
+- `user_preferences` (single row): volume, EQ gains + preset, the EQ's linear-phase mode, four playback switches, language.
 - `watched_folders`: path, added_at. `tracks`: path (unique), folder_id (NULL = ad-hoc import), tags (title/artist/album/composer/album artist/genre/year, track and disc numbers with their totals), duration, format, sample rate, bit depth, channels, lossless, added_at, the four ReplayGain tag columns (track/album gain and peak) and the measured loudness pair (`loudness_lufs`, `loudness_peak`) the normalization feature fills in as tracks are heard. Upsert by path — rescans never duplicate, and the measured loudness columns live outside the upsert so a rescan cannot wipe them.
 - Schema changes are migrations stamped in SQLite's `user_version`, so an existing library gains new columns instead of silently missing them.
 - The webview has no filesystem access at all: the engine reads audio files directly and cover art crosses IPC as base64, so Tauri's asset protocol is not enabled.

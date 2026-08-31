@@ -4,6 +4,7 @@
     import { FREQ_LABELS } from './bands';
     import EqBandSlider from './EqBandSlider.svelte';
     import Chip from '$lib/design-system/atoms/Chip.svelte';
+    import ToggleRow from '$lib/design-system/molecules/ToggleRow.svelte';
     import IconButton from '$lib/design-system/atoms/IconButton.svelte';
     import { IconButtonIdentifier } from '$lib/design-system/atoms/IconButtonIdentifier';
     import { eqOpen } from '$lib/stores/EqOverlayStore';
@@ -13,6 +14,15 @@
     // The 10-band EQ bottom sheet. Rendered by the layout above everything;
     // visible while the `eqOpen` channel is true. Scrim click and Escape
     // close it; clicks inside the sheet stay inside.
+
+    // Once the mode is on the engine reports what it actually costs at the
+    // open device's rate, so the row names the real figure instead of the
+    // generic promise.
+    const linearPhaseDescription = $derived(
+        eqStore.linearPhase && eqStore.latencySecs > 0
+            ? t('eq.linearPhase.latency', { ms: Math.round(eqStore.latencySecs * 1000) })
+            : t('eq.linearPhase.desc'),
+    );
 
     function close() {
         eqOpen.set(false);
@@ -64,7 +74,7 @@
                     </div>
                 </div>
             </div>
-            <div class="flex gap-2 flex-wrap mt-4.5 mb-6">
+            <div class="flex gap-2 flex-wrap mt-4.5 mb-4">
                 {#each PRESET_ORDER as name (name)}
                     <Chip
                         label={t(PRESET_LABEL_KEYS[name])}
@@ -72,6 +82,14 @@
                         onclick={() => eqStore.setPreset(name as EqPresetName)}
                     />
                 {/each}
+            </div>
+            <div class="rounded-card overflow-hidden border border-border mb-6">
+                <ToggleRow
+                    label={t('eq.linearPhase')}
+                    description={linearPhaseDescription}
+                    checked={eqStore.linearPhase}
+                    onToggle={() => eqStore.setLinearPhase(!eqStore.linearPhase)}
+                />
             </div>
             <div class="flex justify-between gap-1.5">
                 {#each FREQ_LABELS as label, i (label)}
