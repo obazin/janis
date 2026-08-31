@@ -181,6 +181,9 @@
     "eq.subtitle": "EQ graphique · appliqué en direct à la lecture",
     "eq.reset": "Réinitialiser",
     "eq.close": "Fermer l'égaliseur",
+    "eq.linearPhase": "Phase linéaire",
+    "eq.linearPhase.desc": "Filtrage haute qualité, sans distorsion de phase",
+    "eq.linearPhase.latency": "Filtrage haute qualité · ajoute {ms} ms de latence",
     "eq.preset.flat": "Neutre",
     "eq.preset.rock": "Rock",
     "eq.preset.pop": "Pop",
@@ -205,5 +208,6 @@
     "error.playback": "Lecture impossible — {message}",
     "error.radio": "Connexion impossible à {name}",
     "error.cover": "Illustration indisponible — la source est peut-être injoignable",
+    "error.preferences": "Votre choix n'a pas pu être enregistré — il sera oublié au prochain lancement",
     "notification.dismiss": "Fermer"
 }

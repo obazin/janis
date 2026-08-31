@@ -3,6 +3,7 @@ import type { Track, CoverArt } from '$lib/models/Track';
 import type { Station } from '$lib/models/Station';
 import { audioEngine, type EngineEvent } from './audioEngine';
 import { notificationStore } from '$lib/stores/NotificationStore.svelte';
+import { eqStore } from '$lib/features/eq/EqStore.svelte';
 
 // The playback store. Rust owns the queue, the transport and the signal path;
 // this is a reactive mirror of the engine plus the bits of presentation the
@@ -236,6 +237,11 @@ class PlayerStore {
                 this.#sampleRate = event.data.sampleRate;
                 break;
             case 'format':
+                break;
+            case 'firEq':
+                // The EQ owns this state; the player only carries the
+                // channel it arrives on (the mutual eq ↔ player edge).
+                eqStore.applyEngineFirEq(event.data.enabled, event.data.latencySecs);
                 break;
             case 'error':
                 console.error('audio engine:', event.data.message);

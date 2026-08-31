@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
+import { notificationStore } from '$lib/stores/NotificationStore.svelte';
 import { audioEngine } from '$lib/features/player/audioEngine';
 import { EQ_BAND_COUNT, EQ_GAIN_RANGE } from './bands';
 import { EQ_PRESETS, type EqPresetName } from './presets';
@@ -13,6 +14,11 @@ import { EQ_PRESETS, type EqPresetName } from './presets';
 class EqStore {
     #gains = $state<number[]>(Array(EQ_BAND_COUNT).fill(0));
     #preset = $state<string>('flat');
+    #linearPhase = $state(false);
+    // What the engine reports the FIR mode costs, in seconds — 0 while off.
+    // Read from its echo rather than assumed, because the filter length is
+    // fixed in taps and so the delay depends on the device's sample rate.
+    #latencySecs = $state(0);
 
     #persistTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -24,11 +30,21 @@ class EqStore {
         return this.#preset;
     }
 
+    get linearPhase(): boolean {
+        return this.#linearPhase;
+    }
+
+    get latencySecs(): number {
+        return this.#latencySecs;
+    }
+
     /** Boot hydration from the preferences row. */
-    init(gains: number[], preset: string) {
+    init(gains: number[], preset: string, linearPhase: boolean) {
         this.#gains = gains.length === EQ_BAND_COUNT ? [...gains] : Array(EQ_BAND_COUNT).fill(0);
         this.#preset = preset;
+        this.#linearPhase = linearPhase;
         void audioEngine.setEq(this.#gains);
+        void audioEngine.setFirEq(linearPhase);
     }
 
     /** One band moved by hand — value in dB, preset becomes `custom`. */
@@ -49,6 +65,29 @@ class EqStore {
 
     reset() {
         this.setPreset('flat');
+    }
+
+    /** The quality mode: realtime biquad filters, or the linear-phase FIR. */
+    setLinearPhase(enabled: boolean) {
+        this.#linearPhase = enabled;
+        void audioEngine.setFirEq(enabled);
+        invoke('set_eq_linear_phase', { enabled }).catch((err) => {
+            // The mode is already live in the engine; only the memory of it
+            // failed, so say so rather than let the next launch silently
+            // forget the choice.
+            console.error('set_eq_linear_phase failed:', err);
+            notificationStore.error('error.preferences', { dedupeKey: 'eq-linear-phase' });
+        });
+    }
+
+    /**
+     * The engine's echo of the mode and its exact latency, replayed on
+     * subscribe too — so a reloaded webview recovers both from the engine
+     * that never stopped rather than from the database alone.
+     */
+    applyEngineFirEq(enabled: boolean, latencySecs: number) {
+        this.#linearPhase = enabled;
+        this.#latencySecs = latencySecs;
     }
 
     #persistDebounced() {

@@ -36,7 +36,7 @@
         await playerStore.connect();
         const prefs = await invoke<Preferences>('get_preferences');
         languageStore.init(prefs.language);
-        eqStore.init(prefs.eqGains, prefs.eqPreset);
+        eqStore.init(prefs.eqGains, prefs.eqPreset, prefs.eqLinearPhase);
         playerStore.initVolume(prefs.volume);
         preferencesStore.init(prefs);
         await libraryStore.init();

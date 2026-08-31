@@ -48,7 +48,14 @@ walkdir = "2"
 # more. Pinned to a tag; `Cargo.lock` records the exact commit. Janis's
 # dev-profile `opt-level = 2` override below still applies to it (and its
 # transitive deps), so realtime DSP stays fast.
-audio-stack-rs = { git = "https://github.com/obazin/audio-stack-rs", tag = "v0.1.0" }
+#
+# `fir-eq` opts into the linear-phase EQ: the same ten bands with no
+# inter-band phase distortion, offered by the equalizer sheet as a quality
+# mode. Pure code in the crate — it reuses the `realfft` the analyser already
+# links — so it pulls in no new dependency.
+audio-stack-rs = { git = "https://github.com/obazin/audio-stack-rs", tag = "spectral-dsp", features = [
+    "fir-eq",
+] }
 
 [features]
 # This feature is used for production builds or when a dev server is not specified, DO NOT REMOVE!!

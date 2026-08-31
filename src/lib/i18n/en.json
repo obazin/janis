@@ -181,6 +181,9 @@
     "eq.subtitle": "Graphic EQ · applied live to playback",
     "eq.reset": "Reset",
     "eq.close": "Close equalizer",
+    "eq.linearPhase": "Linear phase",
+    "eq.linearPhase.desc": "Higher-quality filtering with no phase distortion",
+    "eq.linearPhase.latency": "Higher-quality filtering · adds {ms} ms of latency",
     "eq.preset.flat": "Flat",
     "eq.preset.rock": "Rock",
     "eq.preset.pop": "Pop",
@@ -205,5 +208,6 @@
     "error.playback": "Couldn't play this track — {message}",
     "error.radio": "Couldn't connect to {name}",
     "error.cover": "Cover art couldn't load — the source may be unreachable",
+    "error.preferences": "Your choice couldn't be saved — it will be forgotten on the next launch",
     "notification.dismiss": "Dismiss"
 }

@@ -68,7 +68,7 @@
             cargoRoot = "src-tauri";
             buildAndTestSubdir = finalAttrs.cargoRoot;
 
-            cargoHash = "sha256-xhOMUiV90XWshND4/yoyqZipuh/uZoWXw+ssyoXMpGI=";
+            cargoHash = "sha256-l+kYgFzGrsL6urrHg91uCwdZ/y7sBRzFNPB9BqXuzlQ=";
 
             pnpmDeps = pkgs.fetchPnpmDeps {
               inherit (finalAttrs)

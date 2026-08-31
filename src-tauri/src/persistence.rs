@@ -63,7 +63,7 @@ CREATE INDEX IF NOT EXISTS idx_tracks_added ON tracks(added_at DESC);
 /// `SCHEMA` above is frozen at version 1 — it only ever creates a fresh file.
 /// Every change since is a migration, so a new database and an existing one
 /// converge on the same shape.
-const SCHEMA_VERSION: i64 = 3;
+const SCHEMA_VERSION: i64 = 4;
 
 /// Index `i` upgrades to version `i + 2`. Append only: editing a shipped entry
 /// would skip the change for anyone who already ran it.
@@ -88,6 +88,10 @@ const MIGRATIONS: &[&str] = &[
      ALTER TABLE tracks ADD COLUMN rg_album_peak REAL;
      ALTER TABLE tracks ADD COLUMN loudness_lufs REAL;
      ALTER TABLE tracks ADD COLUMN loudness_peak REAL;",
+    // → 4: whether the equalizer runs in its linear-phase (FIR) mode. Off by
+    //      default: the zero-latency realtime EQ is what a player should do
+    //      out of the box, and the FIR mode trades ~43 ms of latency for it.
+    "ALTER TABLE user_preferences ADD COLUMN eq_linear_phase INTEGER NOT NULL DEFAULT 0;",
 ];
 
 /// Opens (creating if needed) `janis.db` under the app-data directory and
@@ -166,6 +170,7 @@ pub struct Preferences {
     pub volume: f64,
     pub eq_gains: Vec<f64>,
     pub eq_preset: String,
+    pub eq_linear_phase: bool,
     pub gapless: bool,
     pub crossfade: bool,
     pub normalize: bool,
@@ -199,7 +204,8 @@ impl PlaybackOption {
 pub fn get_preferences(db: tauri::State<'_, DbState>) -> Result<Preferences, String> {
     let conn = db.lock();
     conn.query_row(
-        "SELECT volume, eq_gains, eq_preset, gapless, crossfade, normalize, exclusive, language
+        "SELECT volume, eq_gains, eq_preset, eq_linear_phase, gapless, crossfade, normalize,
+                exclusive, language
          FROM user_preferences WHERE id = 1",
         [],
         |row| {
@@ -208,11 +214,12 @@ pub fn get_preferences(db: tauri::State<'_, DbState>) -> Result<Preferences, Str
                 volume: row.get(0)?,
                 eq_gains: serde_json::from_str(&gains_json).unwrap_or_else(|_| vec![0.0; 10]),
                 eq_preset: row.get(2)?,
-                gapless: row.get::<_, i64>(3)? != 0,
-                crossfade: row.get::<_, i64>(4)? != 0,
-                normalize: row.get::<_, i64>(5)? != 0,
-                exclusive: row.get::<_, i64>(6)? != 0,
-                language: row.get(7)?,
+                eq_linear_phase: row.get::<_, i64>(3)? != 0,
+                gapless: row.get::<_, i64>(4)? != 0,
+                crossfade: row.get::<_, i64>(5)? != 0,
+                normalize: row.get::<_, i64>(6)? != 0,
+                exclusive: row.get::<_, i64>(7)? != 0,
+                language: row.get(8)?,
             })
         },
     )
@@ -249,6 +256,20 @@ pub fn set_eq(
         rusqlite::params![gains_json, preset],
     )
     .map_err(|e| format!("persist eq: {}", e))?;
+    Ok(())
+}
+
+/// The equalizer's quality mode. Separate from `set_eq` because the gains are
+/// persisted debounced (a drag emits dozens a second) while this is one
+/// discrete switch.
+#[tauri::command]
+pub fn set_eq_linear_phase(db: tauri::State<'_, DbState>, enabled: bool) -> Result<(), String> {
+    let conn = db.lock();
+    conn.execute(
+        "UPDATE user_preferences SET eq_linear_phase = ?1, updated_at = unixepoch() WHERE id = 1",
+        [enabled as i64],
+    )
+    .map_err(|e| format!("persist eq linear phase: {}", e))?;
     Ok(())
 }
 
@@ -327,6 +348,7 @@ mod tests {
         ] {
             assert!(cols.contains(&expected.to_string()), "missing {expected}");
         }
+        assert!(columns(&conn, "user_preferences").contains(&"eq_linear_phase".to_string()));
         drop(conn);
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -358,6 +380,17 @@ mod tests {
         assert!(cols.contains(&"album_artist".to_string()));
         assert!(cols.contains(&"rg_track_gain_db".to_string()));
         assert!(cols.contains(&"loudness_lufs".to_string()));
+        // The preferences row gains its column too, defaulted off — the
+        // realtime EQ stays what an upgraded install boots with.
+        assert!(columns(&conn, "user_preferences").contains(&"eq_linear_phase".to_string()));
+        let linear_phase: i64 = conn
+            .query_row(
+                "SELECT eq_linear_phase FROM user_preferences WHERE id = 1",
+                [],
+                |r| r.get(0),
+            )
+            .expect("read the new preference");
+        assert_eq!(linear_phase, 0);
 
         // The row that was already there survives, with the new column empty.
         let (title, track_number): (String, Option<u32>) = conn

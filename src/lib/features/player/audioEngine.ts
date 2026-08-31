@@ -57,6 +57,7 @@ export type EngineEvent =
       }
     | { event: 'format'; data: { sampleRate: number; channels: number; codec: string } }
     | { event: 'device'; data: { name: string; sampleRate: number; channels: number } }
+    | { event: 'firEq'; data: { enabled: boolean; latencySecs: number } }
     | { event: 'error'; data: { message: string } };
 
 /** Waveform points then band magnitudes — must match `analyser::FRAME_BYTES`. */
@@ -150,6 +151,18 @@ class AudioEngine {
 
     setEq(gains: number[]) {
         return invoke('audio_set_eq', { gains });
+    }
+
+    /**
+     * Switches the EQ to its linear-phase (FIR) mode, which applies the same
+     * band gains without inter-band phase distortion and takes over from the
+     * realtime filters so the two never stack. Unlike `setEq` it is not
+     * audible on the next buffer: the effect sits in the decode chain, so the
+     * change is heard once the already-buffered audio has played. The engine
+     * echoes the setting — and the latency it costs — back as a `firEq` event.
+     */
+    setFirEq(enabled: boolean) {
+        return invoke('audio_set_fir_eq', { enabled });
     }
 
     setShuffle(enabled: boolean) {

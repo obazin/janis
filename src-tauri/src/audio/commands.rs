@@ -180,3 +180,19 @@ pub fn audio_set_eq(engine: tauri::State<'_, AudioEngine>, gains: Vec<f64>) -> R
     engine.set_eq(gains);
     Ok(())
 }
+
+/// Switches the equalizer between the realtime biquad filters and the
+/// linear-phase FIR mode. The bands are the same either way — the FIR mode
+/// removes the inter-band phase distortion and takes over from the callback
+/// EQ so the two never stack, at the cost of a constant latency the engine
+/// echoes back in its `firEq` event. Unlike the gains this does not reach the
+/// realtime atomics directly: the effect lives in the decode chain, so a
+/// change is heard once the already-buffered audio has played.
+#[tauri::command]
+pub fn audio_set_fir_eq(
+    engine: tauri::State<'_, AudioEngine>,
+    enabled: bool,
+) -> Result<(), String> {
+    engine.set_fir_eq(enabled);
+    Ok(())
+}
