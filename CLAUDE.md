@@ -39,6 +39,7 @@
 
 ```bash
 pnpm tauri dev         # Full Tauri app with hot reload (preferred). Run inside the nix/direnv shell.
+nix run                # build + launch the release app — no dev shell, no pnpm install
 pnpm dev               # Vite dev server only (port 1420) — IPC calls fail outside Tauri
 pnpm tauri build       # Release bundle
 pnpm build             # SvelteKit static build to /build
@@ -48,7 +49,7 @@ just fmt-rust          # format the Rust sources; `fmt-rust-check` to verify onl
 just clippy            # cargo clippy -D warnings
 ```
 
-The dev shell comes from `flake.nix` (composed from the `chess-flake` workspace's `tauriShell` bundle — Rust toolchain, Node 22, pnpm, prettier; the name is historical, the bundle is domain-agnostic). `direnv allow` once, or prefix commands with `nix develop --command`.
+The dev shell comes from `flake.nix` (composed from the `chess-flake` workspace's `tauriShell` bundle — Rust toolchain, Node 22, pnpm, prettier; the name is historical, the bundle is domain-agnostic — plus the Linux GTK/webkit/dbus stack Tauri links and the runtime env vars a shell-built binary needs). `direnv allow` once, or prefix commands with `nix develop --command`. The flake also packages the app itself: `nix run` (alias of `nix run .#janis`) builds frontend and backend in one derivation and launches the release binary — no dev shell, no `pnpm install`.
 
 ## Quality gates — local, no CI yet
 
