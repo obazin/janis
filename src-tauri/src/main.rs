@@ -49,6 +49,7 @@ fn main() {
             persistence::set_volume,
             persistence::set_eq,
             persistence::set_playback_option,
+            persistence::set_title_bar_hidden,
             persistence::set_language,
             library::list_tracks,
             library::list_watched_folders,

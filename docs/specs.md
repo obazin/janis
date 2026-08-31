@@ -4,7 +4,7 @@ The canonical description of user-facing behavior. Every new feature lands here 
 
 ## App shell
 
-- **Titlebar** — prism logo mark + JANIS wordmark + "Open source" badge; centered search field. The field filters the Library, Local Files and Radio screens live (`searchQuery` channel). On macOS the native traffic lights overlay the left edge (`titleBarStyle: Overlay`); empty areas drag the window.
+- **Titlebar** — prism logo mark + JANIS wordmark + "Open source" badge; centered search field. The field filters the Library, Local Files and Radio screens live (`searchQuery` channel). On macOS the native traffic lights overlay the left edge (`titleBarStyle: Overlay`); empty areas drag the window. On Windows/Linux the "Hide title bar" setting drops the native window frame — applied instantly at runtime via `setDecorations` — and the header then carries its own minimize, maximize/restore and close controls.
 - **Sidebar** — three sections (Playing / Library / Sources) + Settings pinned at the bottom. Active row: pink→violet wash + accent ring. Navigation goes through `navigateTo()`; routes mirror screen names.
 - **Mini player** — persistent bottom bar: current art + title/artist (click → Now Playing), prev/play/next, live mini waveform, EQ button. Playback continues across all screens (task lifecycle independent of UI).
 - **Boot** — `+layout.svelte` awaits `get_preferences` + the library before rendering anything, so screens always see hydrated stores. Volume, EQ, playback switches and language persist in `janis.db`.
@@ -75,6 +75,7 @@ The canonical description of user-facing behavior. Every new feature lands here 
 
 - Violet eyebrow. **Equalizer presets** chips (apply immediately + persist) and a "fine-tune" link opening the EQ sheet.
 - **Playback** toggles: normalization, gapless and crossfade are all live in the engine, on by default; exclusive output is still a persisted preference the engine does not act on yet. Toggling normalization is heard immediately, mid-track. Gapless and crossfade take effect from the next track boundary (crossfade turned off mid-fade stops it immediately instead of letting it finish).
+- **Window** toggle (Windows/Linux only — hidden on macOS, which keeps its overlay title bar): "Hide title bar" drops the native window frame instantly and persists; the app header then shows its own window controls.
 - **Audio output** cards: the output device the engine opened and its sample rate (both populate once something has played; "System default" / "—" until then).
 - **Language** chips: English / Français. Persisted; `lang` attribute + localStorage FOUC mirror update immediately.
 - Open-source banner (GPL-3.0).

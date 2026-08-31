@@ -24,6 +24,8 @@ export const ICONS = {
     plus: 'M12 5v14M5 12h14',
     upload: 'M12 16V4M7 9l5-5 5 5M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2',
     close: 'M6 6l12 12M18 6L6 18',
+    minimize: 'M5 12h14',
+    maximize: 'M5 5h14v14H5z',
     folder: 'M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z',
     refresh: 'M21 12a9 9 0 11-2.64-6.36M21 3v6h-6',
     alert: 'M12 4l9 15H3zM12 10v4M12 16.5h.01',

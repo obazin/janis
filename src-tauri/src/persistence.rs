@@ -63,7 +63,7 @@ CREATE INDEX IF NOT EXISTS idx_tracks_added ON tracks(added_at DESC);
 /// `SCHEMA` above is frozen at version 1 — it only ever creates a fresh file.
 /// Every change since is a migration, so a new database and an existing one
 /// converge on the same shape.
-const SCHEMA_VERSION: i64 = 3;
+const SCHEMA_VERSION: i64 = 4;
 
 /// Index `i` upgrades to version `i + 2`. Append only: editing a shipped entry
 /// would skip the change for anyone who already ran it.
@@ -88,6 +88,10 @@ const MIGRATIONS: &[&str] = &[
      ALTER TABLE tracks ADD COLUMN rg_album_peak REAL;
      ALTER TABLE tracks ADD COLUMN loudness_lufs REAL;
      ALTER TABLE tracks ADD COLUMN loudness_peak REAL;",
+    // → 4: the frameless-window switch. When set, the app drops the native
+    //      window frame (Linux and Windows; macOS already ships the overlay
+    //      title bar) and the app header carries the window controls.
+    "ALTER TABLE user_preferences ADD COLUMN hide_title_bar INTEGER NOT NULL DEFAULT 0;",
 ];
 
 /// Opens (creating if needed) `janis.db` under the app-data directory and
@@ -170,6 +174,7 @@ pub struct Preferences {
     pub crossfade: bool,
     pub normalize: bool,
     pub exclusive: bool,
+    pub hide_title_bar: bool,
     pub language: String,
 }
 
@@ -199,7 +204,7 @@ impl PlaybackOption {
 pub fn get_preferences(db: tauri::State<'_, DbState>) -> Result<Preferences, String> {
     let conn = db.lock();
     conn.query_row(
-        "SELECT volume, eq_gains, eq_preset, gapless, crossfade, normalize, exclusive, language
+        "SELECT volume, eq_gains, eq_preset, gapless, crossfade, normalize, exclusive, hide_title_bar, language
          FROM user_preferences WHERE id = 1",
         [],
         |row| {
@@ -212,7 +217,8 @@ pub fn get_preferences(db: tauri::State<'_, DbState>) -> Result<Preferences, Str
                 crossfade: row.get::<_, i64>(4)? != 0,
                 normalize: row.get::<_, i64>(5)? != 0,
                 exclusive: row.get::<_, i64>(6)? != 0,
-                language: row.get(7)?,
+                hide_title_bar: row.get::<_, i64>(7)? != 0,
+                language: row.get(8)?,
             })
         },
     )
@@ -267,6 +273,17 @@ pub fn set_playback_option(
         [enabled as i64],
     )
     .map_err(|e| format!("persist playback option: {}", e))?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn set_title_bar_hidden(db: tauri::State<'_, DbState>, hidden: bool) -> Result<(), String> {
+    let conn = db.lock();
+    conn.execute(
+        "UPDATE user_preferences SET hide_title_bar = ?1, updated_at = unixepoch() WHERE id = 1",
+        [hidden as i64],
+    )
+    .map_err(|e| format!("persist title bar state: {}", e))?;
     Ok(())
 }
 
@@ -358,6 +375,7 @@ mod tests {
         assert!(cols.contains(&"album_artist".to_string()));
         assert!(cols.contains(&"rg_track_gain_db".to_string()));
         assert!(cols.contains(&"loudness_lufs".to_string()));
+        assert!(columns(&conn, "user_preferences").contains(&"hide_title_bar".to_string()));
 
         // The row that was already there survives, with the new column empty.
         let (title, track_number): (String, Option<u32>) = conn
@@ -371,6 +389,37 @@ mod tests {
         assert_eq!(track_number, None);
 
         drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_title_bar_preference_defaults_off_and_survives_a_reboot() {
+        let hidden = |conn: &Connection| -> i64 {
+            conn.query_row(
+                "SELECT hide_title_bar FROM user_preferences WHERE id = 1",
+                [],
+                |r| r.get(0),
+            )
+            .expect("read hide_title_bar")
+        };
+
+        let dir = temp_dir("title-bar");
+        let db = init(dir.clone()).expect("init");
+        assert_eq!(hidden(&db.lock()), 0, "defaults off");
+        drop(db);
+
+        {
+            let conn = Connection::open(dir.join("janis.db")).expect("reopen");
+            conn.execute(
+                "UPDATE user_preferences SET hide_title_bar = 1 WHERE id = 1",
+                [],
+            )
+            .expect("flip the switch");
+        }
+
+        let db = init(dir.clone()).expect("init again");
+        assert_eq!(hidden(&db.lock()), 1, "survives a reboot");
+        drop(db);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
