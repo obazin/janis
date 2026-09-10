@@ -11,6 +11,7 @@ export enum IconButtonIdentifier {
     MiniPlayPause = 'mini-play-pause',
     MiniNext = 'mini-next',
     EqClose = 'eq-close',
+    LibraryCollapseSelection = 'library-collapse-selection',
     LocalRemoveFolder = 'local-remove-folder',
     LocalRescan = 'local-rescan',
 }

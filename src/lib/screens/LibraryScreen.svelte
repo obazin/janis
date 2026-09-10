@@ -16,6 +16,7 @@
     import type { Track } from '$lib/models/Track';
     import AlbumCard from '$lib/features/library/AlbumCard.svelte';
     import TrackRow from '$lib/features/library/TrackRow.svelte';
+    import LibraryTrackAccordion from '$lib/features/library/LibraryTrackAccordion.svelte';
     import Chip from '$lib/design-system/atoms/Chip.svelte';
     import Eyebrow from '$lib/design-system/atoms/Eyebrow.svelte';
     import SectionLabel from '$lib/design-system/atoms/SectionLabel.svelte';
@@ -104,14 +105,6 @@
         libraryStore.artists.filter((a) => a.tracks.some((tr) => filteredTracks.includes(tr))),
     );
     const recentTracks = $derived(filteredTracks.slice(0, 8));
-    // What the list below the grid shows: the selected album/artist's own
-    // tracks, or "Recently added" when nothing is selected.
-    const listTracks = $derived(
-        libraryViewStore.selection ? libraryViewStore.selection.tracks : recentTracks,
-    );
-    const listHeading = $derived(
-        libraryViewStore.selection ? libraryViewStore.selection.label : t('library.recentlyAdded'),
-    );
 
     function playFrom(list: readonly Track[], track: Track) {
         playerStore.playQueue([...list], list.indexOf(track));
@@ -172,6 +165,15 @@
                             libraryViewStore.selection.key === album.key}
                         onclick={() => selectAlbum(album)}
                     />
+                    {#if libraryViewStore.selection?.kind === 'album' && libraryViewStore.selection.key === album.key}
+                        <LibraryTrackAccordion
+                            heading={libraryViewStore.selection.label}
+                            tracks={libraryViewStore.selection.tracks}
+                            useTrackNumber
+                            onPlay={(track) => playFrom(album.tracks, track)}
+                            onClose={() => (libraryViewStore.selection = null)}
+                        />
+                    {/if}
                 {/each}
             </div>
         {:else if libraryViewStore.tab === 'artists'}
@@ -186,6 +188,14 @@
                             libraryViewStore.selection.key === artist.artist}
                         onclick={() => selectArtist(artist)}
                     />
+                    {#if libraryViewStore.selection?.kind === 'artist' && libraryViewStore.selection.key === artist.artist}
+                        <LibraryTrackAccordion
+                            heading={libraryViewStore.selection.label}
+                            tracks={libraryViewStore.selection.tracks}
+                            onPlay={(track) => playFrom(artist.tracks, track)}
+                            onClose={() => (libraryViewStore.selection = null)}
+                        />
+                    {/if}
                 {/each}
             </div>
         {:else}
@@ -196,26 +206,11 @@
             </div>
         {/if}
 
-        {#if libraryViewStore.tab !== 'songs' && listTracks.length}
-            <div class="flex items-center justify-between mb-2">
-                <SectionLabel>{listHeading}</SectionLabel>
-                {#if libraryViewStore.selection}
-                    <button
-                        class="cursor-pointer text-caption font-bold text-accent transition-opacity duration-fast hover:opacity-80"
-                        onclick={() => (libraryViewStore.selection = null)}
-                    >
-                        {t('library.backToRecentlyAdded')}
-                    </button>
-                {/if}
-            </div>
+        {#if libraryViewStore.tab !== 'songs' && !libraryViewStore.selection && recentTracks.length}
+            <SectionLabel class="mb-2">{t('library.recentlyAdded')}</SectionLabel>
             <div class="rounded-card overflow-hidden border border-border">
-                {#each listTracks as track, i (track.id)}
-                    <TrackRow
-                        {track}
-                        index={i}
-                        useTrackNumber={libraryViewStore.selection?.kind === 'album'}
-                        onclick={() => playFrom(listTracks, track)}
-                    />
+                {#each recentTracks as track, i (track.id)}
+                    <TrackRow {track} index={i} onclick={() => playFrom(recentTracks, track)} />
                 {/each}
             </div>
         {/if}
