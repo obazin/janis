@@ -94,6 +94,7 @@ jobs:
               run: pnpm install --frozen-lockfile
 
             - uses: tauri-apps/tauri-action@v1
+              id: tauri
               env:
                   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
               with:
@@ -115,3 +116,18 @@ jobs:
                       - **Linux**: `.AppImage`, `.deb` or `.rpm`, x86_64 and arm64
                       - **Nix** (Linux and macOS): `nix profile install github:obazin/janis`, or `nix run github:obazin/janis` to try it
                   uploadWorkflowArtifacts: ${{ github.event_name == 'workflow_dispatch' }}
+
+            # The action also uploads the macOS updater archive (Janis_x.y.z_<arch>.app.tar.gz),
+            # which nothing consumes without the updater plugin; keep it off the release.
+            - name: Drop the updater archive from the release
+              if: runner.os == 'macOS' && github.event_name == 'push'
+              env:
+                  GH_TOKEN: ${{ github.token }}
+              run: |
+                  case "${{ matrix.target }}" in
+                    aarch64-apple-darwin) archive_arch="aarch64" ;;
+                    x86_64-apple-darwin) archive_arch="x64" ;;
+                  esac
+                  gh release delete-asset "${{ github.ref_name }}" \
+                    "Janis_${{ steps.tauri.outputs.appVersion }}_${archive_arch}.app.tar.gz" \
+                    --repo "$GITHUB_REPOSITORY" --yes
