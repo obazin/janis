@@ -9,13 +9,32 @@
     "bundle": {
         "active": true,
         "targets": "all",
+        "publisher": "Olivier Bazin",
+        "homepage": "https://github.com/obazin/janis",
+        "license": "GPL-3.0-only",
+        "licenseFile": "../LICENSE",
+        "category": "Music",
+        "shortDescription": "Open-source desktop audio player",
+        "longDescription": "Local library with real metadata, curated web radio, a live 10-band equalizer and live waveform visualisation.",
         "icon": [
             "icons/32x32.png",
             "icons/128x128.png",
             "icons/128x128@2x.png",
             "icons/icon.icns",
             "icons/icon.ico"
-        ]
+        ],
+        "macOS": {
+            "signingIdentity": "-",
+            "minimumSystemVersion": "11.0"
+        },
+        "linux": {
+            "deb": {
+                "depends": ["libasound2"]
+            },
+            "rpm": {
+                "depends": ["libasound.so.2()(64bit)"]
+            }
+        }
     },
     "productName": "Janis",
     "mainBinaryName": "Janis",
