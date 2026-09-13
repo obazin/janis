@@ -20,7 +20,14 @@ Playlists, Spotify integration and user-added stations are on the roadmap.
 
 Every release on the [releases page](https://github.com/obazin/janis/releases) carries a bundle per platform, built by the `release` GitHub Actions workflow. None of them is signed with a paid certificate, so each platform asks for one extra step the first time.
 
-- **macOS** (`Janis_x.y.z_aarch64.dmg` for Apple Silicon, `Janis_x.y.z_x64.dmg` for Intel) — open the DMG and drag Janis to Applications. The app is ad-hoc signed and not notarized, so the first launch shows "Apple could not verify Janis is free of malware". Click **Done**, open **System Settings → Privacy & Security** and click **Open Anyway** next to Janis, or clear the flag once from a terminal: `xattr -dr com.apple.quarantine /Applications/Janis.app`.
+- **macOS** — the quickest route is the installer script, which downloads the DMG for your Mac, copies Janis into Applications and clears the quarantine flag, so the app opens with no prompt at all (re-run it to upgrade):
+
+    ```bash
+    curl -fsSL https://raw.githubusercontent.com/obazin/janis/main/scripts/macos/install.sh | sh
+    ```
+
+    Or download the DMG by hand (`Janis_x.y.z_aarch64.dmg` for Apple Silicon, `Janis_x.y.z_x64.dmg` for Intel) and drag Janis to Applications: the app is ad-hoc signed and not notarized, so the first launch then shows "Apple could not verify Janis is free of malware". Click **Done**, open **System Settings → Privacy & Security** and click **Open Anyway** next to Janis, or clear the flag once from a terminal: `xattr -dr com.apple.quarantine /Applications/Janis.app`.
+
 - **Windows** (`Janis_x.y.z_x64-setup.exe`, or the `.msi`) — the installer is unsigned, so SmartScreen shows "Windows protected your PC". Click **More info → Run anyway**. The installer fetches the WebView2 runtime if the machine lacks it.
 - **Linux** (x86_64 and arm64) — `.AppImage`: `chmod +x` and run (needs FUSE 2, `libfuse2` on Debian/Ubuntu). `.deb`: `sudo apt install ./Janis_x.y.z_amd64.deb`. `.rpm`: `sudo dnf install ./Janis-x.y.z-1.x86_64.rpm`. The packages depend on WebKitGTK 4.1, GTK 3 and ALSA.
 

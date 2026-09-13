@@ -110,7 +110,7 @@ jobs:
                   releaseBody: |
                       Unsigned builds — see the [install notes](https://github.com/obazin/janis#install) for the first-launch step each platform asks for.
 
-                      - **macOS**: `Janis_x.y.z_aarch64.dmg` (Apple Silicon) or `Janis_x.y.z_x64.dmg` (Intel)
+                      - **macOS**: `curl -fsSL https://raw.githubusercontent.com/obazin/janis/main/scripts/macos/install.sh | sh` (no Gatekeeper prompt), or `Janis_x.y.z_aarch64.dmg` (Apple Silicon) / `Janis_x.y.z_x64.dmg` (Intel) by hand
                       - **Windows**: `Janis_x.y.z_x64-setup.exe` (or the `.msi`)
                       - **Linux**: `.AppImage`, `.deb` or `.rpm`, x86_64 and arm64
                   uploadWorkflowArtifacts: ${{ github.event_name == 'workflow_dispatch' }}
