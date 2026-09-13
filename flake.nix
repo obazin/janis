@@ -93,6 +93,20 @@
 
             buildInputs = tauriLinuxLibs ++ audioLibs;
 
+            # tauri.conf.json asks for an ad-hoc signature (for the DMGs users
+            # download), which the bundler applies with codesign + xattr —
+            # neither is in the sandbox. Nix's own fixup ad-hoc signs every
+            # Mach-O it installs, so skipping the bundler's pass loses nothing.
+            tauriBuildFlags = pkgs.lib.optionals pkgs.stdenv.isDarwin [ "--no-sign" ];
+
+            # The Tauri hook installs the .app bundle under Applications/ on
+            # macOS and nothing under bin/; expose the executable there too so
+            # `nix run` and a plain `Janis` on PATH work on every platform.
+            postInstall = pkgs.lib.optionalString pkgs.stdenv.isDarwin ''
+              mkdir -p $out/bin
+              ln -s "$out/Applications/Janis.app/Contents/MacOS/Janis" $out/bin/Janis
+            '';
+
             meta = {
               description = "Open-source desktop audio player: local library, web radio, 10-band EQ and live visualisation.";
               homepage = "https://github.com/obazin/janis";
@@ -123,5 +137,11 @@
     {
       devShells = builtins.mapAttrs (_: ps: ps.devShells) perSystem;
       packages = builtins.mapAttrs (_: ps: ps.packages) perSystem;
+
+      # `nixpkgs.overlays = [ janis.overlays.default ]` puts `pkgs.janis` in a
+      # NixOS, nix-darwin or Home Manager configuration.
+      overlays.default = final: _prev: {
+        janis = self.packages.${final.stdenv.hostPlatform.system}.janis;
+      };
     };
 }

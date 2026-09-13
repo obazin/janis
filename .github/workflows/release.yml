@@ -113,4 +113,5 @@ jobs:
                       - **macOS**: `curl -fsSL https://raw.githubusercontent.com/obazin/janis/main/scripts/macos/install.sh | sh` (no Gatekeeper prompt), or `Janis_x.y.z_aarch64.dmg` (Apple Silicon) / `Janis_x.y.z_x64.dmg` (Intel) by hand
                       - **Windows**: `Janis_x.y.z_x64-setup.exe` (or the `.msi`)
                       - **Linux**: `.AppImage`, `.deb` or `.rpm`, x86_64 and arm64
+                      - **Nix** (Linux and macOS): `nix profile install github:obazin/janis`, or `nix run github:obazin/janis` to try it
                   uploadWorkflowArtifacts: ${{ github.event_name == 'workflow_dispatch' }}

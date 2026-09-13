@@ -31,6 +31,15 @@ Every release on the [releases page](https://github.com/obazin/janis/releases) c
 - **Windows** (`Janis_x.y.z_x64-setup.exe`, or the `.msi`) — the installer is unsigned, so SmartScreen shows "Windows protected your PC". Click **More info → Run anyway**. The installer fetches the WebView2 runtime if the machine lacks it.
 - **Linux** (x86_64 and arm64) — `.AppImage`: `chmod +x` and run (needs FUSE 2, `libfuse2` on Debian/Ubuntu). `.deb`: `sudo apt install ./Janis_x.y.z_amd64.deb`. `.rpm`: `sudo dnf install ./Janis-x.y.z-1.x86_64.rpm`. The packages depend on WebKitGTK 4.1, GTK 3 and ALSA.
 
+- **Nix** (Linux and macOS) — the flake packages the app, built from source on your machine, so nothing is downloaded from the releases page and macOS never quarantines it:
+
+    ```bash
+    nix run github:obazin/janis              # try it without installing
+    nix profile install github:obazin/janis  # install into your user profile
+    ```
+
+    In a NixOS, nix-darwin or Home Manager configuration, add `janis.url = "github:obazin/janis";` to the flake inputs and either list `inputs.janis.packages.${pkgs.system}.default` in the packages, or add `inputs.janis.overlays.default` to `nixpkgs.overlays` and use `pkgs.janis`. On macOS the package carries `Applications/Janis.app` next to the `Janis` command, which nix-darwin and Home Manager link where Spotlight finds it.
+
 ## Development
 
 Requires [Nix](https://nixos.org) + [direnv](https://direnv.net) (the dev shell pins Rust, Node 22, pnpm and prettier, and carries the Linux GTK/webkit stack — see `flake.nix`).
