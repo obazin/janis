@@ -16,6 +16,14 @@ Built with **Tauri v2** (Rust backend) and **Svelte 5 / SvelteKit 2 / Tailwind v
 
 Playlists, Spotify integration and user-added stations are on the roadmap.
 
+## Install
+
+Every release on the [releases page](https://github.com/obazin/janis/releases) carries a bundle per platform, built by the `release` GitHub Actions workflow. None of them is signed with a paid certificate, so each platform asks for one extra step the first time.
+
+- **macOS** (`Janis_x.y.z_aarch64.dmg` for Apple Silicon, `Janis_x.y.z_x64.dmg` for Intel) — open the DMG and drag Janis to Applications. The app is ad-hoc signed and not notarized, so the first launch shows "Apple could not verify Janis is free of malware". Click **Done**, open **System Settings → Privacy & Security** and click **Open Anyway** next to Janis, or clear the flag once from a terminal: `xattr -dr com.apple.quarantine /Applications/Janis.app`.
+- **Windows** (`Janis_x.y.z_x64-setup.exe`, or the `.msi`) — the installer is unsigned, so SmartScreen shows "Windows protected your PC". Click **More info → Run anyway**. The installer fetches the WebView2 runtime if the machine lacks it.
+- **Linux** (x86_64 and arm64) — `.AppImage`: `chmod +x` and run (needs FUSE 2, `libfuse2` on Debian/Ubuntu). `.deb`: `sudo apt install ./Janis_x.y.z_amd64.deb`. `.rpm`: `sudo dnf install ./Janis-x.y.z-1.x86_64.rpm`. The packages depend on WebKitGTK 4.1, GTK 3 and ALSA.
+
 ## Development
 
 Requires [Nix](https://nixos.org) + [direnv](https://direnv.net) (the dev shell pins Rust, Node 22, pnpm and prettier, and carries the Linux GTK/webkit stack — see `flake.nix`).
@@ -26,7 +34,7 @@ pnpm install
 pnpm tauri dev        # the app, with hot reload
 ```
 
-Quality gates (no CI yet — run locally):
+Quality gates run locally (the only workflow in CI is the release build):
 
 ```bash
 pnpm check            # svelte-check + TypeScript
@@ -36,7 +44,7 @@ just test-rust        # cargo test
 just fmt-rust-check   # rustfmt verification
 ```
 
-`just release` builds the distributable bundle.
+`just release` builds the distributable bundle for the current machine, ad-hoc signed on macOS. Publishing a release means bumping the version in `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`, `package.json` and `flake.nix`, then pushing a `vX.Y.Z` tag: the `release` workflow checks that the tag matches all four, builds every platform and opens a draft release holding the bundles.
 
 `nix run` (or `nix build .#janis`) builds and launches the app through Nix alone — frontend and backend in a single derivation, no dev shell or `pnpm install` required.
 

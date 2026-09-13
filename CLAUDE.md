@@ -51,9 +51,13 @@ just clippy            # cargo clippy -D warnings
 
 The dev shell comes from `flake.nix` (composed from the `chess-flake` workspace's `tauriShell` bundle — Rust toolchain, Node 22, pnpm, prettier; the name is historical, the bundle is domain-agnostic — plus the Linux GTK/webkit/dbus stack Tauri links and the runtime env vars a shell-built binary needs). `direnv allow` once, or prefix commands with `nix develop --command`. The flake also packages the app itself: `nix run` (alias of `nix run .#janis`) builds frontend and backend in one derivation and launches the release binary — no dev shell, no `pnpm install`.
 
-## Quality gates — local, no CI yet
+## Quality gates — local; CI only builds releases
 
 Quality gates are the local suites: `pnpm check`, `pnpm test:unit`, `cargo test`, `cargo clippy`, `just fmt-rust-check`. Run them before completing any task.
+
+## Distribution
+
+Bundles come from `.github/workflows/release.yml`: pushing a `vX.Y.Z` tag builds macOS (Apple Silicon + Intel DMGs), Windows (NSIS + MSI) and Linux (AppImage, deb, rpm; x86_64 + arm64) and opens a draft release. The workflow refuses a tag whose version differs from `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`, `package.json` or `flake.nix` — bump all four together. No signing certificate exists on any platform: macOS is ad-hoc signed (`bundle.macOS.signingIdentity` = `"-"`, so `pnpm tauri build` needs no Apple account or keychain identity), Windows and Linux are unsigned; README's Install section documents the first-launch step each platform asks for. Linux packages declare ALSA explicitly (`bundle.linux.deb/rpm.depends`) because the Tauri CLI only adds webkit and gtk on its own.
 
 ## Stack
 
