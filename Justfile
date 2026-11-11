@@ -99,10 +99,15 @@ install-macos: release-macos
     fi
 
     mount=$(mktemp -d)
-    # Images of earlier releases embed the license and ask for agreement
-    # before mounting; the "Y" answers that, and is ignored otherwise.
-    printf 'Y\n' | hdiutil attach -nobrowse -readonly -mountpoint "$mount" "$disk_image" >/dev/null
-    trap 'hdiutil detach -quiet "$mount" || true; rmdir "$mount" 2>/dev/null || true' EXIT
+    # diskutil mounts the image where it has the "image" verb; hdiutil does
+    # on systems without it, and for images of earlier releases, which embed
+    # the license and ask for agreement before mounting: the "Y" answers
+    # that, and is ignored otherwise.
+    if ! { diskutil image attach --help >/dev/null 2>&1 \
+        && diskutil image attach --readOnly --nobrowse --mountPoint "$mount" "$disk_image" >/dev/null 2>&1; }; then
+        printf 'Y\n' | hdiutil attach -nobrowse -readonly -mountpoint "$mount" "$disk_image" >/dev/null
+    fi
+    trap 'diskutil eject "$mount" >/dev/null 2>&1 || true; rmdir "$mount" 2>/dev/null || true' EXIT
 
     staging=/Applications/.Janis.app.installing
     rm -rf "$staging"
