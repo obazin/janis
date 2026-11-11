@@ -3,7 +3,9 @@ import { AlbumCard } from "album_card.slint";
 import { LibraryTrackAccordion } from "library_track_accordion.slint";
 
 // The album or artist grid: as many cards per row as fit, and — under the row
-// of the selected card — its tracks, in place.
+// of the selected card — its tracks, in place. Only the lines in view are
+// drawn, so a library of thousands of albums asks for no more covers than
+// the screen shows.
 export component CardGrid inherits Rectangle {
     in property <[LibraryCard]> cards;
     in property <bool> shows-detail;
@@ -15,7 +17,10 @@ export component CardGrid inherits Rectangle {
     property <length> gap: 20px;
     property <length> narrowest-card: 180px;
     property <int> columns: max(1, floor((root.width + root.gap) / (root.narrowest-card + root.gap)));
-    property <length> card-width: (root.width - (root.columns - 1) * root.gap) / root.columns;
+    // Never narrower than the narrowest card: before the first layout the grid
+    // has no width yet, and a card of no width would make every line a few
+    // pixels tall and put hundreds of lines in view.
+    property <length> card-width: max(root.narrowest-card, (root.width - (root.columns - 1) * root.gap) / root.columns);
     property <length> card-height: root.card-width + (root.shows-detail ? 70px : 52px);
     property <length> line-height: root.card-height + root.gap;
     property <int> line-count: ceil(root.cards.length / root.columns);
@@ -25,18 +30,27 @@ export component CardGrid inherits Rectangle {
     out property <length> accordion-top: (root.selected-line + 1) * root.line-height;
     property <length> accordion-room: root.selected-line >= 0 ? accordion.height + root.gap : 0px;
 
+    // The first line in view. Below the open accordion, lines sit lower by
+    // its height, so a window starting under it counts from there; a window
+    // starting inside it may draw a line above, which costs nothing.
+    property <length> lines-top: root.view-top > root.accordion-top ? root.view-top - root.accordion-room : root.view-top;
+    property <int> first-line: max(0, floor(root.lines-top / root.line-height));
+    property <int> line-span: ceil(root.view-height / root.line-height) + 1;
+
     height: root.line-count * root.line-height + root.accordion-room;
 
-    for card[index] in root.cards: AlbumCard {
-        property <int> line: floor(index / root.columns);
-        x: mod(index, root.columns) * (root.card-width + root.gap);
+    for offset in root.line-span * root.columns: AlbumCard {
+        property <int> index: root.first-line * root.columns + offset;
+        property <int> line: floor(self.index / root.columns);
+        x: mod(self.index, root.columns) * (root.card-width + root.gap);
         y: self.line * root.line-height + (root.selected-line >= 0 && self.line > root.selected-line ? root.accordion-room : 0px);
         width: root.card-width;
         height: root.card-height;
-        card: card;
-        active: index == Library.selection-index;
+        visible: self.index < root.cards.length;
+        card: root.cards[self.index];
+        active: self.index == Library.selection-index;
         shows-detail: root.shows-detail;
-        clicked => { root.card-clicked(index); }
+        clicked => { root.card-clicked(self.index); }
     }
 
     accordion := LibraryTrackAccordion {
