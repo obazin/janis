@@ -1,6 +1,6 @@
 # Janis — Feature Specs
 
-The canonical description of user-facing behavior. Every new feature lands here before its task is done (CLAUDE.md rule 5).
+The canonical description of user-facing behavior. Every new feature lands here before its task is done (CLAUDE.md rule 11).
 
 ## App shell
 
@@ -26,7 +26,7 @@ The canonical description of user-facing behavior. Every new feature lands here 
 
 - Header: violet eyebrow, title, gradient "Add music" button (multi-file picker).
 - Tabs (chips): **Playlists** (roadmap placeholder), **Artists** (grid), **Albums** (grid), **Songs** (numbered rows: art, title/artist, composer, duration; click plays from that row within the filtered list).
-- Clicking an album or artist tile browses it rather than playing it: an accent ring marks the selected tile, and its tracks expand inline under that tile's row — an accordion panel spanning the full grid width, showing the album's tracks in running order (or the artist's) with a close button, so browsing a large collection never means scrolling past the whole grid to reach the list. Clicking a row plays from that list. Re-clicking the selected tile, closing the panel, or switching tabs collapses it. The active tab and the selection both survive navigating to another screen and back — they live in the application controller, not the screen (CLAUDE.md rule 9).
+- Clicking an album or artist tile browses it rather than playing it: an accent ring marks the selected tile, and its tracks expand inline under that tile's row — an accordion panel spanning the full grid width, showing the album's tracks in running order (or the artist's) with a close button, so browsing a large collection never means scrolling past the whole grid to reach the list. Clicking a row plays from that list. Re-clicking the selected tile, closing the panel, or switching tabs collapses it. The active tab and the selection both survive navigating to another screen and back — they live in the application controller, not the screen (CLAUDE.md rule 6).
 - "Recently added" rows (first 8, newest scan first) under the grid tabs when nothing is selected.
 - Empty library → empty state with "Add folder" CTA. Titlebar search filters every view.
 
