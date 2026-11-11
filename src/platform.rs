@@ -38,6 +38,15 @@ pub fn select_backend() -> Result<(), String> {
         .map_err(|error| format!("select the windowing backend: {error}"))
 }
 
+/// Brings the window in front of the others and gives it the keyboard.
+pub fn bring_forward(window: &slint::Window) {
+    use slint::winit_030::WinitWindowAccessor;
+    window.with_winit_window(|winit_window| {
+        winit_window.set_minimized(false);
+        winit_window.focus_window();
+    });
+}
+
 /// Calls `dropped` for each file the user drops on the window.
 pub fn on_file_dropped(window: &slint::Window, mut dropped: impl FnMut(PathBuf) + 'static) {
     use slint::winit_030::winit::event::WindowEvent;

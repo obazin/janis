@@ -14,6 +14,7 @@ mod covers;
 mod effects;
 mod equalizer;
 mod halo;
+mod instance;
 mod library;
 mod library_view;
 mod logging;
@@ -53,6 +54,14 @@ fn main() -> ExitCode {
 
 fn run() -> Result<(), String> {
     logging::init();
+    // Before anything touches the database: a second launch only brings the
+    // running instance forward.
+    let Some(_instance) = instance::claim(&platform::data_directory()?, || {
+        application::post(Application::come_forward);
+    })?
+    else {
+        return Ok(());
+    };
     platform::select_backend()?;
     let window = AppWindow::new().map_err(|error| format!("create the window: {error}"))?;
     let application = Application::start(window.clone_strong())?;
