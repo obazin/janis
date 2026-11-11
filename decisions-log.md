@@ -111,6 +111,9 @@ A language is named in its own language ("English", "Français") and the wordmar
 **D39 · A round shape takes its radius from its size** — *current*
 A circle or a pill is `self.width / 2` or `self.height / 2`, not a number that has to be kept equal to half the box. The other radii are `Metrics` tokens (`radius-tag`, `radius-segment`, `radius-tile`, `radius-inset` beside the first five), and a tint of a token is a function in `tokens.slint` (`accent-tint`, `play-pulse-at`).
 
+**D42 · Favourite stations: starred on Now Playing, filtered on the Radio screen** — *current*
+A station is a favourite or not, by its catalog id, in the `favourite_stations` table (a row is a favourite, no row the default); the id is not checked against the catalog, so a station that leaves it and returns keeps its star. The star that flips it sits after the station name on Now Playing, an `IconButton` stroked when off and filled in the accent when on. The Radio screen shows the favourites two ways: a "Favourites" chip that filters the grid, combining with the country and genre chips and the search, and a filled star after the name on each favourite's card. The card's star is a mark, not a button: the whole card is one click target that plays the station. `favourites.rs` holds the set and decides; `Catalog::filtered` takes the ids as one more filter. `JANIS_FAVOURITES` turns the filter on for snapshots.
+
 ## Distribution
 
 **D23 · Installers from cargo-packager, the rpm from cargo-generate-rpm** — *current*

@@ -5,6 +5,8 @@ import { ArtTile } from "../atoms/art_tile.slint";
 import { Badge, BadgeVariant } from "../atoms/badge.slint";
 import { EmptyState } from "../atoms/empty_state.slint";
 import { Eyebrow } from "../atoms/eyebrow.slint";
+import { GlyphMode } from "../atoms/glyph.slint";
+import { IconButton, IconButtonIdentifier, IconButtonTone } from "../atoms/icon_button.slint";
 import { SectionLabel } from "../atoms/section_label.slint";
 import { ScrollArea } from "../molecules/scroll_area.slint";
 import { Player } from "../features/player/player.slint";
@@ -12,8 +14,10 @@ import { Waveform, WaveformVariant } from "../features/player/waveform.slint";
 import { TransportControls } from "../features/player/transport_controls.slint";
 import { NowPlayingQueue } from "../features/player/now_playing_queue.slint";
 import { ArtistSpotlight } from "../features/library/artist_spotlight.slint";
+import { Radio } from "../features/radio/radio.slint";
 
 // One labelled fact about what is playing; hidden when it has nothing to say.
+// What it is given as children follows the value on its line.
 component Detail inherits VerticalLayout {
     in property <string> label;
     in property <string> value;
@@ -28,13 +32,19 @@ component Detail inherits VerticalLayout {
     SectionLabel {
         label: root.label;
     }
-    Text {
-        text: root.value;
-        font-size: Typography.heading-md;
-        font-weight: root.weight;
-        color: root.tint;
-        horizontal-alignment: left;
-        overflow: elide;
+    HorizontalLayout {
+        alignment: start;
+        spacing: 8px;
+        Text {
+            text: root.value;
+            font-size: Typography.heading-md;
+            font-weight: root.weight;
+            color: root.tint;
+            horizontal-alignment: left;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+        @children
     }
     if root.note != "": Text {
         text: root.note;
@@ -47,7 +57,8 @@ component Detail inherits VerticalLayout {
 
 // The facts about what is playing, side by side, wrapping onto further lines
 // when they do not fit. A local track shows its artist, composer, album and
-// genre; a station shows the announced artist and album, its name and genre.
+// genre; a station shows the announced artist and album, its name — with the
+// star that makes it a favourite — and genre.
 component DetailFlow inherits Rectangle {
     property <length> gap: 40px;
     property <length> line-gap: 18px;
@@ -102,6 +113,22 @@ component DetailFlow inherits Rectangle {
         note: Player.radio ? "" : Player.album-line;
         tint: Player.radio ? Tokens.text : Tokens.text-secondary;
         weight: Player.radio ? Typography.bold : Typography.semibold;
+
+        // The line's box leaves room under the baseline; the padding brings
+        // the star down to the middle of the capitals.
+        if Player.radio: VerticalLayout {
+            alignment: center;
+            padding-top: 4px;
+            IconButton {
+                identifier: IconButtonIdentifier.station-favourite;
+                icon: Icons.star;
+                label: Radio.active-station-favourite ? Strings.radio-favourite-remove : Strings.radio-favourite-add;
+                mode: Radio.active-station-favourite ? GlyphMode.fill : GlyphMode.stroke;
+                tone: IconButtonTone.muted;
+                active: Radio.active-station-favourite;
+                clicked => { Radio.active-station-favourite-toggled(); }
+            }
+        }
     }
 
     fourth := Detail {

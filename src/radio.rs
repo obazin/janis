@@ -5,7 +5,7 @@
 //! from the Radio Browser community database, baked in at build time. No
 //! network call is made to list stations.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use serde::Deserialize;
 
@@ -108,12 +108,14 @@ impl Catalog {
     }
 
     /// The stations the screen shows. Both filters are multi-select and an
-    /// empty one means "all"; the search matches the station's name or its
-    /// genre label in the current language.
+    /// empty one means "all"; `only`, when given, keeps the stations whose id
+    /// it holds (the favourites); the search matches the station's name or
+    /// its genre label in the current language.
     pub fn filtered(
         &self,
         countries: &[String],
         genres: &[String],
+        only: Option<&HashSet<String>>,
         search: &str,
         translations: &Translations,
     ) -> Vec<&Station> {
@@ -123,6 +125,7 @@ impl Catalog {
             .filter(|station| {
                 (countries.is_empty() || countries.contains(&station.country))
                     && (genres.is_empty() || genres.contains(&station.genre_key))
+                    && only.is_none_or(|station_ids| station_ids.contains(&station.id))
                     && (query.is_empty()
                         || station.name.to_lowercase().contains(&query)
                         || translations
@@ -233,7 +236,7 @@ mod tests {
             let countries: Vec<String> = countries.iter().map(|c| c.to_string()).collect();
             let genres: Vec<String> = genres.iter().map(|g| format!("radio.genre.{g}")).collect();
             catalog
-                .filtered(&countries, &genres, search, &translations)
+                .filtered(&countries, &genres, None, search, &translations)
                 .iter()
                 .map(|station| station.id.clone())
                 .collect()
@@ -246,6 +249,24 @@ mod tests {
         assert_eq!(ids(&[], &[], "  fip "), ["two", "three"]);
         // The search also reads the genre label, not only the station name.
         assert_eq!(ids(&[], &[], "ambient"), ["one"]);
+    }
+
+    #[test]
+    fn the_favourites_filter_keeps_only_starred_stations_within_the_other_filters() {
+        let catalog = small_catalog();
+        let translations = Translations::new(Language::English);
+        let favourites: HashSet<String> = ["two", "four"].map(str::to_owned).into();
+        let ids = |countries: &[String], only: Option<&HashSet<String>>| -> Vec<String> {
+            catalog
+                .filtered(countries, &[], only, "", &translations)
+                .iter()
+                .map(|station| station.id.clone())
+                .collect()
+        };
+
+        assert_eq!(ids(&[], Some(&favourites)), ["two", "four"]);
+        assert_eq!(ids(&["FR".to_owned()], Some(&favourites)), ["two"]);
+        assert!(ids(&[], Some(&HashSet::new())).is_empty());
     }
 
     #[test]

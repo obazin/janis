@@ -13,6 +13,8 @@ export struct StationRow {
     name: string,
     // Genre and bit rate.
     detail: string,
+    // The listener starred it.
+    favourite: bool,
     gradient-index: int,
 }
 
@@ -26,8 +28,15 @@ export global Radio {
     in property <string> active-station-id;
     // True while that station is still connecting.
     in property <bool> connecting;
+    // The loaded station is one the listener starred.
+    in property <bool> active-station-favourite;
+    // Only the starred stations are listed.
+    in property <bool> favourites-only;
 
     callback country-toggled(key: string);
     callback genre-toggled(key: string);
+    callback favourites-toggled();
+    // Stars the loaded station, or takes its star away.
+    callback active-station-favourite-toggled();
     callback station-clicked(index: int);
 }

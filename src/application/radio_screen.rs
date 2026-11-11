@@ -17,6 +17,8 @@ use crate::user_interface::{self, RadioChip, StationRow};
 pub(super) struct RadioScreen {
     countries: Vec<String>,
     genres: Vec<String>,
+    /// Only the starred stations are shown.
+    favourites_only: bool,
     shown: Vec<Station>,
 }
 
@@ -49,6 +51,28 @@ impl Application {
             }
             application.refresh_radio();
         }));
+        view.on_favourites_toggled(self.action(|application| {
+            {
+                let mut screen = application.radio_screen.borrow_mut();
+                screen.favourites_only = !screen.favourites_only;
+            }
+            application.refresh_radio();
+        }));
+        view.on_active_station_favourite_toggled(self.action(|application| {
+            let station_id = application
+                .player
+                .borrow()
+                .station()
+                .map(|station| station.id.clone());
+            if let Some(station_id) = station_id {
+                let effects = application
+                    .favourite_stations
+                    .borrow_mut()
+                    .toggle(&station_id);
+                application.run(effects);
+                application.refresh_radio();
+            }
+        }));
         view.on_station_clicked(self.handler(|application, index: i32| {
             let station = application
                 .radio_screen
@@ -63,10 +87,14 @@ impl Application {
         }));
     }
 
-    /// Which station plays or connects, so its card can show it.
+    /// Which station plays or connects, so its card can show it, and whether
+    /// it is a favourite.
     pub(super) fn refresh_active_station(&self, player: &Player) {
         let station = player.station();
         let radio = self.window.global::<user_interface::Radio>();
+        radio.set_active_station_favourite(
+            station.is_some_and(|station| self.favourite_stations.borrow().contains(&station.id)),
+        );
         radio.set_active_station_id(
             station
                 .map(|station| station.id.as_str())
@@ -82,6 +110,10 @@ impl Application {
         let translations = self.translations.borrow();
         let search = self.search.borrow();
         let mut screen = self.radio_screen.borrow_mut();
+        let favourites = self.favourite_stations.borrow();
+        self.window
+            .global::<user_interface::Radio>()
+            .set_favourites_only(screen.favourites_only);
 
         let mut countries = vec![RadioChip {
             key: ALL_COUNTRIES_KEY.into(),
@@ -114,7 +146,13 @@ impl Application {
 
         screen.shown = self
             .catalog
-            .filtered(&screen.countries, &screen.genres, &search, &translations)
+            .filtered(
+                &screen.countries,
+                &screen.genres,
+                screen.favourites_only.then(|| favourites.station_ids()),
+                &search,
+                &translations,
+            )
             .into_iter()
             .cloned()
             .collect();
@@ -131,6 +169,7 @@ impl Application {
                         translations.translate("radio.kbps", &[("kbps", station.kbps.to_string())])
                     )
                     .into(),
+                    favourite: favourites.contains(&station.id),
                     gradient_index: (station.gradient_index % text::ART_GRADIENT_COUNT) as i32,
                 })
                 .collect::<Vec<_>>(),
