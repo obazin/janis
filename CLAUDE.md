@@ -55,6 +55,7 @@ The dev shell comes from `flake.nix` (composed from the `chess-flake` workspace'
 | `JANIS_SEARCH=<text>`            | Fills the search field                                                    |
 | `JANIS_EQUALIZER`                | Opens the equalizer sheet                                                 |
 | `JANIS_AUTOPLAY=<search>`        | Plays, silently, the tracks the library search finds                      |
+| `JANIS_AUDIBLE`                  | With `JANIS_AUTOPLAY`: keeps the saved volume, so the trace is live       |
 | `JANIS_STATION=<place>`          | Starts the station at that place in the Radio grid                        |
 | `JANIS_LOG=<level>`              | What the standard-error logger shows (all builds)                         |
 
@@ -104,7 +105,7 @@ engine thread     → symphonia decode → rubato → SPSC ring
 cpal callback     → 10×biquad (EQ) → volume+track gain → analyser tap → device
                     (the only realtime context: no alloc, no lock, no log)
 engine            → EngineBridge → post() → Player::apply → effects → refresh_player
-                  → latest visual frame, read by the 60 Hz frame timer → Visualizer → path commands
+                  → latest visual frame, read by the frame timer (30 Hz) → Visualizer → path commands
 a station click   → Player::play_station → Effect::ConnectStation → the station runtime
                     (HTTP connect + prefetch off the interface thread) → same decode/EQ/analyser path
 ```
@@ -129,6 +130,7 @@ Which screen is open is interface state (`Shell.screen`, a string identifier); t
 
 ## Slint notes
 
+- The renderer repaints the whole window for any change — it has no partial repaint — so what an animation costs the graphics processor is its frame rate, not its size. Everything that moves during playback (waveform, glow, pulse) runs on the one clock the controller ticks (`FRAME_INTERVAL`, exposed as `Player.animation-time`); never animate with `animation-tick()`, which redraws at the display's rate. Caching static regions (`cache-rendering-hint`) and the Skia renderer were both measured and do not help.
 - Element-level `opacity` on an animated item forces an offscreen layer (hundreds of megabytes); carry transparency in the color.
 - A stroked `Path` is laid out inside its stroke: grow it by the stroke width to keep it on its grid (see `Glyph`, `Waveform`).
 - A `Path` with a viewbox keeps its aspect ratio; give it a viewbox equal to its own size to fill a box.

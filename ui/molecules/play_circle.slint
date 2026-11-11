@@ -4,19 +4,20 @@ import { Glyph, GlyphMode } from "../atoms/glyph.slint";
 
 export enum PlayCircleVariant { hero, mini }
 
-// The round play / pause button. The hero variant breathes: a ring swells
+// The round play / pause button. The hero variant can breathe: a ring swells
 // out of it and fades, over a steady glow.
 export component PlayCircle inherits Rectangle {
     in property <string> identifier;
     in property <string> label;
     in property <bool> playing;
     in property <PlayCircleVariant> variant: PlayCircleVariant.hero;
+    // How far the hero variant's ring has swollen, 0 to 1. The caller
+    // drives it, so the pulse shares whatever clock the screen redraws on.
+    in property <float> swell;
     callback clicked();
 
     property <bool> hero: root.variant == PlayCircleVariant.hero;
     property <length> side: root.hero ? 60px : 42px;
-    // 0 → 1 → 0 over one beat.
-    property <float> swell: root.hero ? (1 - cos(Math.mod(animation-tick(), Motion.pulse) / Motion.pulse * 360deg)) / 2 : 0;
     property <length> ring: 14px * root.swell;
 
     width: root.side;

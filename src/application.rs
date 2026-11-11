@@ -36,8 +36,12 @@ use crate::translations::{Language, Translations};
 use crate::user_interface::{self, AppWindow, Covers, Shell, Strings, Toast, Tokens};
 use crate::visualizer::Visualizer;
 
-/// How often the waveform is redrawn while it moves.
-const FRAME_INTERVAL: Duration = Duration::from_millis(16);
+/// How often the window is redrawn while something plays: the waveform, the
+/// glow behind the art and the play button's pulse all move on this one clock.
+/// The renderer repaints the whole window for any change, so the rate is what
+/// playback costs the graphics processor; thirty frames a second halves it
+/// against sixty.
+const FRAME_INTERVAL: Duration = Duration::from_millis(33);
 /// How long the volume must rest before it is saved.
 const VOLUME_SETTLE: Duration = Duration::from_millis(300);
 /// How long the equalizer sliders must rest before they are saved.
@@ -148,6 +152,8 @@ pub struct Application {
     station_runtime: tokio::runtime::Runtime,
     frame_timer: Timer,
     last_frame: Cell<Instant>,
+    /// How long the animations have run; it stands still while nothing plays.
+    animation_time: Cell<Duration>,
     volume_timer: Timer,
     equalizer_timer: Timer,
 }
@@ -230,6 +236,7 @@ impl Application {
                 .map_err(|error| format!("start the station runtime: {error}"))?,
             frame_timer: Timer::default(),
             last_frame: Cell::new(now),
+            animation_time: Cell::new(Duration::ZERO),
             volume_timer: Timer::default(),
             equalizer_timer: Timer::default(),
         });
@@ -1226,6 +1233,12 @@ impl Application {
         let (width, height) = (view.get_big_wave_width(), view.get_big_wave_height());
         if width > 0.0 && height > 0.0 {
             view.set_big_wave_commands(visualizer.path_commands(width, height).into());
+        }
+        if playing {
+            self.animation_time.set(self.animation_time.get() + elapsed);
+            view.set_animation_time(
+                i64::try_from(self.animation_time.get().as_millis()).unwrap_or_default(),
+            );
         }
         let progress = player.live_progress(now) as f32;
         view.set_progress(progress);
