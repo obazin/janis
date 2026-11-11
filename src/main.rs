@@ -64,6 +64,8 @@ fn run() -> Result<(), String> {
     let _snapshot_timer = development::snapshot_when_asked(&window);
     #[cfg(debug_assertions)]
     development::play_when_asked(&application);
+    #[cfg(debug_assertions)]
+    development::open_what_was_asked(&window);
 
     let outcome = window
         .run()
@@ -91,6 +93,18 @@ mod development {
             application.silence();
             let found = crate::library_view::search_library(&application.tracks(), &search);
             application.play_queue(found.into_iter().take(5).collect(), 0);
+        }
+    }
+
+    /// `JANIS_SCREEN=<identifier>` opens on that screen, and `JANIS_EQUALIZER`
+    /// opens the equalizer sheet, so each can be looked at in a snapshot.
+    pub fn open_what_was_asked(window: &AppWindow) {
+        let shell = window.global::<crate::user_interface::Shell>();
+        if let Ok(screen) = std::env::var("JANIS_SCREEN") {
+            shell.set_screen(screen.into());
+        }
+        if std::env::var_os("JANIS_EQUALIZER").is_some() {
+            shell.set_equalizer_open(true);
         }
     }
 

@@ -1,0 +1,88 @@
+import { Tokens, Fonts, Typography } from "../../tokens.slint";
+
+// One band of the equalizer: its gain, a column to drag, and its frequency.
+export component EqualizerBandSlider inherits VerticalLayout {
+    in property <float> gain;
+    in property <float> range: 12;
+    in property <string> frequency-label;
+    callback changed(gain: float);
+
+    // 0 at the bottom of the column, 1 at the top.
+    property <float> fraction: (root.gain + root.range) / (root.range * 2);
+
+    spacing: 10px;
+
+    Text {
+        text: (root.gain > 0 ? "+" : "") + root.gain;
+        font-family: Fonts.mono;
+        font-size: Typography.label;
+        font-weight: Typography.bold;
+        color: root.gain > 0 ? Tokens.lime : root.gain < 0 ? Tokens.ember : Tokens.text-muted;
+        horizontal-alignment: center;
+    }
+
+    HorizontalLayout {
+        alignment: center;
+        column := Rectangle {
+            width: 34px;
+            height: 190px;
+            border-radius: self.width / 2;
+            background: Tokens.well-deep;
+            clip: true;
+            accessible-role: slider;
+            accessible-label: root.frequency-label;
+            accessible-value-minimum: -root.range;
+            accessible-value-maximum: root.range;
+            accessible-value: root.gain;
+
+            Rectangle {
+                y: root.gain >= 0 ? column.height * (1 - root.fraction) : column.height / 2;
+                height: abs(root.fraction - 0.5) * column.height;
+                background: Tokens.equalizer-band-fill;
+            }
+
+            Rectangle {
+                width: 2px;
+                height: 1px;
+                background: Tokens.rail;
+            }
+
+            Rectangle {
+                y: column.height * (1 - root.fraction) - self.height / 2;
+                width: 26px;
+                height: 12px;
+                border-radius: 6px;
+                border-width: 2px;
+                border-color: Tokens.equalizer-handle-ring;
+                background: Tokens.text;
+            }
+
+            touch := TouchArea {
+                mouse-cursor: row-resize;
+
+                function follow() {
+                    root.changed((1 - max(0, min(1, self.mouse-y / self.height))) * root.range * 2 - root.range);
+                }
+
+                pointer-event(event) => {
+                    if event.kind == PointerEventKind.down {
+                        self.follow();
+                    }
+                }
+                moved => {
+                    if self.pressed {
+                        self.follow();
+                    }
+                }
+            }
+        }
+    }
+
+    Text {
+        text: root.frequency-label;
+        font-family: Fonts.mono;
+        font-size: Typography.label;
+        color: Tokens.text-muted;
+        horizontal-alignment: center;
+    }
+}

@@ -1,0 +1,26 @@
+// The equalizer's state as its sheet shows it. Filled by the application;
+// the callbacks are the listener's moves.
+
+export struct EqualizerPreset {
+    name: string,
+    label: string,
+}
+
+export global Equalizer {
+    // Gain per band in dB, low to high.
+    in property <[float]> gains;
+    // The label under each band.
+    in property <[string]> frequency-labels;
+    // Sliders run from minus to plus this many dB.
+    in property <float> gain-range: 12;
+    // The active preset's name, or "custom".
+    in property <string> preset;
+    in property <[EqualizerPreset]> presets;
+    in property <bool> linear-phase;
+    in property <string> linear-phase-description;
+
+    callback band-changed(index: int, gain: float);
+    callback preset-selected(name: string);
+    callback reset();
+    callback linear-phase-toggled();
+}
