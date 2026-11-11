@@ -17,10 +17,14 @@ import { NowPlayingScreen } from "screens/now_playing_screen.slint";
 import { LibraryScreen } from "screens/library_screen.slint";
 import { LocalFilesScreen } from "screens/local_files_screen.slint";
 import { RadioScreen } from "screens/radio_screen.slint";
+import { DiscoverScreen } from "screens/discover_screen.slint";
+import { SpotifyScreen } from "screens/spotify_screen.slint";
+import { SettingsScreen } from "screens/settings_screen.slint";
+import { Settings } from "features/settings/settings.slint";
 import { Radio } from "features/radio/radio.slint";
 import { Library } from "features/library/library.slint";
 
-export { Strings, Shell, Player, Covers, Equalizer, Library, Radio, Tokens }
+export { Strings, Shell, Player, Covers, Equalizer, Library, Radio, Settings, Tokens }
 
 export component AppWindow inherits Window {
     title: "Janis";
@@ -72,6 +76,9 @@ export component AppWindow inherits Window {
                 if Shell.screen == "library": LibraryScreen { }
                 if Shell.screen == "local": LocalFilesScreen { }
                 if Shell.screen == "radio": RadioScreen { }
+                if Shell.screen == "discover": DiscoverScreen { }
+                if Shell.screen == "spotify": SpotifyScreen { }
+                if Shell.screen == "settings": SettingsScreen { }
             }
         }
 

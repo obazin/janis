@@ -1,0 +1,213 @@
+import { Tokens, Typography, Metrics, Accent } from "../tokens.slint";
+import { Strings } from "strings.slint";
+import { Chip } from "../atoms/chip.slint";
+import { SectionLabel } from "../atoms/section_label.slint";
+import { ScreenHeader } from "../molecules/screen_header.slint";
+import { ScrollArea } from "../molecules/scroll_area.slint";
+import { ToggleRow } from "../molecules/toggle_row.slint";
+import { Equalizer } from "../features/equalizer/equalizer.slint";
+import { OpenEqualizerButton } from "../features/equalizer/open_equalizer_button.slint";
+import { Settings } from "../features/settings/settings.slint";
+
+// A read-only fact about the audio output.
+component OutputCard inherits Rectangle {
+    in property <string> label;
+    in property <string> value;
+
+    horizontal-stretch: 1;
+    border-radius: 12px;
+    border-width: 1px;
+    border-color: Tokens.border;
+    background: Tokens.panel;
+
+    VerticalLayout {
+        padding-left: 16px;
+        padding-right: 16px;
+        padding-top: 14px;
+        padding-bottom: 14px;
+        spacing: 4px;
+        Text {
+            text: root.label;
+            font-size: Typography.caption;
+            color: Tokens.text-muted;
+            horizontal-alignment: left;
+        }
+        Text {
+            text: root.value;
+            font-weight: Typography.semibold;
+            color: Tokens.text;
+            horizontal-alignment: left;
+            overflow: elide;
+        }
+    }
+}
+
+// The preferences: equalizer presets, the playback switches, the output in
+// use, and the interface language.
+export component SettingsScreen inherits Rectangle {
+    property <length> side: 44px;
+
+    page := ScrollArea {
+        content-height: column.preferred-height;
+        column := VerticalLayout {
+            x: root.side;
+            width: min(760px - 2 * root.side, page.content-width - root.side - 32px);
+            padding-top: 36px;
+            padding-bottom: 40px;
+            alignment: start;
+
+            ScreenHeader {
+                eyebrow: Strings.settings-eyebrow;
+                tone: Accent.violet;
+                title: Strings.settings-title;
+            }
+
+            Rectangle {
+                height: 28px;
+            }
+
+            SectionLabel {
+                label: Strings.settings-eq-presets;
+            }
+
+            FlexboxLayout {
+                padding-top: 12px;
+                padding-bottom: 16px;
+                spacing: 10px;
+                for preset in Equalizer.presets: Chip {
+                    label: preset.label;
+                    active: Equalizer.preset == preset.name;
+                    clicked => { Equalizer.preset-selected(preset.name); }
+                }
+            }
+
+            HorizontalLayout {
+                alignment: start;
+                padding-bottom: 32px;
+                OpenEqualizerButton {
+                    label: Strings.settings-fine-tune;
+                }
+            }
+
+            SectionLabel {
+                label: Strings.settings-playback;
+            }
+
+            Rectangle {
+                height: 12px;
+            }
+
+            Rectangle {
+                border-radius: Metrics.radius-card;
+                border-width: 1px;
+                border-color: Tokens.border;
+                VerticalLayout {
+                    ToggleRow {
+                        label: Strings.settings-gapless;
+                        description: Strings.settings-gapless-desc;
+                        checked: Settings.gapless;
+                        toggled => { Settings.option-toggled("gapless"); }
+                    }
+                    ToggleRow {
+                        label: Strings.settings-crossfade;
+                        description: Strings.settings-crossfade-desc;
+                        checked: Settings.crossfade;
+                        toggled => { Settings.option-toggled("crossfade"); }
+                    }
+                    ToggleRow {
+                        label: Strings.settings-normalize;
+                        description: Strings.settings-normalize-desc;
+                        checked: Settings.normalize;
+                        toggled => { Settings.option-toggled("normalize"); }
+                    }
+                    ToggleRow {
+                        label: Strings.settings-exclusive;
+                        description: Strings.settings-exclusive-desc;
+                        checked: Settings.exclusive;
+                        last: true;
+                        toggled => { Settings.option-toggled("exclusive"); }
+                    }
+                }
+            }
+
+            Rectangle {
+                height: 32px;
+            }
+
+            SectionLabel {
+                label: Strings.settings-output;
+            }
+
+            HorizontalLayout {
+                padding-top: 12px;
+                padding-bottom: 32px;
+                spacing: 14px;
+                OutputCard {
+                    label: Strings.settings-device;
+                    value: Settings.device != "" ? Settings.device : Strings.settings-device-value;
+                }
+                OutputCard {
+                    label: Strings.settings-sample-rate;
+                    value: Settings.sample-rate;
+                }
+            }
+
+            SectionLabel {
+                label: Strings.settings-language;
+            }
+
+            HorizontalLayout {
+                alignment: start;
+                padding-top: 12px;
+                padding-bottom: 32px;
+                spacing: 10px;
+                Chip {
+                    label: "English";
+                    active: Settings.language == "en";
+                    clicked => { Settings.language-selected("en"); }
+                }
+                Chip {
+                    label: "Français";
+                    active: Settings.language == "fr";
+                    clicked => { Settings.language-selected("fr"); }
+                }
+            }
+
+            Rectangle {
+                border-radius: Metrics.radius-card;
+                border-width: 1px;
+                border-color: Tokens.border-strong;
+                background: Tokens.banner;
+                HorizontalLayout {
+                    padding: 18px;
+                    spacing: 14px;
+                    VerticalLayout {
+                        alignment: center;
+                        Rectangle {
+                            width: 36px;
+                            height: 36px;
+                            border-radius: 8px;
+                            background: Tokens.prism-conic;
+                        }
+                    }
+                    VerticalLayout {
+                        horizontal-stretch: 1;
+                        alignment: center;
+                        Text {
+                            text: Strings.settings-banner-title;
+                            font-weight: Typography.bold;
+                            color: Tokens.text;
+                            horizontal-alignment: left;
+                        }
+                        Text {
+                            text: Strings.settings-banner-desc;
+                            font-size: Typography.body;
+                            color: Tokens.text-soft;
+                            horizontal-alignment: left;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

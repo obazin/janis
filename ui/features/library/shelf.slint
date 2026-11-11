@@ -1,0 +1,41 @@
+import { Tokens, Fonts, Typography } from "../../tokens.slint";
+import { LibraryCard } from "library.slint";
+import { ShelfTile } from "shelf_tile.slint";
+
+// A titled row of tiles that scrolls sideways when it is wider than the screen.
+export component Shelf inherits Rectangle {
+    in property <string> title;
+    in property <[LibraryCard]> cards;
+    callback tile-clicked(index: int);
+
+    property <length> gap: 18px;
+    property <length> tile-width: 176px;
+    property <length> title-height: 42px;
+
+    height: root.title-height + root.tile-width + 48px + 36px;
+
+    Text {
+        x: 0;
+        y: 0;
+        text: root.title;
+        font-family: Fonts.display;
+        font-weight: Typography.extrabold;
+        font-size: Typography.heading-md;
+        color: Tokens.text;
+        horizontal-alignment: left;
+    }
+
+    Flickable {
+        x: 0;
+        y: root.title-height;
+        height: root.tile-width + 48px + 24px;
+        content-width: max(self.width, root.cards.length * (root.tile-width + root.gap));
+        content-height: self.height;
+        for card[index] in root.cards: ShelfTile {
+            x: index * (root.tile-width + root.gap);
+            y: 0;
+            card: card;
+            clicked => { root.tile-clicked(index); }
+        }
+    }
+}

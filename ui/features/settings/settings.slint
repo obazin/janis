@@ -1,0 +1,18 @@
+// The preferences as the Settings screen shows them. Filled by the
+// application; the callbacks are the listener's choices.
+
+export global Settings {
+    in property <bool> gapless;
+    in property <bool> crossfade;
+    in property <bool> normalize;
+    in property <bool> exclusive;
+    // The output device in use, and its sample rate.
+    in property <string> device;
+    in property <string> sample-rate;
+    // The interface language, by its code.
+    in property <string> language;
+
+    // One of gapless, crossfade, normalize, exclusive.
+    callback option-toggled(option: string);
+    callback language-selected(code: string);
+}

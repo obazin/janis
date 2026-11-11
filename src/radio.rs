@@ -84,6 +84,7 @@ impl Catalog {
         }
     }
 
+    #[cfg(test)]
     pub fn stations(&self) -> &[Station] {
         &self.stations
     }

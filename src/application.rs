@@ -8,6 +8,7 @@
 
 mod library_screens;
 mod radio_screen;
+mod settings_screen;
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -122,7 +123,6 @@ pub struct Application {
     equalizer_gains: Rc<VecModel<f32>>,
     search: RefCell<String>,
     folders: RefCell<Vec<WatchedFolder>>,
-    scanning: Cell<bool>,
     last_report: Cell<Option<ScanReport>>,
     library_screen: RefCell<library_screens::LibraryScreen>,
     library_albums: Rc<VecModel<user_interface::LibraryCard>>,
@@ -132,6 +132,9 @@ pub struct Application {
     library_selection_tracks: Rc<VecModel<user_interface::LibraryTrack>>,
     library_local: Rc<VecModel<user_interface::LibraryTrack>>,
     library_folders: Rc<VecModel<user_interface::WatchedFolderRow>>,
+    discover_recent: Rc<VecModel<user_interface::LibraryCard>>,
+    discover_rediscover: Rc<VecModel<user_interface::LibraryCard>>,
+    discover_artists: Rc<VecModel<user_interface::LibraryCard>>,
     library_worker: Worker,
     radio_screen: RefCell<radio_screen::RadioScreen>,
     radio_countries: Rc<VecModel<user_interface::RadioChip>>,
@@ -198,7 +201,6 @@ impl Application {
             equalizer_gains: Rc::new(VecModel::default()),
             search: RefCell::new(String::new()),
             folders: RefCell::new(folders),
-            scanning: Cell::new(false),
             last_report: Cell::new(None),
             library_screen: RefCell::new(library_screens::LibraryScreen::default()),
             library_albums: Rc::new(VecModel::default()),
@@ -208,6 +210,9 @@ impl Application {
             library_selection_tracks: Rc::new(VecModel::default()),
             library_local: Rc::new(VecModel::default()),
             library_folders: Rc::new(VecModel::default()),
+            discover_recent: Rc::new(VecModel::default()),
+            discover_rediscover: Rc::new(VecModel::default()),
+            discover_artists: Rc::new(VecModel::default()),
             library_worker: Worker::new("janis library")?,
             radio_screen: RefCell::new(radio_screen::RadioScreen::default()),
             radio_countries: Rc::new(VecModel::default()),
@@ -241,6 +246,7 @@ impl Application {
         application.refresh_library();
         application.refresh_local_files();
         application.refresh_radio();
+        application.refresh_settings();
         Ok(application)
     }
 
@@ -310,6 +316,7 @@ impl Application {
         }));
         self.connect_library();
         self.connect_radio();
+        self.connect_settings();
         platform::on_file_dropped(self.window.window(), {
             let weak = Rc::downgrade(self);
             move |path| {
@@ -480,6 +487,8 @@ impl Application {
         self.refresh_library();
         self.refresh_local_files();
         self.refresh_radio();
+        self.refresh_settings();
+        self.refresh_toasts();
     }
 
     /// One file of a drop on the window. The system reports a drop file by
@@ -905,6 +914,15 @@ impl Application {
             .or(stream.title.as_deref())
             .or(station.map(|station| station.name.as_str()))
             .unwrap_or_default();
+        let settings = self.window.global::<user_interface::Settings>();
+        settings.set_device(player.device_name().unwrap_or_default().into());
+        settings.set_sample_rate(
+            player
+                .sample_rate()
+                .map(|rate| format!("{:.1} kHz", f64::from(rate) / 1000.0))
+                .unwrap_or_else(|| "—".to_owned())
+                .into(),
+        );
         let radio = self.window.global::<user_interface::Radio>();
         radio.set_active_station_id(
             station

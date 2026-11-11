@@ -1,0 +1,60 @@
+import { Accent } from "../tokens.slint";
+import { Icons } from "../icons.slint";
+import { Strings } from "strings.slint";
+import { EmptyState } from "../atoms/empty_state.slint";
+import { ScreenHeader } from "../molecules/screen_header.slint";
+import { ScrollArea } from "../molecules/scroll_area.slint";
+import { Library } from "../features/library/library.slint";
+import { Shelf } from "../features/library/shelf.slint";
+
+// Shelves built from the listener's own library: what was added last, albums
+// worth another listen, and the artists with the most tracks.
+export component DiscoverScreen inherits Rectangle {
+    property <length> side: 44px;
+    property <length> content-width: page.content-width - root.side - 32px;
+
+    page := ScrollArea {
+        content-height: column.preferred-height;
+        column := VerticalLayout {
+            x: root.side;
+            width: root.content-width;
+            padding-top: 36px;
+            padding-bottom: 40px;
+            spacing: 28px;
+            alignment: start;
+
+            ScreenHeader {
+                eyebrow: Strings.discover-eyebrow;
+                tone: Accent.teal;
+                title: Strings.discover-title;
+            }
+
+            if Library.discover-recent.length == 0: EmptyState {
+                icon: Icons.discover;
+                title: Strings.discover-empty-title;
+                description: Strings.discover-empty-desc;
+                action-label: Strings.library-add-music;
+                action-icon: Icons.plus;
+                action-clicked => { Library.add-music(); }
+            }
+
+            if Library.discover-recent.length > 0: Shelf {
+                title: Strings.discover-recent-albums;
+                cards: Library.discover-recent;
+                tile-clicked(index) => { Library.shelf-tile-clicked("recent", index); }
+            }
+
+            if Library.discover-recent.length > 0: Shelf {
+                title: Strings.discover-rediscover;
+                cards: Library.discover-rediscover;
+                tile-clicked(index) => { Library.shelf-tile-clicked("rediscover", index); }
+            }
+
+            if Library.discover-artists.length > 0: Shelf {
+                title: Strings.discover-artists;
+                cards: Library.discover-artists;
+                tile-clicked(index) => { Library.shelf-tile-clicked("artists", index); }
+            }
+        }
+    }
+}
