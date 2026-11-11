@@ -258,6 +258,12 @@ impl Application {
         APPLICATION.with(|cell| cell.borrow_mut().take());
     }
 
+    /// Brings the window to the front, for a second launch that found this
+    /// instance running.
+    pub fn come_forward(&self) {
+        platform::bring_forward(self.window.window());
+    }
+
     /// Turns the output down to nothing without touching the saved volume,
     /// so playback can be exercised in development without a sound.
     #[cfg(debug_assertions)]
