@@ -32,6 +32,9 @@ pub struct Player {
     mode: Mode,
     stream: StreamInfo,
     connecting: bool,
+    /// Bumped each time the listener starts something else, so the outcome
+    /// of a connection they have moved on from is recognised and dropped.
+    connection_epoch: u64,
     station: Option<Station>,
     volume: f64,
     shuffle: bool,
@@ -53,6 +56,7 @@ impl Player {
             mode: Mode::Idle,
             stream: StreamInfo::default(),
             connecting: false,
+            connection_epoch: 0,
             station: None,
             volume: 0.8,
             shuffle: false,
@@ -126,6 +130,11 @@ impl Player {
             Mode::Local => self.queue.get(self.index),
             Mode::Idle | Mode::Radio => None,
         }
+    }
+
+    /// Where the current local track sits in the queue.
+    pub fn current_index(&self) -> Option<usize> {
+        self.current().map(|_| self.index)
     }
 
     /// Fractional progress, interpolated between the engine's ~10 Hz position
@@ -253,6 +262,9 @@ impl Player {
         }
         let mut effects = self.clear_stream_info();
         self.station = None;
+        // A station still connecting is abandoned: its outcome is not awaited.
+        self.connecting = false;
+        self.connection_epoch += 1;
         self.index = index.min(tracks.len() - 1);
         self.queue = tracks;
         self.mode = Mode::Local;
@@ -277,18 +289,29 @@ impl Player {
         self.position_seconds = 0.0;
         self.duration_seconds = 0.0;
         self.connecting = true;
+        self.connection_epoch += 1;
         effects.push(Effect::LoadCover(None));
-        effects.push(Effect::ConnectStation(station));
+        effects.push(Effect::ConnectStation {
+            station,
+            epoch: self.connection_epoch,
+        });
         effects
     }
 
     /// The outcome of the connection `Effect::ConnectStation` asked for:
-    /// success once the station is connected and buffered.
+    /// success once the station is connected and buffered. `epoch` is the one
+    /// the effect carried; an outcome from a connection the listener has
+    /// moved on from changes nothing.
     pub fn station_connection_finished(
         &mut self,
         station: &Station,
+        epoch: u64,
         outcome: Result<(), String>,
     ) -> Vec<Effect> {
+        if epoch != self.connection_epoch {
+            log::debug!("an abandoned connection to {} finished", station.name);
+            return Vec::new();
+        }
         self.connecting = false;
         match outcome {
             Ok(()) => Vec::new(),
@@ -441,6 +464,7 @@ mod tests {
         let effects = player.apply(EngineEvent::TrackChanged { index: 1 }, now, &no_stations);
 
         assert_eq!(player.current().map(|track| track.id), Some(2));
+        assert_eq!(player.current_index(), Some(1));
         assert_eq!(effects, [Effect::LoadCover(Some(2))]);
     }
 
@@ -507,14 +531,22 @@ mod tests {
         let effects = player.play_station(jazz.clone());
         assert!(player.connecting());
         assert_eq!(player.station(), Some(&jazz));
-        assert_eq!(effects.last(), Some(&Effect::ConnectStation(jazz.clone())));
+        assert_eq!(
+            effects.last(),
+            Some(&Effect::ConnectStation {
+                station: jazz.clone(),
+                epoch: 1,
+            })
+        );
 
-        assert!(player.station_connection_finished(&jazz, Ok(())).is_empty());
+        assert!(player
+            .station_connection_finished(&jazz, 1, Ok(()))
+            .is_empty());
         assert!(!player.connecting());
         assert_eq!(player.station(), Some(&jazz));
 
         player.play_station(jazz.clone());
-        let effects = player.station_connection_finished(&jazz, Err("refused".to_owned()));
+        let effects = player.station_connection_finished(&jazz, 2, Err("refused".to_owned()));
         assert_eq!(player.station(), None);
         assert_eq!(
             effects,
@@ -524,6 +556,42 @@ mod tests {
                 dedupe_key: None,
             }]
         );
+    }
+
+    #[test]
+    fn the_outcome_of_a_station_the_listener_left_for_another_is_ignored() {
+        let mut player = Player::new(Instant::now());
+        let (jazz, rock) = (station("jazz"), station("rock"));
+        player.play_station(jazz.clone());
+        player.play_station(rock.clone());
+
+        // The first station fails after the second was chosen.
+        let effects = player.station_connection_finished(&jazz, 1, Err("refused".to_owned()));
+
+        assert!(effects.is_empty());
+        assert!(player.connecting());
+        assert_eq!(player.station(), Some(&rock));
+
+        assert!(player
+            .station_connection_finished(&rock, 2, Ok(()))
+            .is_empty());
+        assert!(!player.connecting());
+        assert_eq!(player.station(), Some(&rock));
+    }
+
+    #[test]
+    fn playing_a_queue_abandons_a_station_that_was_connecting() {
+        let now = Instant::now();
+        let mut player = Player::new(now);
+        let jazz = station("jazz");
+        player.play_station(jazz.clone());
+
+        player.play_queue(vec![timed_track(1, 10.0)], 0, now);
+        assert!(!player.connecting());
+
+        let effects = player.station_connection_finished(&jazz, 1, Err("refused".to_owned()));
+        assert!(effects.is_empty());
+        assert_eq!(player.current().map(|track| track.id), Some(1));
     }
 
     #[test]

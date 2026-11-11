@@ -119,7 +119,7 @@ impl Equalizer {
         let Some(gain) = self.gains.get_mut(index) else {
             return Vec::new();
         };
-        // Halves round up, as the sliders always have.
+        // Halves round up.
         *gain = (value.clamp(-GAIN_RANGE, GAIN_RANGE) * 2.0 + 0.5).floor() / 2.0;
         self.preset = CUSTOM_PRESET.to_owned();
         vec![
@@ -158,6 +158,11 @@ impl Equalizer {
             Effect::SetLinearPhase(enabled),
             Effect::PersistLinearPhase(enabled),
         ]
+    }
+
+    /// Flips the quality mode.
+    pub fn toggle_linear_phase(&mut self) -> Vec<Effect> {
+        self.set_linear_phase(!self.linear_phase)
     }
 
     /// The engine's own account of the mode and its exact latency.
@@ -257,6 +262,13 @@ mod tests {
             [
                 Effect::SetLinearPhase(true),
                 Effect::PersistLinearPhase(true)
+            ]
+        );
+        assert_eq!(
+            equalizer.toggle_linear_phase(),
+            [
+                Effect::SetLinearPhase(false),
+                Effect::PersistLinearPhase(false)
             ]
         );
         equalizer.apply_engine_report(true, 0.043);

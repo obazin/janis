@@ -6,6 +6,7 @@ use std::rc::Rc;
 use slint::ComponentHandle;
 
 use super::Application;
+use crate::player::Player;
 use crate::radio::{self, Station, ALL_COUNTRIES_KEY, ALL_GENRES_KEY};
 use crate::text;
 use crate::user_interface::{self, RadioChip, StationRow};
@@ -60,6 +61,19 @@ impl Application {
                 application.run(effects);
             }
         }));
+    }
+
+    /// Which station plays or connects, so its card can show it.
+    pub(super) fn refresh_active_station(&self, player: &Player) {
+        let station = player.station();
+        let radio = self.window.global::<user_interface::Radio>();
+        radio.set_active_station_id(
+            station
+                .map(|station| station.id.as_str())
+                .unwrap_or_default()
+                .into(),
+        );
+        radio.set_connecting(player.connecting());
     }
 
     /// Rebuilds the Radio screen's chips and stations from the filters, the

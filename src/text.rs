@@ -134,7 +134,7 @@ mod tests {
 
     #[test]
     fn art_gradient_index_is_stable_and_in_range() {
-        // Values the webview's hash produced for the same seeds.
+        // The hash is the 31-multiplier string hash over UTF-16 units.
         assert_eq!(art_gradient_index(""), 0);
         assert_eq!(art_gradient_index("a"), 97 % 6);
         assert_eq!(art_gradient_index("ab"), (97 * 31 + 98) % 6);

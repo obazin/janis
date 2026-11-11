@@ -7,6 +7,7 @@ use slint::ComponentHandle;
 
 use super::Application;
 use crate::persistence::{self, PlaybackOption};
+use crate::player::Player;
 use crate::translations::Language;
 use crate::user_interface;
 
@@ -40,6 +41,19 @@ impl Application {
         );
         self.apply_strings();
         self.refresh_everything();
+    }
+
+    /// The output device the engine reports, for the Settings readout.
+    pub(super) fn refresh_output_readout(&self, player: &Player) {
+        let settings = self.window.global::<user_interface::Settings>();
+        settings.set_device(player.device_name().unwrap_or_default().into());
+        settings.set_sample_rate(
+            player
+                .sample_rate()
+                .map(|rate| format!("{:.1} kHz", f64::from(rate) / 1000.0))
+                .unwrap_or_else(|| "—".to_owned())
+                .into(),
+        );
     }
 
     pub(super) fn refresh_settings(&self) {
