@@ -25,7 +25,8 @@ A native application: Rust throughout, with a [Slint](https://slint.dev) interfa
 ```sh
 direnv allow                 # or: nix develop — the Rust toolchain, just, cmake, slint-lsp
 cargo run                    # the app (`just run`, or `run` in the dev shell)
-just check                   # fmt check, clippy -D warnings, cargo test
+just check                   # fmt check, clippy -D warnings, cargo test (the catalog builder included)
+just stations                # rebuild data/stations.json from scripts/radio (network)
 just release-macos           # dist/Janis.app + .dmg (other systems: release-linux, release-windows)
 just install-macos           # release-macos, then replace /Applications/Janis.app with the .dmg's
 nix run                      # build + launch the release app, no dev shell
