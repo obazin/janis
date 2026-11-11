@@ -146,3 +146,7 @@ Each step of the rewrite was committed as it passed `just check`, so any step ca
 **D40 · The dev shell carries the Slint language server** — *current*
 `slint-lsp` is built in the flake at the version of Slint in `Cargo.lock` (1.18.1): nixpkgs' recipe, with the workspace's Rust toolchain, the matching crate and its own dependency hash. A Slint bump moves its version and both hashes too. What the shell puts on the path is a wrapper that tells the server where the latest build left the generated `strings.slint`, so an editor resolves the `Strings` global; a key added to the catalog is known to it after the next `cargo build`.
 Superseded: the release the pinned nixpkgs carries, 1.14.1, which parsed the interface but trailed the compiler by four releases (D40a).
+
+**D41 · The station catalog is built by a Rust package of its own** — *current*
+`scripts/radio` is a standalone package (`janis-stations`, own `Cargo.lock`, run with `just stations`) that merges the curated seed with Radio Browser's answers into `data/stations.json`. Standing apart keeps its HTTP client out of the application's dependency graph, so `Cargo.lock` and the flake's `cargoHash` do not move with it. On one captured set of answers it writes the same file, byte for byte, as the script it replaces.
+Superseded: `build-stations.mjs`, a Node script, the last thing in the repository that needed Node (D41a).

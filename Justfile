@@ -18,7 +18,21 @@ run:
     cargo run
 
 # Format check, lints and tests: every quality gate.
-check: fmt-rust-check clippy test-rust
+check: fmt-rust-check clippy test-rust check-stations
+
+# The cargo arguments of the catalog builder, a package of its own.
+stations_package := "--manifest-path scripts/radio/Cargo.toml"
+stations_build := stations_package + " --target-dir target/tools"
+
+# Rebuild data/stations.json from the curated seed and Radio Browser (network).
+stations *arguments:
+    cargo run {{ stations_build }} -- {{ arguments }}
+
+# The same gates for the catalog builder.
+check-stations:
+    cargo fmt {{ stations_package }} --check
+    cargo clippy {{ stations_build }} --all-targets -- -D warnings
+    cargo test {{ stations_build }}
 
 test-rust:
     cargo test
@@ -29,6 +43,7 @@ clippy:
 # Format the Rust sources (style in rustfmt.toml).
 fmt-rust:
     cargo fmt
+    cargo fmt {{ stations_package }}
 
 fmt-rust-check:
     cargo fmt --check

@@ -1,0 +1,19 @@
+# The web-radio catalog builder: a development tool, run by hand with
+# `just stations`. It is its own package with its own lock file, outside the
+# application's dependency graph, so nothing here reaches a release build.
+[package]
+name = "janis-stations"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Rebuilds data/stations.json from the curated seed and the Radio Browser database"
+license = "GPL-3.0-only"
+
+# Stands alone: not a member of any workspace above it.
+[workspace]
+
+[dependencies]
+regex = "1"
+# `preserve_order` keeps the curated stations' fields as they are written.
+serde_json = { version = "1", features = ["preserve_order"] }
+ureq = { version = "2", features = ["json"] }
