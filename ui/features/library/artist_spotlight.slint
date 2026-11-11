@@ -1,0 +1,176 @@
+import { Tokens, Fonts, Typography, Metrics, Motion } from "../../tokens.slint";
+import { Icons } from "../../icons.slint";
+import { Strings } from "strings.slint";
+import { Glyph, GlyphMode } from "../../atoms/glyph.slint";
+import { SectionLabel } from "../../atoms/section_label.slint";
+import { Player, SpotlightTrack, SpotlightAlbum } from "../player/player.slint";
+import { CoverArt } from "cover_art.slint";
+
+component SpotlightTrackRow inherits Rectangle {
+    in property <SpotlightTrack> track;
+    in property <int> position;
+    callback clicked();
+
+    height: self.preferred-height;
+    border-radius: Metrics.radius-card;
+    background: touch.has-hover ? Tokens.row-hover : transparent;
+    animate background { duration: Motion.fast; }
+    accessible-role: button;
+    accessible-label: root.track.title;
+    accessible-action-default => { root.clicked(); }
+
+    HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 10px;
+        padding-top: 8px;
+        padding-bottom: 8px;
+        spacing: 10px;
+        Text {
+            width: 22px;
+            text: root.position;
+            font-family: Fonts.display;
+            font-weight: Typography.black;
+            font-size: Typography.heading-sm;
+            color: Tokens.accent;
+            horizontal-alignment: left;
+            vertical-alignment: center;
+        }
+        VerticalLayout {
+            horizontal-stretch: 1;
+            alignment: center;
+            Text {
+                text: root.track.title;
+                font-size: Typography.body;
+                font-weight: Typography.semibold;
+                color: Tokens.text;
+                horizontal-alignment: left;
+                overflow: elide;
+            }
+            Text {
+                text: root.track.album;
+                font-size: Typography.micro;
+                color: Tokens.text-muted;
+                horizontal-alignment: left;
+                overflow: elide;
+            }
+        }
+        VerticalLayout {
+            alignment: center;
+            Glyph {
+                width: 14px;
+                height: 14px;
+                icon: Icons.play;
+                mode: GlyphMode.fill;
+                tint: Tokens.text-muted;
+            }
+        }
+    }
+
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+component SpotlightAlbumTile inherits Rectangle {
+    in property <SpotlightAlbum> album;
+    callback clicked();
+
+    height: self.width + 40px;
+    accessible-role: button;
+    accessible-label: root.album.title;
+    accessible-action-default => { root.clicked(); }
+
+    CoverArt {
+        x: 0;
+        y: 0;
+        width: root.width;
+        height: root.width;
+        radius: 12px;
+        track-id: root.album.track-id;
+        gradient-index: root.album.gradient-index;
+        drop-shadow-offset-y: Tokens.shadow-tile.offset-y;
+        drop-shadow-blur: Tokens.shadow-tile.blur;
+        drop-shadow-spread: Tokens.shadow-tile.spread;
+        drop-shadow-color: Tokens.shadow-tile.color;
+    }
+
+    Text {
+        x: 0;
+        y: root.width + 6px;
+        width: root.width;
+        text: root.album.title;
+        font-size: Typography.caption;
+        font-weight: Typography.semibold;
+        color: Tokens.text;
+        horizontal-alignment: left;
+        overflow: elide;
+    }
+
+    Text {
+        x: 0;
+        y: root.width + 23px;
+        width: root.width;
+        text: root.album.detail;
+        font-size: Typography.micro;
+        color: Tokens.text-muted;
+        horizontal-alignment: left;
+        overflow: elide;
+    }
+
+    TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+// Fills the space under the queue card on Now Playing: more tracks by the
+// current artist, and that artist's albums — both from the library.
+export component ArtistSpotlight inherits HorizontalLayout {
+    property <length> gap: 12px;
+
+    spacing: 24px;
+
+    VerticalLayout {
+        horizontal-stretch: 1;
+        min-width: 0px;
+        preferred-width: 0px;
+        alignment: start;
+        spacing: 2px;
+        if Player.spotlight-tracks.length > 0: VerticalLayout {
+            padding-bottom: 8px;
+            SectionLabel {
+                label: Player.spotlight-heading;
+            }
+        }
+        for track[index] in Player.spotlight-tracks: SpotlightTrackRow {
+            track: track;
+            position: index + 1;
+            clicked => { Player.spotlight-track-clicked(index); }
+        }
+    }
+
+    VerticalLayout {
+        horizontal-stretch: 1;
+        min-width: 0px;
+        preferred-width: 0px;
+        alignment: start;
+        if Player.spotlight-albums.length > 0: VerticalLayout {
+            padding-bottom: 10px;
+            SectionLabel {
+                label: Strings.now-albums-by;
+            }
+        }
+        albums := Rectangle {
+            property <length> tile: (self.width - root.gap) / 2;
+            height: ceil(Player.spotlight-albums.length / 2) * (self.tile + 40px + root.gap);
+            for album[index] in Player.spotlight-albums: SpotlightAlbumTile {
+                x: mod(index, 2) * (albums.tile + root.gap);
+                y: floor(index / 2) * (albums.tile + 40px + root.gap);
+                width: albums.tile;
+                album: album;
+                clicked => { Player.spotlight-album-clicked(index); }
+            }
+        }
+    }
+}

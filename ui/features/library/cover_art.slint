@@ -1,0 +1,11 @@
+import { ArtTile } from "../../atoms/art_tile.slint";
+import { Covers } from "covers.slint";
+
+// An art tile that shows a library track's cover, loading it when the tile
+// first appears. A `track-id` of 0 stays a gradient.
+export component CoverArt inherits ArtTile {
+    in property <int> track-id;
+
+    cover: Covers.thumbnail(root.track-id, Covers.revision);
+    unavailable: Covers.unavailable(root.track-id, Covers.revision);
+}

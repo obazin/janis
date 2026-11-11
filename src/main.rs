@@ -16,6 +16,7 @@ mod background;
 mod covers;
 mod effects;
 mod equalizer;
+mod halo;
 mod library;
 mod library_view;
 mod logging;

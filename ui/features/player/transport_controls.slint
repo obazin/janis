@@ -1,0 +1,87 @@
+import { Tokens } from "../../tokens.slint";
+import { Icons } from "../../icons.slint";
+import { Strings } from "strings.slint";
+import { Glyph, GlyphMode } from "../../atoms/glyph.slint";
+import { IconButton, IconButtonIdentifier, IconButtonSize, IconButtonTone } from "../../atoms/icon_button.slint";
+import { PlayCircle } from "../../molecules/play_circle.slint";
+import { Player } from "player.slint";
+import { VolumeSlider } from "volume_slider.slint";
+
+// Shuffle, previous, play / pause, next, repeat — and the volume.
+export component TransportControls inherits HorizontalLayout {
+    spacing: 20px;
+
+    VerticalLayout {
+        alignment: center;
+        IconButton {
+            identifier: IconButtonIdentifier.transport-shuffle;
+            icon: Icons.shuffle;
+            label: Strings.player-shuffle;
+            active: Player.shuffle;
+            tone: IconButtonTone.muted;
+            clicked => { Player.shuffle-toggled(); }
+        }
+    }
+    VerticalLayout {
+        alignment: center;
+        IconButton {
+            identifier: IconButtonIdentifier.transport-previous;
+            icon: Icons.previous;
+            label: Strings.player-previous;
+            mode: GlyphMode.fill;
+            size: IconButtonSize.medium;
+            clicked => { Player.previous(); }
+        }
+    }
+    // Room for the play button's ring to swell into.
+    Rectangle {
+        width: 60px;
+        height: 88px;
+        PlayCircle {
+            identifier: IconButtonIdentifier.transport-play-pause;
+            playing: Player.playing;
+            label: Player.playing ? Strings.player-pause : Strings.player-play;
+            clicked => { Player.toggled(); }
+        }
+    }
+    VerticalLayout {
+        alignment: center;
+        IconButton {
+            identifier: IconButtonIdentifier.transport-next;
+            icon: Icons.next;
+            label: Strings.player-next;
+            mode: GlyphMode.fill;
+            size: IconButtonSize.medium;
+            clicked => { Player.next(); }
+        }
+    }
+    VerticalLayout {
+        alignment: center;
+        IconButton {
+            identifier: IconButtonIdentifier.transport-repeat;
+            icon: Icons.repeat;
+            label: Strings.player-repeat;
+            active: Player.repeat;
+            tone: IconButtonTone.muted;
+            clicked => { Player.repeat-toggled(); }
+        }
+    }
+    Rectangle {
+        horizontal-stretch: 1;
+    }
+    VerticalLayout {
+        alignment: center;
+        Glyph {
+            width: 19px;
+            height: 19px;
+            icon: Icons.volume;
+            tint: Tokens.text-muted;
+        }
+    }
+    VerticalLayout {
+        alignment: center;
+        VolumeSlider {
+            label: Strings.player-volume;
+        }
+    }
+}

@@ -4,15 +4,16 @@
 import { Tokens, Fonts, Typography } from "tokens.slint";
 import { Icons } from "icons.slint";
 import { Strings } from "strings.slint";
-import { EmptyState } from "atoms/empty_state.slint";
 import { SidebarNav } from "organisms/sidebar_nav.slint";
 import { Toaster } from "organisms/toaster.slint";
 import { Shell } from "shell.slint";
 import { Player } from "features/player/player.slint";
 import { MiniPlayer } from "features/player/mini_player.slint";
+import { Covers } from "features/library/covers.slint";
 import { AppTitlebar } from "screens/app_titlebar.slint";
+import { NowPlayingScreen } from "screens/now_playing_screen.slint";
 
-export { Strings, Shell, Player }
+export { Strings, Shell, Player, Covers, Tokens }
 
 export component AppWindow inherits Window {
     title: "Janis";
@@ -58,13 +59,7 @@ export component AppWindow inherits Window {
 
             Rectangle {
                 horizontal-stretch: 1;
-                if Shell.screen == "now-playing": EmptyState {
-                    icon: Icons.now-playing;
-                    title: Strings.now-empty-title;
-                    description: Strings.now-empty-desc;
-                    action-label: Strings.now-empty-cta;
-                    action-icon: Icons.plus;
-                }
+                if Shell.screen == "now-playing": NowPlayingScreen { }
             }
         }
 

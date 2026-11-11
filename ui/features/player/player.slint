@@ -1,21 +1,83 @@
 // What is playing, as the player's components show it. Filled by the
-// application; the callbacks are the listener's transport actions.
+// application; the callbacks are the listener's actions.
+
+// The three lists the Now Playing queue card switches between.
+export enum QueueView { up-next, playlist, album }
+
+export struct QueueRow {
+    track-id: int,
+    // The row's number, zero-padded.
+    number: string,
+    title: string,
+    artist: string,
+    duration: string,
+    gradient-index: int,
+    current: bool,
+}
+
+export struct SpotlightTrack {
+    title: string,
+    album: string,
+}
+
+export struct SpotlightAlbum {
+    title: string,
+    detail: string,
+    // The track whose cover stands for the album.
+    track-id: int,
+    gradient-index: int,
+}
 
 export global Player {
     // ── Transport ─────────────────────────────────────────────────────────
     // False when nothing is loaded.
     in property <bool> active;
+    // A local track is loaded.
+    in property <bool> local;
+    // A station is loaded.
+    in property <bool> radio;
     in property <bool> playing;
     in property <bool> shuffle;
     in property <bool> repeat;
     in property <float> volume: 0.8;
+    in property <string> elapsed: "0:00";
+    // The track's length, or the "live" label for a station.
+    in property <string> total: "0:00";
 
-    // ── What the mini player names ────────────────────────────────────────
+    // ── What is playing ───────────────────────────────────────────────────
     in property <string> title: "—";
+    // The mini player's second line: the artist, or the station's genre.
     in property <string> subtitle;
     in property <image> cover;
     in property <int> gradient-index;
     in property <bool> cover-unavailable;
+    in property <string> initials;
+    // The rotating glow behind the Now Playing art.
+    in property <image> halo;
+
+    // ── Now Playing details; an empty text hides its column ───────────────
+    in property <string> eyebrow;
+    in property <string> hero-title;
+    in property <string> quality;
+    in property <bool> lossless;
+    in property <string> artist;
+    in property <string> composer;
+    in property <string> album;
+    in property <string> album-line;
+    in property <string> genre;
+    in property <string> station-name;
+    in property <string> station-genre;
+
+    // ── Queue card ────────────────────────────────────────────────────────
+    in property <QueueView> queue-view;
+    in property <[QueueRow]> queue-rows;
+    in property <string> queue-heading;
+
+    // ── Artist spotlight ──────────────────────────────────────────────────
+    in property <bool> spotlight-shown;
+    in property <string> spotlight-heading;
+    in property <[SpotlightTrack]> spotlight-tracks;
+    in property <[SpotlightAlbum]> spotlight-albums;
 
     // ── Waveform ──────────────────────────────────────────────────────────
     // Each waveform view reports its size, and gets the trace back as path
@@ -39,4 +101,8 @@ export global Player {
     callback volume-changed(volume: float);
     // A fraction of the current track.
     callback seek(fraction: float);
+    callback queue-view-selected(view: QueueView);
+    callback queue-row-clicked(index: int);
+    callback spotlight-track-clicked(index: int);
+    callback spotlight-album-clicked(index: int);
 }
