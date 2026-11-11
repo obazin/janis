@@ -20,6 +20,10 @@ pub type Pixels = SharedPixelBuffer<Rgba8Pixel>;
 pub const HERO_SIDE: u32 = 800;
 /// The longest side of the art shown in lists and grids, in pixels.
 pub const THUMBNAIL_SIDE: u32 = 256;
+/// The longest side a cover's file may have, in pixels, to be decoded at all.
+const LARGEST_SOURCE_SIDE: u32 = 8192;
+/// The most memory decoding one cover may take.
+const LARGEST_DECODE_BYTES: u64 = 512 * 1024 * 1024;
 /// Covers kept in memory at once for lists and grids.
 pub const THUMBNAIL_LIMIT: usize = 300;
 
@@ -48,8 +52,19 @@ fn decode_base64(encoded: &str, longest_side: u32) -> Result<Pixels, String> {
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(encoded)
         .map_err(|error| format!("decode cover base64: {error}"))?;
-    let picture =
-        image::load_from_memory(&bytes).map_err(|error| format!("decode cover image: {error}"))?;
+    let mut reader = image::ImageReader::new(std::io::Cursor::new(bytes))
+        .with_guessed_format()
+        .map_err(|error| format!("recognise cover image: {error}"))?;
+    // Art comes from files and stations Janis does not control: a picture
+    // that would decode to more than this is refused rather than allocated.
+    let mut limits = image::Limits::default();
+    limits.max_image_width = Some(LARGEST_SOURCE_SIDE);
+    limits.max_image_height = Some(LARGEST_SOURCE_SIDE);
+    limits.max_alloc = Some(LARGEST_DECODE_BYTES);
+    reader.limits(limits);
+    let picture = reader
+        .decode()
+        .map_err(|error| format!("decode cover image: {error}"))?;
     let picture = if picture.width().max(picture.height()) > longest_side {
         picture.thumbnail(longest_side, longest_side)
     } else {
@@ -143,6 +158,15 @@ mod tests {
 
         cache.clear();
         assert_eq!(cache.get(3), None);
+    }
+
+    #[test]
+    fn an_oversized_cover_is_refused() {
+        let url = format!(
+            "data:image/png;base64,{}",
+            encoded_png(LARGEST_SOURCE_SIDE + 1, 1)
+        );
+        assert!(data_url_cover(&url, 100).is_err());
     }
 
     #[test]
