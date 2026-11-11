@@ -6,6 +6,8 @@
 //! window. Anything slow — file reads, picture decoding, network connects —
 //! runs on another thread and comes back through [`post`].
 
+mod library_screens;
+
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::Arc;
@@ -19,7 +21,7 @@ use crate::covers::{self, Pixels};
 use crate::effects::Effect;
 use crate::equalizer::{self, Equalizer};
 use crate::halo;
-use crate::library::{self, LoudnessStore, Track};
+use crate::library::{self, LoudnessStore, ScanReport, Track, WatchedFolder};
 use crate::library_view::{self, AlbumGroup, ArtistGroup, QueueView};
 use crate::notifications::{self, Notifications};
 use crate::persistence::{self, DbState, Preferences};
@@ -115,6 +117,17 @@ pub struct Application {
     spotlight_tracks: Rc<VecModel<user_interface::SpotlightTrack>>,
     spotlight_albums: Rc<VecModel<user_interface::SpotlightAlbum>>,
     equalizer_gains: Rc<VecModel<f32>>,
+    search: RefCell<String>,
+    folders: RefCell<Vec<WatchedFolder>>,
+    scanning: Cell<bool>,
+    last_report: Cell<Option<ScanReport>>,
+    library_screen: RefCell<library_screens::LibraryScreen>,
+    library_albums: Rc<VecModel<user_interface::LibraryCard>>,
+    library_artists: Rc<VecModel<user_interface::LibraryCard>>,
+    library_songs: Rc<VecModel<user_interface::LibraryTrack>>,
+    library_recent: Rc<VecModel<user_interface::LibraryTrack>>,
+    library_selection_tracks: Rc<VecModel<user_interface::LibraryTrack>>,
+    library_worker: Worker,
     toasts: Rc<VecModel<Toast>>,
     picture_worker: Worker,
     frame_timer: Timer,
@@ -129,6 +142,7 @@ impl Application {
         let database = Arc::new(persistence::init(platform::data_directory()?)?);
         let preferences = persistence::get_preferences(&database)?;
         let tracks = library::list_tracks(&database)?;
+        let folders = library::list_watched_folders(&database)?;
 
         let bridge = Arc::new(EngineBridge::new(|event| {
             post(move |application| application.on_engine_event(event));
@@ -169,6 +183,17 @@ impl Application {
             spotlight_tracks: Rc::new(VecModel::default()),
             spotlight_albums: Rc::new(VecModel::default()),
             equalizer_gains: Rc::new(VecModel::default()),
+            search: RefCell::new(String::new()),
+            folders: RefCell::new(folders),
+            scanning: Cell::new(false),
+            last_report: Cell::new(None),
+            library_screen: RefCell::new(library_screens::LibraryScreen::default()),
+            library_albums: Rc::new(VecModel::default()),
+            library_artists: Rc::new(VecModel::default()),
+            library_songs: Rc::new(VecModel::default()),
+            library_recent: Rc::new(VecModel::default()),
+            library_selection_tracks: Rc::new(VecModel::default()),
+            library_worker: Worker::new("janis library")?,
             toasts,
             picture_worker: Worker::new("janis pictures")?,
             frame_timer: Timer::default(),
@@ -186,6 +211,7 @@ impl Application {
         application.refresh_player();
         application.refresh_now_playing_lists();
         application.refresh_equalizer();
+        application.refresh_library();
         Ok(application)
     }
 
@@ -246,6 +272,11 @@ impl Application {
         shell.on_toast_dismissed(self.handler(|application, id: i32| {
             application.dismiss_notification(u64::try_from(id).unwrap_or_default());
         }));
+
+        shell.on_search_edited(self.handler(|application, search: slint::SharedString| {
+            *application.search.borrow_mut() = search.into();
+        }));
+        self.connect_library();
 
         let player = self.window.global::<user_interface::Player>();
         player.on_toggled(self.action(|application| {
@@ -398,6 +429,8 @@ impl Application {
         self.refresh_player();
         self.refresh_now_playing_lists();
         self.refresh_equalizer();
+        self.refresh_library();
+        self.refresh_local_files();
     }
 
     // ── Playback ────────────────────────────────────────────────────────────
@@ -692,9 +725,17 @@ impl Application {
             }
         };
         self.thumbnails.borrow_mut().insert(track_id, thumbnail);
+        self.bump_cover_revision();
+    }
+
+    /// Tells every cover tile to look its art up again.
+    fn bump_cover_revision(&self) {
         let covers = self.window.global::<Covers>();
         covers.set_revision(covers.get_revision().wrapping_add(1));
     }
+
+    /// Pushes the Local Files screen's state to the window.
+    fn refresh_local_files(&self) {}
 
     fn notify_cover_unavailable(&self) {
         self.notify_error("error.cover", Vec::new(), Some("cover-unavailable"));

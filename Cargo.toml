@@ -32,6 +32,8 @@ slint = { version = "1.18", default-features = false, features = [
 # Decodes cover art (embedded in files, or announced by a station) into pixels
 # the interface can draw.
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "gif", "bmp"] }
+# The system's file and folder pickers.
+rfd = "0.15"
 # Cover art reaches Janis base64-encoded, from the audio facade and from
 # stations alike.
 base64 = "0.22"

@@ -1,0 +1,35 @@
+import { Tokens, Fonts, Typography, Accent } from "../tokens.slint";
+import { Eyebrow } from "../atoms/eyebrow.slint";
+
+// The top of a screen: its colored eyebrow and its title, with room on the
+// right for the screen's main action.
+export component ScreenHeader inherits HorizontalLayout {
+    in property <string> eyebrow;
+    in property <Accent> tone;
+    in property <string> title;
+
+    spacing: 16px;
+
+    VerticalLayout {
+        horizontal-stretch: 1;
+        spacing: 8px;
+        Eyebrow {
+            label: root.eyebrow;
+            tone: root.tone;
+        }
+        Text {
+            text: root.title;
+            font-family: Fonts.display;
+            font-weight: Typography.black;
+            font-size: Typography.display;
+            letter-spacing: Typography.tracking-tight * Typography.display;
+            color: Tokens.text;
+            horizontal-alignment: left;
+        }
+    }
+
+    VerticalLayout {
+        alignment: end;
+        @children
+    }
+}

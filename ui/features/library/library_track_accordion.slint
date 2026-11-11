@@ -1,0 +1,68 @@
+import { Tokens } from "../../tokens.slint";
+import { Icons } from "../../icons.slint";
+import { Strings } from "strings.slint";
+import { IconButton, IconButtonIdentifier } from "../../atoms/icon_button.slint";
+import { SectionLabel } from "../../atoms/section_label.slint";
+import { LibraryTrack } from "library.slint";
+import { TrackList } from "track_list.slint";
+
+// The tracks of the album or artist browsed in the grid, shown in place under
+// its card, with a way to put them away.
+export component LibraryTrackAccordion inherits Rectangle {
+    in property <string> heading;
+    in property <[LibraryTrack]> tracks;
+    in property <length> view-top;
+    in property <length> view-height;
+    callback track-clicked(index: int);
+    callback closed();
+
+    property <length> header-height: 59px;
+
+    height: list.height;
+    background: Tokens.panel;
+
+    list := TrackList {
+        y: 0;
+        tracks: root.tracks;
+        view-top: root.view-top;
+        view-height: root.view-height;
+        rows-top: root.header-height;
+        clicked(index) => { root.track-clicked(index); }
+    }
+
+    HorizontalLayout {
+        y: 0;
+        height: root.header-height;
+        padding-left: 16px;
+        padding-right: 16px;
+        VerticalLayout {
+            horizontal-stretch: 1;
+            alignment: center;
+            SectionLabel {
+                label: root.heading;
+                overflow: elide;
+            }
+        }
+        VerticalLayout {
+            alignment: center;
+            Rectangle {
+                width: 34px;
+                height: 34px;
+                border-radius: 17px;
+                background: Tokens.chip-hover;
+                IconButton {
+                    identifier: IconButtonIdentifier.library-collapse-selection;
+                    icon: Icons.close;
+                    label: Strings.library-collapse-selection;
+                    clicked => { root.closed(); }
+                }
+            }
+        }
+    }
+
+    Rectangle {
+        y: root.header-height - 1px;
+        height: 1px;
+        background: Tokens.border;
+    }
+}

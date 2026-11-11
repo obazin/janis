@@ -208,6 +208,7 @@
     "error.playback": "Lecture impossible — {message}",
     "error.radio": "Connexion impossible à {name}",
     "error.cover": "Illustration indisponible — la source est peut-être injoignable",
+    "error.library": "Impossible de mettre à jour la bibliothèque — {message}",
     "error.preferences": "Votre choix n'a pas pu être enregistré — il sera oublié au prochain lancement",
     "notification.dismiss": "Fermer"
 }

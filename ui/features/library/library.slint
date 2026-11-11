@@ -1,0 +1,59 @@
+// The track library as the library screens show it. Filled by the
+// application; the callbacks are the listener's actions.
+
+// A card of the album and artist grids.
+export struct LibraryCard {
+    key: string,
+    title: string,
+    subtitle: string,
+    detail: string,
+    // The track whose cover stands for the card.
+    track-id: int,
+    gradient-index: int,
+}
+
+// A row of a track list.
+export struct LibraryTrack {
+    track-id: int,
+    // The row's number, zero-padded.
+    number: string,
+    title: string,
+    artist: string,
+    composer: string,
+    format: string,
+    duration: string,
+    gradient-index: int,
+}
+
+export global Library {
+    // True when the library holds no track at all.
+    in property <bool> empty: true;
+    // The open tab: playlists, artists, albums or songs.
+    in property <string> tab: "albums";
+
+    // What the search kept.
+    in property <[LibraryCard]> albums;
+    in property <[LibraryCard]> artists;
+    in property <[LibraryTrack]> songs;
+    in property <[LibraryTrack]> recent;
+
+    // The album or artist browsed in place: its place among the cards of the
+    // open tab, or -1 when nothing is selected or the search hides it.
+    in property <int> selection-index: -1;
+    // True while an album or artist is selected, shown or not.
+    in property <bool> selection-present;
+    in property <string> selection-heading;
+    in property <[LibraryTrack]> selection-tracks;
+
+    callback tab-selected(tab: string);
+    callback album-clicked(index: int);
+    callback artist-clicked(index: int);
+    callback song-clicked(index: int);
+    callback recent-clicked(index: int);
+    callback selection-track-clicked(index: int);
+    callback selection-closed();
+    // Pick audio files to add.
+    callback add-music();
+    // Pick a folder to watch.
+    callback add-folder();
+}

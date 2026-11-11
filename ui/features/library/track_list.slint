@@ -1,0 +1,35 @@
+import { Tokens, Metrics } from "../../tokens.slint";
+import { LibraryTrack } from "library.slint";
+import { TrackRow } from "track_row.slint";
+
+// A bordered list of track rows that draws only the rows in view. The screen
+// tells it which part of it is visible: `view-top` is where the visible
+// window starts, measured from the top of the list.
+export component TrackList inherits Rectangle {
+    in property <[LibraryTrack]> tracks;
+    in property <length> view-top;
+    in property <length> view-height;
+    // Leaves the top of the box to something else, like a header.
+    in property <length> rows-top;
+    callback clicked(index: int);
+
+    out property <length> row-height: 60px;
+    property <int> first: max(0, floor((root.view-top - root.rows-top) / root.row-height));
+    property <int> count: ceil(root.view-height / root.row-height) + 1;
+
+    height: root.rows-top + root.tracks.length * root.row-height;
+    border-radius: Metrics.radius-card;
+    border-width: 1px;
+    border-color: Tokens.border;
+    clip: true;
+
+    for offset in root.count: TrackRow {
+        property <int> index: root.first + offset;
+        y: root.rows-top + self.index * root.row-height;
+        height: root.row-height;
+        visible: self.index < root.tracks.length;
+        track: root.tracks[self.index];
+        ruled: self.index > 0;
+        clicked => { root.clicked(self.index); }
+    }
+}
