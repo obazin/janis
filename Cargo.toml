@@ -76,8 +76,9 @@ audio-stack-rs = { git = "https://github.com/obazin/audio-stack-rs", tag = "spec
 opt-level = 2
 
 # ── Distribution ──────────────────────────────────────────────────────────────
-# `just release` builds the release binary, then `cargo packager --release`
-# makes the installers of the platform it runs on, into `dist/`: a DMG on macOS, NSIS and MSI installers on Windows, an
+# `just release-macos` (or `release-linux`, `release-windows`) builds the
+# release binary, then `cargo packager --release` makes the installers of the
+# platform it runs on, into `dist/`: a DMG on macOS, NSIS and MSI installers on Windows, an
 # AppImage and a deb on Linux. No signing certificate is involved: the macOS
 # bundle is ad-hoc signed, the others are unsigned.
 [package.metadata.packager]

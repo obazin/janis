@@ -72,9 +72,10 @@ curl -fL --progress-bar -o "${work_directory}/${disk_image_name}" "$download_url
 
 echo "Opening the disk image ..."
 mkdir -p "$mount_point"
-# The image embeds the license, so hdiutil asks for agreement before
-# mounting; the "Y" answers that prompt (hdiutil cancels it under -quiet,
-# hence the redirect instead of the flag).
+# Images of earlier releases embed the license, so hdiutil asks for
+# agreement before mounting them; the "Y" answers that prompt and is ignored
+# otherwise (hdiutil cancels the prompt under -quiet, hence the redirect
+# instead of the flag).
 printf 'Y\n' | hdiutil attach -nobrowse -readonly -mountpoint "$mount_point" "${work_directory}/${disk_image_name}" >/dev/null \
     || fail "could not open the disk image"
 [ -d "${mount_point}/${application_name}.app" ] || fail "the disk image does not contain ${application_name}.app"
