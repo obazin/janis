@@ -1,0 +1,53 @@
+import { Tokens, Fonts, Typography } from "../tokens.slint";
+import { Icons } from "../icons.slint";
+import { Glyph } from "glyph.slint";
+
+// Album or cover art tile. Shows real cover art when given, otherwise a
+// deterministic prism gradient picked by `gradient-index`, with an optional
+// initials monogram. The caller sizes it — the tile fills its box.
+//
+// When art was expected but its source failed, the caller sets `unavailable`:
+// the tile falls back to the gradient and shows a muted mark, so a failed load
+// reads differently from art that simply doesn't exist.
+export component ArtTile inherits Rectangle {
+    in property <image> cover;
+    in property <int> gradient-index;
+    in property <string> initials;
+    in property <bool> unavailable;
+    in property <length> radius;
+
+    property <bool> has-cover: root.cover.width > 0;
+
+    border-radius: root.radius;
+    clip: true;
+    background: root.has-cover ? transparent : Tokens.art-gradient(root.gradient-index);
+
+    if root.has-cover: Image {
+        width: 100%;
+        height: 100%;
+        source: root.cover;
+        image-fit: ImageFit.cover;
+    }
+
+    if !root.has-cover && root.unavailable: Glyph {
+        width: min(root.width / 3, 32px);
+        height: self.width;
+        icon: Icons.image-off;
+        weight: 1.4;
+        tint: Tokens.unavailable-mark;
+    }
+
+    if !root.has-cover && !root.unavailable && root.initials != "": Text {
+        x: 10px;
+        y: root.height - self.height - 8px;
+        text: root.initials;
+        font-family: Fonts.display;
+        font-weight: Typography.black;
+        font-size: Typography.heading-lg;
+        color: Tokens.art-initials;
+    }
+
+    Rectangle {
+        background: Tokens.art-gloss;
+    }
+}

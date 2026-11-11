@@ -1,0 +1,32 @@
+import { Tokens } from "../tokens.slint";
+
+export enum GlyphMode { stroke, fill }
+
+// One icon from `Icons`, drawn on its 24 × 24 grid at whatever size the
+// caller gives it.
+export component Glyph inherits Rectangle {
+    in property <string> icon;
+    in property <GlyphMode> mode: GlyphMode.stroke;
+    in property <brush> tint: Tokens.text;
+    // Stroke width on the 24-unit grid.
+    in property <float> weight: 2;
+
+    property <length> stroke: root.mode == GlyphMode.stroke ? root.weight * root.width / 24 : 0px;
+
+    // A stroked path is laid out inside its stroke, so the path is grown by
+    // the stroke to keep the glyph on its grid.
+    Path {
+        x: -root.stroke / 2;
+        y: -root.stroke / 2;
+        width: root.width + root.stroke;
+        height: root.height + root.stroke;
+        viewbox-width: 24;
+        viewbox-height: 24;
+        commands: root.icon;
+        fill: root.mode == GlyphMode.fill ? root.tint : transparent;
+        stroke: root.mode == GlyphMode.stroke ? root.tint : transparent;
+        stroke-width: root.stroke;
+        stroke-line-cap: LineCap.round;
+        stroke-line-join: LineJoin.round;
+    }
+}

@@ -1,0 +1,64 @@
+import { Tokens, Metrics } from "../tokens.slint";
+import { SectionLabel } from "../atoms/section_label.slint";
+import { NavItem } from "../molecules/nav_item.slint";
+
+export struct NavEntry {
+    id: string,
+    label: string,
+    icon: string,
+}
+
+export struct NavSection {
+    label: string,
+    items: [NavEntry],
+}
+
+// The sidebar: labelled sections of destinations, and one pinned to the bottom.
+export component SidebarNav inherits Rectangle {
+    in property <[NavSection]> sections;
+    in property <NavEntry> footer-item;
+    in property <string> active-id;
+    callback item-clicked(id: string);
+
+    width: Metrics.sidebar-width;
+
+    VerticalLayout {
+        padding-left: 14px;
+        padding-right: 14px;
+        padding-top: 20px;
+        padding-bottom: 20px;
+        spacing: 6px;
+        for section[index] in root.sections: VerticalLayout {
+            padding-top: index == 0 ? 0px : 14px;
+            spacing: 6px;
+            HorizontalLayout {
+                padding-left: 12px;
+                padding-bottom: 6px;
+                SectionLabel {
+                    label: section.label;
+                }
+            }
+            for item in section.items: NavItem {
+                label: item.label;
+                icon: item.icon;
+                active: root.active-id == item.id;
+                clicked => { root.item-clicked(item.id); }
+            }
+        }
+        Rectangle {
+            vertical-stretch: 1;
+        }
+        NavItem {
+            label: root.footer-item.label;
+            icon: root.footer-item.icon;
+            active: root.active-id == root.footer-item.id;
+            clicked => { root.item-clicked(root.footer-item.id); }
+        }
+    }
+
+    Rectangle {
+        x: root.width - 1px;
+        width: 1px;
+        background: Tokens.divider;
+    }
+}

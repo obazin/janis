@@ -1,0 +1,55 @@
+import { Tokens, Typography, Metrics, Motion } from "../tokens.slint";
+import { Glyph } from "../atoms/glyph.slint";
+
+// One row of the sidebar: an icon and a label. The active row wears the
+// accent wash and outline.
+export component NavItem inherits Rectangle {
+    in property <string> label;
+    in property <string> icon;
+    in property <bool> active;
+    callback clicked();
+
+    height: self.preferred-height;
+    border-radius: Metrics.radius-button;
+    border-width: root.active ? 1px : 0px;
+    border-color: Tokens.accent-ring;
+    background: root.active ? Tokens.nav-active : touch.has-hover ? Tokens.panel : transparent;
+    accessible-role: button;
+    accessible-label: root.label;
+    accessible-checkable: true;
+    accessible-checked: root.active;
+    accessible-action-default => { root.clicked(); }
+
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+        padding-top: 11px;
+        padding-bottom: 11px;
+        spacing: 12px;
+        VerticalLayout {
+            alignment: center;
+            Glyph {
+                width: 19px;
+                height: 19px;
+                icon: root.icon;
+                weight: 1.9;
+                tint: root.active ? Tokens.accent : Tokens.nav-idle;
+            }
+        }
+        Text {
+            text: root.label;
+            font-size: Typography.body-em;
+            font-weight: Typography.semibold;
+            color: root.active ? Tokens.text : touch.has-hover ? Tokens.text-soft : Tokens.nav-idle;
+            vertical-alignment: center;
+            horizontal-alignment: left;
+            overflow: elide;
+            animate color { duration: Motion.fast; }
+        }
+    }
+
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}

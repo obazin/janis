@@ -1,0 +1,39 @@
+import { Tokens, Typography, Motion } from "../tokens.slint";
+
+// A selectable pill.
+export component Chip inherits Rectangle {
+    in property <string> label;
+    in property <bool> active;
+    callback clicked();
+
+    width: self.preferred-width;
+    height: self.preferred-height;
+    border-radius: self.height / 2;
+    border-width: root.active ? 0px : 1px;
+    border-color: Tokens.border-strong;
+    background: root.active ? Tokens.accent : touch.has-hover ? Tokens.chip-hover : Tokens.chip;
+    animate background { duration: Motion.fast; }
+    accessible-role: button;
+    accessible-label: root.label;
+    accessible-checkable: true;
+    accessible-checked: root.active;
+    accessible-action-default => { root.clicked(); }
+
+    HorizontalLayout {
+        padding-left: 15px;
+        padding-right: 15px;
+        padding-top: 8px;
+        padding-bottom: 8px;
+        Text {
+            text: root.label;
+            font-size: Typography.body;
+            font-weight: Typography.bold;
+            color: root.active ? Tokens.on-accent : Tokens.text-soft;
+        }
+    }
+
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}

@@ -1,0 +1,51 @@
+import { Tokens, Typography, Motion } from "../tokens.slint";
+import { Glyph } from "glyph.slint";
+
+// An outlined pill button, with an optional leading icon.
+export component GhostButton inherits Rectangle {
+    in property <string> label;
+    in property <string> icon;
+    callback clicked();
+
+    property <color> foreground: touch.has-hover ? Tokens.text : Tokens.text-muted;
+
+    width: self.preferred-width;
+    height: self.preferred-height;
+    border-radius: self.height / 2;
+    border-width: 1px;
+    border-color: Tokens.border-emphasis;
+    background: touch.has-hover ? Tokens.chip : transparent;
+    animate background { duration: Motion.fast; }
+    accessible-role: button;
+    accessible-label: root.label;
+    accessible-action-default => { root.clicked(); }
+
+    HorizontalLayout {
+        padding-left: 14px;
+        padding-right: 14px;
+        padding-top: 8px;
+        padding-bottom: 8px;
+        spacing: 8px;
+        if root.icon != "": VerticalLayout {
+            alignment: center;
+            Glyph {
+                width: 15px;
+                height: 15px;
+                icon: root.icon;
+                tint: root.foreground;
+            }
+        }
+        Text {
+            text: root.label;
+            font-size: Typography.body;
+            font-weight: Typography.bold;
+            color: root.foreground;
+            vertical-alignment: center;
+        }
+    }
+
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}

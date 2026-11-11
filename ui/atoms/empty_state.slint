@@ -1,0 +1,62 @@
+import { Tokens, Fonts, Typography } from "../tokens.slint";
+import { Glyph } from "glyph.slint";
+import { PrimaryButton } from "primary_button.slint";
+
+// What a screen shows when it has nothing to list: an icon, a title, a
+// sentence, and optionally the action that fixes it.
+export component EmptyState inherits VerticalLayout {
+    in property <string> icon;
+    in property <string> title;
+    in property <string> description;
+    // Leave empty for no call to action.
+    in property <string> action-label;
+    in property <string> action-icon;
+    callback action-clicked();
+
+    alignment: center;
+    spacing: 14px;
+    padding-top: 64px;
+    padding-bottom: 64px;
+
+    HorizontalLayout {
+        alignment: center;
+        Glyph {
+            width: 46px;
+            height: 46px;
+            icon: root.icon;
+            weight: 1.6;
+            tint: Tokens.text-faint;
+        }
+    }
+
+    Text {
+        text: root.title;
+        font-family: Fonts.display;
+        font-weight: Typography.extrabold;
+        font-size: Typography.heading-md;
+        color: Tokens.text;
+        horizontal-alignment: center;
+    }
+
+    HorizontalLayout {
+        alignment: center;
+        Text {
+            max-width: 400px;
+            text: root.description;
+            font-size: Typography.body-em;
+            color: Tokens.text-muted;
+            horizontal-alignment: center;
+            wrap: word-wrap;
+        }
+    }
+
+    if root.action-label != "": HorizontalLayout {
+        alignment: center;
+        padding-top: 10px;
+        PrimaryButton {
+            label: root.action-label;
+            icon: root.action-icon;
+            clicked => { root.action-clicked(); }
+        }
+    }
+}

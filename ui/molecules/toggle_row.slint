@@ -1,0 +1,53 @@
+import { Tokens, Typography } from "../tokens.slint";
+import { Toggle } from "../atoms/toggle.slint";
+
+// A setting: its name, what it does, and its switch.
+export component ToggleRow inherits Rectangle {
+    in property <string> label;
+    in property <string> description;
+    in property <bool> checked;
+    // The last row of a group has no separator under it.
+    in property <bool> last;
+    callback toggled();
+
+    height: self.preferred-height;
+
+    HorizontalLayout {
+        padding-left: 18px;
+        padding-right: 18px;
+        padding-top: 15px;
+        padding-bottom: 15px;
+        spacing: 16px;
+        VerticalLayout {
+            alignment: center;
+            Text {
+                text: root.label;
+                font-size: Typography.heading-sm;
+                font-weight: Typography.semibold;
+                color: Tokens.text;
+                horizontal-alignment: left;
+            }
+            Text {
+                text: root.description;
+                font-size: Typography.caption;
+                color: Tokens.text-muted;
+                horizontal-alignment: left;
+                wrap: word-wrap;
+            }
+        }
+        VerticalLayout {
+            alignment: center;
+            Toggle {
+                checked: root.checked;
+                label: root.label;
+                toggled => { root.toggled(); }
+            }
+        }
+    }
+
+    if !root.last: Rectangle {
+        y: root.height - 1px;
+        height: 1px;
+        background: Tokens.divider;
+    }
+}
