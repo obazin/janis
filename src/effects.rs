@@ -19,8 +19,11 @@ pub enum Effect {
         index: usize,
     },
     /// Connect to a station off the user-interface thread, then report back
-    /// through `Player::station_connection_finished`.
-    ConnectStation(Station),
+    /// through `Player::station_connection_finished` with the same `epoch`.
+    ConnectStation {
+        station: Station,
+        epoch: u64,
+    },
     Toggle,
     Next,
     Previous,

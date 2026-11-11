@@ -7,7 +7,9 @@ use std::sync::Arc;
 
 use slint::ComponentHandle;
 
-use super::{gradient_index, interface_id, post, Application};
+use super::{
+    album_gradient_index, gradient_index, interface_id, post, with_application, Application,
+};
 use crate::audio;
 use crate::library::{self, ScanReport, Track, WatchedFolder};
 use crate::library_view::{
@@ -29,6 +31,10 @@ pub(super) struct LibraryScreen {
     shown_albums: Vec<AlbumGroup>,
     shown_artists: Vec<ArtistGroup>,
     local_tracks: Vec<Track>,
+    /// The Discover shelves, tile by tile.
+    recent_albums: Vec<AlbumGroup>,
+    rediscover_albums: Vec<AlbumGroup>,
+    shelf_artists: Vec<ArtistGroup>,
 }
 
 /// A fresh read of the library, taken off the interface thread.
@@ -137,6 +143,14 @@ impl Application {
             application.library_screen.borrow_mut().selection = None;
             application.refresh_library();
         }));
+        view.on_add_music(self.action(Application::add_files));
+        view.on_add_folder(self.action(Application::add_folder));
+        self.connect_local_files();
+        self.connect_discover();
+    }
+
+    fn connect_local_files(self: &std::rc::Rc<Self>) {
+        let view = self.window.global::<user_interface::Library>();
         view.set_local_tracks(self.library_local.clone().into());
         view.set_folders(self.library_folders.clone().into());
         view.on_local_track_clicked(self.handler(|application, index: i32| {
@@ -147,6 +161,10 @@ impl Application {
         view.on_folder_removed(self.handler(|application, id: i32| {
             application.remove_folder(i64::from(id));
         }));
+    }
+
+    fn connect_discover(self: &std::rc::Rc<Self>) {
+        let view = self.window.global::<user_interface::Library>();
         view.set_discover_recent(self.discover_recent.clone().into());
         view.set_discover_rediscover(self.discover_rediscover.clone().into());
         view.set_discover_artists(self.discover_artists.clone().into());
@@ -158,27 +176,27 @@ impl Application {
                 }
             }
         });
-        view.on_add_music(self.action(Application::add_files));
-        view.on_add_folder(self.action(Application::add_folder));
     }
 
     /// A click on a Discover tile plays the album or the artist it shows.
     fn play_shelf_tile(&self, shelf: &str, index: usize) {
-        let tracks = match shelf {
-            "recent" => self
-                .albums
-                .borrow()
-                .get(index)
-                .map(|album| album.tracks.clone()),
-            "rediscover" => library_view::rediscover(&self.albums.borrow())
-                .get(index)
-                .map(|album| album.tracks.clone()),
-            "artists" => self
-                .artists
-                .borrow()
-                .get(index)
-                .map(|artist| artist.tracks.clone()),
-            _ => None,
+        let tracks = {
+            let screen = self.library_screen.borrow();
+            match shelf {
+                "recent" => screen
+                    .recent_albums
+                    .get(index)
+                    .map(|album| album.tracks.clone()),
+                "rediscover" => screen
+                    .rediscover_albums
+                    .get(index)
+                    .map(|album| album.tracks.clone()),
+                "artists" => screen
+                    .shelf_artists
+                    .get(index)
+                    .map(|artist| artist.tracks.clone()),
+                _ => None,
+            }
         };
         if let Some(tracks) = tracks {
             self.play_queue(tracks, 0);
@@ -235,29 +253,22 @@ impl Application {
             &translations,
         ));
 
-        // The Discover shelves are built from the whole library, not from
-        // what the search kept.
-        self.discover_recent.set_vec(
-            albums
-                .iter()
-                .take(SHELF_TILE_COUNT)
-                .map(|album| album_card(album, &translations))
-                .collect::<Vec<_>>(),
+        Self::show_selection(
+            &screen,
+            &view,
+            &self.library_selection_tracks,
+            &translations,
         );
-        self.discover_rediscover.set_vec(
-            library_view::rediscover(&albums)
-                .into_iter()
-                .map(|album| album_card(album, &translations))
-                .collect::<Vec<_>>(),
-        );
-        self.discover_artists.set_vec(
-            artists
-                .iter()
-                .take(SHELF_TILE_COUNT)
-                .map(|artist| artist_card(artist, &translations))
-                .collect::<Vec<_>>(),
-        );
+    }
 
+    /// Pushes the album or artist browsed in place, and where its tile sits
+    /// in the grid of the open tab.
+    fn show_selection(
+        screen: &LibraryScreen,
+        view: &user_interface::Library<'_>,
+        rows: &slint::VecModel<LibraryTrack>,
+        translations: &Translations,
+    ) {
         let selection_index =
             screen
                 .selection
@@ -278,17 +289,55 @@ impl Application {
         match &screen.selection {
             Some(selection) => {
                 view.set_selection_heading(selection.label.as_str().into());
-                self.library_selection_tracks.set_vec(track_rows(
+                rows.set_vec(track_rows(
                     &selection.tracks,
                     selection.kind == SelectionKind::Album,
-                    &translations,
+                    translations,
                 ));
             }
             None => {
                 view.set_selection_heading(Default::default());
-                self.library_selection_tracks.set_vec(Vec::new());
+                rows.set_vec(Vec::new());
             }
         }
+    }
+
+    /// Rebuilds the Discover shelves. They are built from the whole library,
+    /// not from what the search kept.
+    pub(super) fn refresh_discover(&self) {
+        let translations = self.translations.borrow();
+        let albums = self.albums.borrow();
+        let artists = self.artists.borrow();
+        let mut screen = self.library_screen.borrow_mut();
+
+        screen.recent_albums = albums.iter().take(SHELF_TILE_COUNT).cloned().collect();
+        screen.rediscover_albums = library_view::rediscover(&albums)
+            .into_iter()
+            .cloned()
+            .collect();
+        screen.shelf_artists = artists.iter().take(SHELF_TILE_COUNT).cloned().collect();
+
+        self.discover_recent.set_vec(
+            screen
+                .recent_albums
+                .iter()
+                .map(|album| album_card(album, &translations))
+                .collect::<Vec<_>>(),
+        );
+        self.discover_rediscover.set_vec(
+            screen
+                .rediscover_albums
+                .iter()
+                .map(|album| album_card(album, &translations))
+                .collect::<Vec<_>>(),
+        );
+        self.discover_artists.set_vec(
+            screen
+                .shelf_artists
+                .iter()
+                .map(|artist| artist_card(artist, &translations))
+                .collect::<Vec<_>>(),
+        );
     }
 
     /// Pushes the Local Files screen's state to the window.
@@ -346,27 +395,36 @@ impl Application {
 
     // ── Changing the library ────────────────────────────────────────────────
 
-    /// File picker → ad-hoc import.
+    /// File picker → ad-hoc import. The dialog is awaited on the interface
+    /// thread's own loop, so the window goes on drawing behind it.
     pub(super) fn add_files(&self) {
-        let picked = rfd::FileDialog::new()
-            .add_filter("Audio", audio::AUDIO_EXTENSIONS)
+        let filter_name = self.translations.borrow().text("local.audioFiles");
+        let dialog = rfd::AsyncFileDialog::new()
+            .add_filter(filter_name, audio::AUDIO_EXTENSIONS)
             .pick_files();
-        if let Some(files) = picked {
-            self.import_paths(
-                files
+        await_dialog(async move {
+            if let Some(files) = dialog.await {
+                let paths = files
                     .iter()
-                    .map(|file| file.to_string_lossy().into_owned())
-                    .collect(),
-            );
-        }
+                    .map(|file| file.path().to_string_lossy().into_owned())
+                    .collect();
+                with_application(|application| application.import_paths(paths));
+            }
+        });
     }
 
     /// Folder picker → register and scan.
     pub(super) fn add_folder(&self) {
-        if let Some(folder) = rfd::FileDialog::new().pick_folder() {
-            let folder = folder.to_string_lossy().into_owned();
-            self.scan(move |database| library::add_watched_folder(database, &folder));
-        }
+        let dialog = rfd::AsyncFileDialog::new().pick_folder();
+        await_dialog(async move {
+            if let Some(folder) = dialog.await {
+                let folder = folder.path().to_string_lossy().into_owned();
+                with_application(|application| {
+                    application
+                        .scan(move |database| library::add_watched_folder(database, &folder));
+                });
+            }
+        });
     }
 
     pub(super) fn rescan(&self) {
@@ -422,9 +480,27 @@ impl Application {
         *self.artists.borrow_mut() = library_view::artists(&snapshot.tracks);
         *self.tracks.borrow_mut() = snapshot.tracks;
         *self.folders.borrow_mut() = snapshot.folders;
+        {
+            let mut screen = self.library_screen.borrow_mut();
+            screen.selection = screen.selection.take().and_then(|selection| {
+                library_view::renewed_selection(
+                    selection,
+                    &self.albums.borrow(),
+                    &self.artists.borrow(),
+                )
+            });
+        }
         // A rescan may have changed any file's art.
+        self.thumbnail_epoch.set(self.thumbnail_epoch.get() + 1);
         self.thumbnails.borrow_mut().clear();
         self.bump_cover_revision();
+    }
+}
+
+/// Waits for a system dialog on the interface thread's event loop.
+fn await_dialog(dialog: impl std::future::Future<Output = ()> + 'static) {
+    if let Err(error) = slint::spawn_local(dialog) {
+        log::error!("open a system dialog: {error}");
     }
 }
 
@@ -451,11 +527,7 @@ fn album_card(album: &AlbumGroup, translations: &Translations) -> LibraryCard {
             .first()
             .map(|track| interface_id(track.id))
             .unwrap_or_default(),
-        gradient_index: text::art_gradient_index(&format!(
-            "{}-{}",
-            album.artist.as_deref().unwrap_or(""),
-            album.album.as_deref().unwrap_or("")
-        )) as i32,
+        gradient_index: album_gradient_index(album),
     }
 }
 

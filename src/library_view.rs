@@ -227,6 +227,50 @@ pub fn album_tracks_of(groups: &[AlbumGroup], track: &Track) -> Vec<Track> {
         .unwrap_or_else(|| vec![track.clone()])
 }
 
+/// The tracks the artist spotlight shows around `track`: the first few of
+/// its artist.
+pub fn spotlight_tracks(groups: &[ArtistGroup], track: &Track) -> Vec<Track> {
+    artist_group_of(groups, track)
+        .map(|group| group.tracks.iter().take(SPOTLIGHT_COUNT).cloned().collect())
+        .unwrap_or_default()
+}
+
+/// The albums the artist spotlight shows around `track`: the first few
+/// under its artist's name.
+pub fn spotlight_albums(groups: &[AlbumGroup], track: &Track) -> Vec<AlbumGroup> {
+    let Some(artist) = track.artist.as_ref() else {
+        return Vec::new();
+    };
+    groups
+        .iter()
+        .filter(|album| album.artist.as_ref() == Some(artist))
+        .take(SPOTLIGHT_COUNT)
+        .cloned()
+        .collect()
+}
+
+/// What a click on a spotlight track plays: everything by its artist,
+/// starting from the chosen track — or the track alone when the library no
+/// longer has its artist.
+pub fn artist_queue_from(groups: &[ArtistGroup], chosen: &Track) -> (Vec<Track>, usize) {
+    let tracks = artist_group_of(groups, chosen)
+        .map(|group| group.tracks.clone())
+        .unwrap_or_else(|| vec![chosen.clone()]);
+    let start = tracks
+        .iter()
+        .position(|track| track.id == chosen.id)
+        .unwrap_or_default();
+    (tracks, start)
+}
+
+fn artist_group_of<'groups>(
+    groups: &'groups [ArtistGroup],
+    track: &Track,
+) -> Option<&'groups ArtistGroup> {
+    let artist = track.artist.as_ref()?;
+    groups.iter().find(|group| &group.artist == artist)
+}
+
 /// Position on the record and its year — whatever the tags gave us.
 pub fn album_line(track: &Track, translations: &Translations) -> Option<String> {
     let mut parts = Vec::with_capacity(3);
@@ -314,6 +358,29 @@ pub fn toggle_selection(current: &mut Option<Selection>, next: Selection) {
     *current = if same { None } else { Some(next) };
 }
 
+/// The selection as a replaced library has it: the same album or artist with
+/// its tracks as they are now, or nothing when the library no longer holds it.
+pub fn renewed_selection(
+    selection: Selection,
+    albums: &[AlbumGroup],
+    artists: &[ArtistGroup],
+) -> Option<Selection> {
+    let tracks = match selection.kind {
+        SelectionKind::Album => albums
+            .iter()
+            .find(|album| album.key == selection.key)
+            .map(|album| album.tracks.clone()),
+        SelectionKind::Artist => artists
+            .iter()
+            .find(|artist| artist.artist == selection.key)
+            .map(|artist| artist.tracks.clone()),
+    }?;
+    Some(Selection {
+        tracks,
+        ..selection
+    })
+}
+
 /// The number a track row shows: its place in the list, or — in an album —
 /// the position its tags give it.
 pub fn row_number(track: &Track, index: usize, use_track_number: bool) -> u32 {
@@ -338,23 +405,29 @@ pub enum QueueView {
 #[derive(Clone, Debug, PartialEq)]
 pub struct QueueRow {
     pub track: Track,
-    /// The number shown beside the row.
-    pub display: u32,
+    /// The number shown beside the row; none where the rows are in no
+    /// particular order.
+    pub display: Option<u32>,
     /// Where the row's track sits in the list a click plays from: the album
     /// in the album view, the play queue otherwise.
     pub list_index: usize,
     pub is_current: bool,
 }
 
-/// The rows of the Now Playing queue card.
+/// The rows of the Now Playing queue card. `current_index` is the place of
+/// the current track in `queue`, when a local track is current.
+///
+/// The engine draws the shuffled order itself and does not say what it
+/// drew: with `shuffle` on, Up Next still lists what is left to hear, but
+/// unnumbered, since their place in the list is not when they will play.
 pub fn queue_rows(
     view: QueueView,
     queue: &[Track],
-    current: Option<&Track>,
+    current_index: Option<usize>,
     album_tracks: &[Track],
+    shuffle: bool,
 ) -> Vec<QueueRow> {
-    let current_index =
-        current.and_then(|current| queue.iter().position(|track| track.id == current.id));
+    let current = current_index.and_then(|index| queue.get(index));
     match view {
         QueueView::Album => album_tracks
             .iter()
@@ -363,7 +436,7 @@ pub fn queue_rows(
                 track: track.clone(),
                 // The album's own numbering, so a partially-ripped album shows
                 // the positions the sleeve does.
-                display: track.track_number.unwrap_or(index as u32 + 1),
+                display: Some(track.track_number.unwrap_or(index as u32 + 1)),
                 list_index: index,
                 is_current: current.is_some_and(|current| current.id == track.id),
             })
@@ -373,26 +446,23 @@ pub fn queue_rows(
             .enumerate()
             .map(|(index, track)| QueueRow {
                 track: track.clone(),
-                display: index as u32 + 1,
+                display: Some(index as u32 + 1),
                 list_index: index,
                 is_current: current_index == Some(index),
             })
             .collect(),
         QueueView::UpNext => {
             // With nothing current the ring is simply the whole queue.
-            let after = current_index.map_or(0, |index| index + 1);
-            let before = current_index.unwrap_or(0);
+            let after = current_index.map_or(0, |index| (index + 1).min(queue.len()));
+            let before = current_index.unwrap_or(0).min(queue.len());
             queue[after..]
                 .iter()
                 .chain(&queue[..before])
                 .enumerate()
                 .map(|(index, track)| QueueRow {
                     track: track.clone(),
-                    display: index as u32 + 1,
-                    list_index: queue
-                        .iter()
-                        .position(|candidate| candidate.id == track.id)
-                        .unwrap_or(0),
+                    display: (!shuffle).then_some(index as u32 + 1),
+                    list_index: (after + index) % queue.len(),
                     is_current: false,
                 })
                 .collect()
@@ -406,6 +476,7 @@ pub fn queue_heading(
     queue_length: usize,
     row_count: usize,
     current: Option<&Track>,
+    shuffle: bool,
     translations: &Translations,
 ) -> String {
     match view {
@@ -416,7 +487,12 @@ pub fn queue_heading(
             translations.translate("now.queueHeading", &[("count", queue_length.to_string())])
         }
         QueueView::UpNext => {
-            translations.translate("now.upNextHeading", &[("count", row_count.to_string())])
+            let key = if shuffle {
+                "now.upNextShuffledHeading"
+            } else {
+                "now.upNextHeading"
+            };
+            translations.translate(key, &[("count", row_count.to_string())])
         }
     }
 }
@@ -602,14 +678,79 @@ mod tests {
     fn up_next_reads_as_a_ring_starting_after_the_current_track() {
         let queue = [track(1, "a"), track(2, "b"), track(3, "c"), track(4, "d")];
 
-        let rows = queue_rows(QueueView::UpNext, &queue, Some(&queue[1]), &[]);
+        let rows = queue_rows(QueueView::UpNext, &queue, Some(1), &[], false);
 
-        let listed: Vec<(&str, u32, usize)> = rows
+        let listed: Vec<(&str, Option<u32>, usize)> = rows
             .iter()
             .map(|row| (row.track.title.as_str(), row.display, row.list_index))
             .collect();
-        assert_eq!(listed, [("c", 1, 2), ("d", 2, 3), ("a", 3, 0)]);
+        assert_eq!(
+            listed,
+            [("c", Some(1), 2), ("d", Some(2), 3), ("a", Some(3), 0)]
+        );
         assert!(rows.iter().all(|row| !row.is_current));
+
+        // With nothing current the ring is the whole queue, from its top.
+        let rows = queue_rows(QueueView::UpNext, &queue, None, &[], false);
+        let places: Vec<usize> = rows.iter().map(|row| row.list_index).collect();
+        assert_eq!(places, [0, 1, 2, 3]);
+        assert!(queue_rows(QueueView::UpNext, &[], None, &[], false).is_empty());
+    }
+
+    #[test]
+    fn a_shuffled_up_next_lists_what_is_left_without_claiming_an_order() {
+        let queue = [track(1, "a"), track(2, "b"), track(3, "c")];
+
+        let rows = queue_rows(QueueView::UpNext, &queue, Some(0), &[], true);
+
+        assert_eq!(rows.len(), 2);
+        assert!(rows.iter().all(|row| row.display.is_none()));
+        // A click still plays the row's own track.
+        assert_eq!(rows[1].list_index, 2);
+        // The playlist is the queue as loaded, whatever the engine draws.
+        let playlist = queue_rows(QueueView::Playlist, &queue, Some(0), &[], true);
+        assert_eq!(playlist[2].display, Some(3));
+        assert_eq!(
+            queue_heading(
+                QueueView::UpNext,
+                3,
+                2,
+                Some(&queue[0]),
+                true,
+                &Translations::new(Language::English)
+            ),
+            "Up next, shuffled · 2 songs"
+        );
+    }
+
+    #[test]
+    fn the_spotlight_gathers_the_artist_and_a_click_plays_them_from_the_chosen_track() {
+        let tracks: Vec<Track> = (1..=6)
+            .map(|id| album_track(id, &format!("t{id}"), &format!("Album {id}"), "X", Some(1)))
+            .chain([album_track(7, "other", "Elsewhere", "Y", Some(1))])
+            .collect();
+        let artist_groups = artists(&tracks);
+        let album_groups = albums(&tracks);
+
+        assert_eq!(
+            spotlight_tracks(&artist_groups, &tracks[0]).len(),
+            SPOTLIGHT_COUNT
+        );
+        let shown_albums = spotlight_albums(&album_groups, &tracks[0]);
+        assert_eq!(shown_albums.len(), SPOTLIGHT_COUNT);
+        assert!(shown_albums
+            .iter()
+            .all(|album| album.artist.as_deref() == Some("X")));
+
+        let (queue, start) = artist_queue_from(&artist_groups, &tracks[2]);
+        assert_eq!(queue.len(), 6);
+        assert_eq!(queue[start].id, 3);
+
+        // A track with no artist, or one the library lost, plays alone.
+        let stray = track(9, "stray");
+        assert!(spotlight_tracks(&artist_groups, &stray).is_empty());
+        assert!(spotlight_albums(&album_groups, &stray).is_empty());
+        assert_eq!(artist_queue_from(&artist_groups, &stray), (vec![stray], 0));
     }
 
     #[test]
@@ -619,7 +760,7 @@ mod tests {
         album_only.track_number = Some(5);
         let album = [queue[1].clone(), album_only];
 
-        let playlist = queue_rows(QueueView::Playlist, &queue, Some(&queue[1]), &album);
+        let playlist = queue_rows(QueueView::Playlist, &queue, Some(1), &album, false);
         assert_eq!(
             playlist
                 .iter()
@@ -628,11 +769,11 @@ mod tests {
             [false, true]
         );
 
-        let album_rows = queue_rows(QueueView::Album, &queue, Some(&queue[1]), &album);
+        let album_rows = queue_rows(QueueView::Album, &queue, Some(1), &album, false);
         assert!(album_rows[0].is_current);
         // Untagged rows count from their place; tagged ones keep the sleeve's number.
-        assert_eq!(album_rows[0].display, 1);
-        assert_eq!(album_rows[1].display, 5);
+        assert_eq!(album_rows[0].display, Some(1));
+        assert_eq!(album_rows[1].display, Some(5));
         assert_eq!(album_rows[1].list_index, 1);
     }
 
@@ -641,20 +782,34 @@ mod tests {
         let translations = Translations::new(Language::English);
         let mut current = track(1, "a");
         assert_eq!(
-            queue_heading(QueueView::UpNext, 4, 3, Some(&current), &translations),
+            queue_heading(
+                QueueView::UpNext,
+                4,
+                3,
+                Some(&current),
+                false,
+                &translations
+            ),
             "Up next · 3 songs"
         );
         assert_eq!(
-            queue_heading(QueueView::Playlist, 4, 4, Some(&current), &translations),
+            queue_heading(
+                QueueView::Playlist,
+                4,
+                4,
+                Some(&current),
+                false,
+                &translations
+            ),
             "Play queue · 4 songs"
         );
         assert_eq!(
-            queue_heading(QueueView::Album, 4, 1, Some(&current), &translations),
+            queue_heading(QueueView::Album, 4, 1, Some(&current), false, &translations),
             "Unknown album"
         );
         current.album = Some("Blue".to_owned());
         assert_eq!(
-            queue_heading(QueueView::Album, 4, 1, Some(&current), &translations),
+            queue_heading(QueueView::Album, 4, 1, Some(&current), false, &translations),
             "Blue"
         );
     }
@@ -667,12 +822,14 @@ mod tests {
             label: key.to_owned(),
             tracks: Vec::new(),
         };
+        let key_of =
+            |selection: &Option<Selection>| selection.as_ref().map(|selected| selected.key.clone());
         let mut selection = None;
 
         toggle_selection(&mut selection, album("a"));
-        assert_eq!(selection.as_ref().map(|s| s.key.as_str()), Some("a"));
+        assert_eq!(key_of(&selection).as_deref(), Some("a"));
         toggle_selection(&mut selection, album("b"));
-        assert_eq!(selection.as_ref().map(|s| s.key.as_str()), Some("b"));
+        assert_eq!(key_of(&selection).as_deref(), Some("b"));
         toggle_selection(&mut selection, album("b"));
         assert_eq!(selection, None);
 
@@ -685,7 +842,32 @@ mod tests {
                 ..album("x")
             },
         );
-        assert_eq!(selection.map(|s| s.kind), Some(SelectionKind::Artist));
+        assert_eq!(
+            selection.map(|selected| selected.kind),
+            Some(SelectionKind::Artist)
+        );
+    }
+
+    #[test]
+    fn a_selection_follows_a_replaced_library_or_closes_when_its_subject_is_gone() {
+        let before = [album_track(1, "One", "A", "X", Some(1))];
+        let after = [
+            album_track(1, "One", "A", "X", Some(1)),
+            album_track(2, "Two", "A", "X", Some(2)),
+        ];
+        let selection = Selection {
+            kind: SelectionKind::Album,
+            key: albums(&before)[0].key.clone(),
+            label: "A".to_owned(),
+            tracks: before.to_vec(),
+        };
+
+        let renewed = renewed_selection(selection.clone(), &albums(&after), &artists(&after))
+            .expect("the album is still there");
+        assert_eq!(titles(&renewed.tracks), ["One", "Two"]);
+        assert_eq!(renewed.label, "A");
+
+        assert_eq!(renewed_selection(selection, &[], &[]), None);
     }
 
     #[test]
