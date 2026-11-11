@@ -1,12 +1,6 @@
 # Atomic Design — Concepts & Methodology
 
-> A practitioner's reference for Atomic Design, distilled from Brad Frost's
-> _Atomic Design_ (Chapter 2) and translated to **Svelte 5 + SvelteKit 2**
-> idioms. This document is the conceptual companion to Janis's living
-> design system at `src/lib/design-system/` (generic, domain-agnostic
-> primitives) and the per-feature domain code at `src/lib/features/`
-> (audio-player components built on top of the design system). Atomic
-> tiers (atoms / molecules / organisms) apply equally to both layers.
+> A practitioner's reference for Atomic Design, distilled from Brad Frost's _Atomic Design_ (Chapter 2) and translated to **Slint** idioms. This document is the conceptual companion to Janis's living design system under `ui/` (generic, domain-agnostic primitives in `ui/atoms`, `ui/molecules` and `ui/organisms`) and the per-feature domain components under `ui/features/` (audio-player components built on top of the design system). Atomic tiers (atoms / molecules / organisms) apply equally to both layers.
 
 ---
 
@@ -125,9 +119,7 @@ template that says "header region, 200×60px logo, nav with up to 6 items,
 a headline of 40–80 characters" is doing template work; a template that
 says only "header region, main region, footer region" is underspecified.
 
-In Svelte 5 those regions are expressed either as `children` / named
-snippet props (`{@render header()}`, `{@render main()}`) or, at the route
-level, as the implicit child rendered by a `+layout.svelte`.
+In Slint those regions are the `@children` placeholder of a component, or — for the window itself — the elements `app.slint` lays out around the open screen.
 
 | Trait           | Detail                                                                                                  |
 | --------------- | ------------------------------------------------------------------------------------------------------- |
@@ -136,8 +128,7 @@ level, as the implicit child rendered by a `+layout.svelte`.
 | Concerns        | Layout, spacing, responsive behaviour **and** content-shape constraints (sizes, lengths, cardinalities) |
 | Not its concern | Real data binding, business logic, final copy                                                           |
 
-In SvelteKit terms, **`+layout.svelte` files are template-shaped**: they
-own the scaffolding that screens slot into.
+In Janis, **`ui/app.slint` is template-shaped**: it owns the scaffolding that screens slot into.
 
 ### 3.5 Pages
 
@@ -251,161 +242,63 @@ extract it into a real component.
 
 ---
 
-## 6. Best Practices (Svelte 5 Edition)
+## 6. Best Practices (Slint Edition)
 
 ### 6.1 Folder structure
 
-Mirror the hierarchy on disk. **Janis separates UI into three layers**:
-the design system (primitives), features (domain capabilities), and
-screens (compositions). Atomic tiers (atoms / molecules / organisms)
-are a classification scheme that applies inside both the design system
-and each feature folder:
+Mirror the hierarchy on disk. **Janis separates the interface into three layers**: the design system (primitives), features (domain capabilities), and screens (compositions). Atomic tiers are a classification scheme inside the design system and inside each feature folder.
 
 ```
-src/lib/
-  design-system/                          # THE design system — could ship as a UI library.
-    atoms/      molecules/   organisms/   # Domain-agnostic primitives. Check here first.
-
-  features/                               # Capability-shaped domain code (NOT screen-shaped).
-    player/                               # Engine mirror + transport + visualisers
-      PlayerStore.svelte.ts               # Feature owns its state (a mirror of the Rust engine).
-      audioEngine.ts  visualizer.ts       # IPC client for the Rust engine + shared frame data
-      MiniPlayer.svelte  WaveformCanvas.svelte  NowPlayingQueue.svelte  …
-    eq/                                   # 10-band EQ
-      EqStore.svelte.ts  presets.ts  bands.ts
-      EqualizerOverlay.svelte  EqBandSlider.svelte  OpenEqButton.svelte
-    library/                              # Track library (scan, folders, grouping)
-      LibraryStore.svelte.ts
-      TrackRow.svelte  LocalRow.svelte  AlbumCard.svelte  ShelfTile.svelte
-      CoverArt.svelte  ArtistSpotlight.svelte
-    radio/                                # Curated web-radio stations
-      stations.ts  StationCard.svelte
-    settings/                             # Playback preferences
-      PreferencesStore.svelte.ts
-
-  screens/                                # Compositions — pages in atomic-design terms.
-    NowPlayingScreen.svelte               # Each cherry-picks from one or more features
-    LibraryScreen.svelte                  # + the design system. A screen is NOT a feature.
-    SettingsScreen.svelte  …
-
-  models/ stores/ i18n/ icons/            # Cross-cutting infrastructure.
-
-src/routes/                               # SvelteKit routes — 1-line wrappers around screens.
+ui/
+├── tokens.slint            every color, typeface, text size, radius, shadow, duration
+├── icons.slint             glyph path data
+├── shell.slint             the window frame's state
+├── app.slint               the window: the only file that assembles screens
+├── atoms/                  design system, tier 1
+├── molecules/              design system, tier 2
+├── organisms/              design system, tier 3
+├── features/
+│   ├── player/             a feature's components, and the global they read
+│   ├── equalizer/
+│   ├── library/
+│   ├── radio/
+│   └── settings/
+└── screens/                one composition per destination
 ```
 
-**Dependency direction between the layers is one-way:**
-
-- `design-system/` depends on nothing.
-- `features/<X>/` depends on `design-system/` first; allowed cross-feature edges (kept minimal): `library → player`, `radio → player`, `settings → player` — every feature drives playback through the player's engine client — plus the deliberately mutual pair `eq ↔ player`, because the EQ and the player describe one signal path (the EQ store drives the engine's filters; the player's canvases and EQ affordance render EQ state).
-- `screens/` depends on `features/<any>` + `design-system/`. Screens are the only layer that freely crosses feature boundaries — NowPlayingScreen, for instance, resolves library data and hands it to the player's queue card, so the player never imports the library.
-
-This separation is what makes the design system extractable and what
-gives "reuse-first" a physical meaning (scan `design-system/` first,
-then the relevant feature folders). It also matches the deeper insight
-that a screen is a _composition_, not a _feature_ — a screen exists
-to wire features together into a user-facing experience.
+Dependencies run one way: the design system imports nothing but tokens and icons; features import the design system (and the feature edges `CLAUDE.md` allows); screens import anything.
 
 ### 6.2 Naming conventions
 
-- **PascalCase** for components (`IconButton.svelte`, `PlayerRow.svelte`).
-- **Suffix by role** for non-components (`PlayerStore.svelte.ts`, `EqOverlayStore.ts`); a store holding `$state` takes the `.svelte.ts` extension.
-- **One responsibility per file name** — if the name needs `And` or `Or`,
-  the component is doing too much.
-- **Co-locate** the `.figma.ts` Code Connect mapping next to the component
-  (`PillLabel.svelte` + `PillLabel.figma.ts`).
+One component per file. The file is the component's name in snake case (`art_tile.slint` holds `ArtTile`). Names say what the thing is, in full words, never how it looks today. A component private to a file — a row of one list, a tab of one card — stays unexported in that file.
 
-### 6.3 Props and component APIs
+### 6.3 Properties and component interfaces
 
-Keep APIs **decoupled and generic** — components should solve problems
-dynamically, not be wired to a fixed display.
-
-```svelte
-<!-- atom: knows nothing of its caller -->
-<script lang="ts">
-    interface Props {
-        label: string;
-        onclick: () => void;
-        variant?: 'primary' | 'ghost';
-        disabled?: boolean;
-    }
-    let { label, onclick, variant = 'primary', disabled = false }: Props = $props();
-</script>
-```
-
-Rules:
-
-- **Always type props with an `interface Props`** (Svelte 5 idiom).
-- **Callbacks, not events** — pass `onSelect: (id) => void` as a prop
-  rather than calling `createEventDispatcher` (Svelte 4 legacy). This is
-  the official Svelte 5 migration guidance — components communicate
-  upward by invoking callback props, not by dispatching custom events.
-- **Snippets replace slots in Svelte 5.** Content passed inside a component
-  tag becomes the implicit `children` snippet, rendered with
-  `{@render children()}`. Type it as `children: Snippet` (or
-  `Snippet<[ArgType]>` when the snippet takes arguments).
-- **No `export let`** — use `$props()`.
+- Declare every input as an `in property` with a type, and every event as a `callback`; a component never reaches into its parent.
+- Offer variants as an `enum` property (`BadgeVariant`, `PlayCircleVariant`), not as a pile of booleans.
+- Take text as properties. A design-system component never names a translation key; features and screens pass it `Strings.<key>`.
+- An icon-only button takes its accessible label and its `IconButtonIdentifier`.
 
 ### 6.4 State ownership
 
-Where state lives matters more than how it's implemented:
+- **Design-system components** own only what is theirs to show: hover, press, an animation phase.
+- **Feature components** read their feature's global (`Player`, `Equalizer`, `Library`, `Radio`, `Settings`) and call its callbacks. The globals are filled by the application controller; a component never computes what Rust already did.
+- **Screens** hold layout state only — which rows are in view, where a section sits. Anything the listener should find again after leaving the screen lives in the controller, because a screen is created anew each time it is opened.
 
-| Level                 | What state it owns                               |
-| --------------------- | ------------------------------------------------ |
-| Atoms                 | None (or trivial visual toggles)                 |
-| Molecules             | Local UI state at most (hover, focus)            |
-| Organisms             | Section-level UI state (open tab, selected item) |
-| Stores (`.svelte.ts`) | Persistent or cross-screen state                 |
-| Templates / Layouts   | Boot-time wiring (`bootPromise`)                 |
-| Pages / Screens       | Compose stores + organisms; thin orchestration   |
+### 6.5 Bindings
 
-This is the Svelte translation of "manage state at higher levels and pass it down via props". For Janis specifically, see CLAUDE.md rule 13 for the store-shape policy (setter methods for persistent state, public `$state` fields for ephemeral state).
+Slint properties are reactive: a binding is re-evaluated when what it reads changes. Prefer a binding to a `changed` handler; keep handlers for effects (scrolling something into view, reporting a size to a global). Two things worth knowing:
 
-### 6.5 Reactivity primitives (Svelte 5 runes)
+- Element-level `opacity` on something that animates forces an offscreen layer; carry transparency in the color instead.
+- A layout cannot depend on a size it determines — bind to the parent's width, never to a value derived from the child's own preferred size.
 
-Each tier of the atomic hierarchy should reach for the simplest rune that
-covers its needs:
+### 6.6 Long lists
 
-| Rune                           | Purpose                                                                                                                         | Typical tier                         |
-| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------ |
-| `let x = $state(initial)`      | Reactive local state. Mutate by assignment.                                                                                     | Atoms (rarely), molecules, organisms |
-| `let y = $derived(expr)`       | Pure computation derived from state — must be side-effect free.                                                                 | Anywhere `$state` is used            |
-| `let z = $derived.by(() => …)` | Same as `$derived`, but with a function body for non-trivial expressions.                                                       | Organisms, screens                   |
-| `$effect(() => { … })`         | DOM-side effects, subscriptions, imperative APIs. Returns an optional cleanup.                                                  | Organisms, screens, stores           |
-| `setContext` / `getContext`    | Pass values down a subtree without prop drilling — typed via a `Symbol` key.                                                    | Templates / organism trees           |
-| Stores in `*.svelte.ts` files  | Cross-screen reactive state with persistence or side effects. Setter methods are the chokepoint for writes (see Janis rule 13). | Above the screen layer               |
-
-**On memoisation.** Svelte's compiled reactivity tracks dependencies at the
-expression level and updates only the DOM nodes that depend on a changed
-signal — there is no virtual DOM diff and no per-render component
-re-execution to worry about. Reach for `$derived` to **share computed
-values** between consumers, not to "prevent re-renders". Reach for
-`$effect` only when you need a true side effect (DOM measurement, event
-subscription, imperative library API) — never to mirror state.
-
-### 6.6 Documentation and isolation
-
-Atoms and molecules should be developed and reviewed **in isolation**, not
-discovered for the first time inside a page. In a Svelte project the two
-tools that fit this role are:
-
-- **Histoire** — Svelte-native story runner, fastest to set up.
-- **Storybook (Svelte adapter)** — heavier, but useful if the team already
-  knows it from other stacks.
-
-Whichever you pick, the discipline is the same:
-
-- One story per meaningful variant (states and sizes — Janis ships a single dark "prism" theme, so there are no theme variants to cover; see CLAUDE.md rule 4).
-- Cover edge cases (long text, empty state, error state, RTL) before the
-  component lands in a page.
-- Co-locate stories with the component file so they evolve together.
-
-Until a story runner is wired up, a temporary `/dev/components` route that
-renders each atom and molecule with sample inputs is a perfectly adequate
-substitute.
+A list of fixed-height rows draws only the rows in view. The screen's `ScrollArea` says how far it is scrolled; the list computes which rows that shows and places each at `index × row height`. A row per item is never instantiated.
 
 ### 6.7 Validation against design
 
-Whenever a component originates from Figma, the design system layer is **the contract** between visual intent and code. Use Code Connect mappings (`<Component>.figma.ts`) so the Figma MCP server returns the _mapped_ component rather than re-deriving markup. (Janis has no Figma source today; this applies if one is introduced.)
+Look at the result. Debug builds save what the window shows (`JANIS_SNAPSHOT=<file.png>`, with `JANIS_SCREEN`, `JANIS_LIBRARY`, `JANIS_SEARCH`, `JANIS_EQUALIZER`, `JANIS_AUTOPLAY` and `JANIS_STATION` to reach a state), which is how a change to the interface is checked.
 
 ---
 
@@ -418,7 +311,7 @@ Whenever a component originates from Figma, the design system layer is **the con
 | Atoms     | Logo, Input, IconButton (search), NavLink, CartIcon, Badge (count)                                  |
 | Molecules | SearchField (Input + IconButton), NavItem (NavLink + optional Badge), CartButton (CartIcon + Badge) |
 | Organism  | Header (Logo + Nav (× NavItem) + SearchField + CartButton + UserMenu)                               |
-| Template  | StoreLayout — snippet regions for header, body, footer                                              |
+| Template  | StoreLayout — regions for header, body, footer                                                      |
 | Page      | `/products/[slug]` — real product data                                                              |
 
 Update one atom (say, `IconButton`) and **every consumer benefits**. That
@@ -431,7 +324,7 @@ is the practical payoff.
 | Atoms     | Label, Number, Icon, Button, ToggleSwitch                                                                |
 | Molecules | MetricCard (Label + Number), FilterDropdown (Button + menu), ToolbarButton                               |
 | Organisms | Sidebar (Nav + UserChip), ChartPanel (FilterDropdown + Chart + export Button), MetricGrid (× MetricCard) |
-| Template  | DashboardLayout — sidebar + main + toolbar snippet regions                                               |
+| Template  | DashboardLayout — sidebar + main + toolbar regions                                                       |
 | Page      | `/dashboard` — real metrics, real user, real filters                                                     |
 
 The same `DashboardLayout` template can host analytics, user management, or
@@ -441,61 +334,31 @@ sales pages just by swapping the organisms rendered into each region.
 
 ## 8. How Janis Applies This
 
-Janis separates **the design system** (generic, domain-agnostic primitives
-under `src/lib/design-system/`) from **the application** (audio-player
-domain code under `src/lib/features/`). Atomic-design tiering classifies
-components inside both layers.
+Janis separates **the design system** (generic, domain-agnostic primitives) from **the application** (audio-player components under `ui/features/`). Atomic-design tiering classifies components inside both layers.
 
-### The design system (`src/lib/design-system/`)
+### The design system (`ui/atoms`, `ui/molecules`, `ui/organisms`)
 
-Could plausibly ship as a separate UI library — nothing here knows
-about audio.
+Could plausibly ship as a separate library — nothing here knows about audio.
 
-- **Atoms** — `IconButton`, `Chip`, `Badge`, `PrimaryButton`,
-  `GhostButton`, `SectionLabel`, `Eyebrow`, `Toggle`, `ArtTile`,
-  `EmptyState`. Plus the canonical-registry enum `IconButtonIdentifier`
-  and the shared `accent.ts` maps.
-- **Molecules** — `NavItem`, `ToggleRow`, `PlayCircle`.
-- **Organisms** — `SidebarNav`.
+- **Atoms** — `Glyph`, `IconButton` (with the `IconButtonIdentifier` registry), `Chip`, `Badge`, `PrimaryButton`, `GhostButton`, `SectionLabel`, `Eyebrow`, `Toggle`, `ArtTile`, `EmptyState`.
+- **Molecules** — `NavItem`, `ToggleRow`, `PlayCircle`, `ScreenHeader`, `ScrollArea`.
+- **Organisms** — `SidebarNav`, `Toaster`.
 
-### The features (`src/lib/features/`)
+### The features (`ui/features/`)
 
-Each feature folder is **capability-shaped** — a coherent unit of
-functionality that screens can compose. Features own their stores +
-tier files. Features do **not** own screens.
+Each feature folder is **capability-shaped** — a coherent unit of functionality that screens compose. A feature owns its components and the global they read. Features do **not** own screens.
 
-- **`player/`** — the engine mirror. Store: `PlayerStore.svelte.ts` (queue, transport, volume — a reactive mirror of the Rust engine, which owns the actual audio). Infrastructure: `audioEngine.ts` (the IPC client for the Rust engine), `visualizer.ts` (shared per-frame visual data), `format.ts`. Components: `MiniPlayer`, `WaveformCanvas`, `NowPlayingQueue`, `TransportControls`, `VolumeSlider`.
-- **`eq/`** — the 10-band EQ. Store: `EqStore.svelte.ts`. Data: `presets.ts`, `bands.ts`. Components: `EqualizerOverlay` (bottom sheet), `EqBandSlider`, `OpenEqButton`.
-- **`library/`** — the track library. Store: `LibraryStore.svelte.ts` (DB mirror + scan actions + album/artist grouping). Components: `TrackRow`, `LocalRow`, `AlbumCard`, `ShelfTile`, `CoverArt`, `ArtistSpotlight`.
-- **`radio/`** — curated web radio. Data: `stations.ts`. Component: `StationCard`.
-- **`settings/`** — playback preferences. Store: `PreferencesStore.svelte.ts`.
+- **`player/`** — global `Player`. Components: `MiniPlayer`, `Waveform`, `NowPlayingQueue`, `TransportControls`, `VolumeSlider`.
+- **`equalizer/`** — global `Equalizer`. Components: `EqualizerOverlay` (bottom sheet), `EqualizerBandSlider`, `OpenEqualizerButton`.
+- **`library/`** — globals `Library` and `Covers`. Components: `CoverArt`, `AlbumCard`, `CardGrid`, `TrackRow`, `TrackList`, `LibraryTrackAccordion`, `LocalRow`, `LocalTable`, `ShelfTile`, `Shelf`, `ArtistSpotlight`.
+- **`radio/`** — global `Radio`. Component: `StationCard`.
+- **`settings/`** — global `Settings`.
 
-### The screens (`src/lib/screens/`)
+### The screens (`ui/screens/`)
 
-Compositions that wire features together into user-facing experiences.
-Atomic-design "pages" in the pure sense — they sit ABOVE the atomic
-tiers and consume from them.
+Compositions that wire features together into what the listener sees. Atomic-design "pages" in the pure sense — they sit above the atomic tiers and consume from them: `NowPlayingScreen`, `LibraryScreen`, `DiscoverScreen`, `RadioScreen`, `LocalFilesScreen`, `SpotifyScreen`, `SettingsScreen`, and `AppTitlebar`, the window's own strip. `app.slint` is the template: title bar, sidebar, the open screen, the mini player, and what floats above them.
 
-- **`NowPlayingScreen`** — hero art + metadata + waveform + transport + queue card + artist spotlight, fed by the player and library features.
-- **`LibraryScreen`** — tabs over the library feature's groupings, with
-  the design system's grid cards.
-- **`DiscoverScreen`** — shelves derived from the library.
-- **`RadioScreen`**, **`LocalFilesScreen`**, **`SpotifyScreen`**,
-  **`SettingsScreen`** — one composition each; `AppTitlebar` is app
-  chrome shared by the root layout.
-
-- **Templates** — SvelteKit `+layout.svelte` files (e.g. the root layout
-  with its `bootPromise` gate) wrap pages.
-- **Routes** — `src/routes/<name>/+page.svelte` are 1-line wrappers
-  importing the matching screen.
-
-The mandatory project rules in `CLAUDE.md` enforce the atomic discipline:
-
-- **Rule 9** — every clickable icon button needs a corresponding `IconButtonIdentifier` entry. The enum is the **atom registry**.
-- **Rule 11** — screens are thin containers (i.e. proper pages, not god-components).
-- **Rule 15** — reuse-first. Before writing new markup, search atoms and molecules. A pattern repeated three times inline is a missing atom.
-
-The component catalogue lives in the Design System section of `CLAUDE.md`.
+The mandatory project rules in `CLAUDE.md` enforce the atomic discipline: tokens only, the icon-button registry, thin screens, reuse first, and search → ask → create for new components.
 
 ---
 
@@ -506,11 +369,9 @@ The component catalogue lives in the Design System section of `CLAUDE.md`.
 - [ ] Is the API generic enough that **a second, unrelated caller** could
       reuse it without modification?
 - [ ] Does it own only state appropriate to its tier?
-- [ ] Are all user-facing strings going through `t('key')` (Janis rule 10 — new keys land in both `en.json` and `fr.json`)?
-- [ ] Are all colours, sizes, and durations using semantic tokens — no
-      Tailwind magic numbers (Janis rule 3a)?
-- [ ] If it's reusable, is there a `<Component>.figma.ts` mapping?
-- [ ] Has `mcp__svelte__svelte-autofixer` been run and reported clean?
+- [ ] Does all user-facing text come from the `Strings` global or from the controller (new keys land in both `translations/en.json` and `fr.json`)?
+- [ ] Do all colours, type sizes, radii, shadows and durations come from `ui/tokens.slint`?
+- [ ] Has it been looked at in the running window (a snapshot), not only compiled?
 
 ---
 
@@ -521,7 +382,7 @@ The component catalogue lives in the Design System section of `CLAUDE.md`.
 | **Atom**     | Irreducible primitive                                                         | Visual variants via props                                                      | Could ship in any app                   |
 | **Molecule** | Smallest functional unit                                                      | One job, tiny local state                                                      | Does exactly one thing                  |
 | **Organism** | Distinct UI section                                                           | Section state, maybe store reads                                               | Stands alone in a doc page              |
-| **Template** | Layout skeleton                                                               | Snippet regions and spacing                                                    | Holds without real content              |
+| **Template** | Layout skeleton                                                               | Regions and spacing                                                            | Holds without real content              |
 | **Page**     | The most concrete stage: template populated with real, representative content | Orchestration of stores + organisms; no new visual decisions at the file level | Surfaces edge cases the template missed |
 
 **The single most useful idea.** Atomic Design is a vocabulary, not a
@@ -537,6 +398,5 @@ pattern, fix the pattern, not the page.
   <https://atomicdesign.bradfrost.com/chapter-2/>
 - Propelius Technologies, _Atomic Design in React: Best Practices_ —
   <https://propelius.tech/blogs/atomic-design-in-react-best-practices/>
-  (the source's React-specific advice has been translated to Svelte 5
-  idioms throughout this document)
-- Janis-specific application — `CLAUDE.md` (rules 9, 11, 15, and the Design System section, which doubles as the component catalogue)
+  (the source's React-specific advice has been translated to Slint idioms throughout this document)
+- Janis-specific application — `CLAUDE.md` (the mandatory rules, and the Design System section, which doubles as the component catalogue)

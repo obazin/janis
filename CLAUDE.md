@@ -1,155 +1,149 @@
 # Janis - Open-Source Desktop Audio Player
 
+A native application: Rust throughout, with a Slint interface.
+
 ## Mandatory Rules
 
 > Break any of these and the task is not done.
 
-1. **Svelte MCP after every `.svelte` edit.** Call `mcp__svelte__svelte-autofixer` on the changed file. Fix all reported issues. Repeat until clean.
-2. **Svelte 5 runes only.** Never use Svelte 4 syntax (`$:`, `export let`, `on:event`, `<slot>`, `createEventDispatcher`).
-3. **Semantic tokens only.** Components never reference palette colors (`pink-*`, `purple-*`), hex literals, or raw OKLCH values. Use `bg-canvas`, `text-text`, `bg-panel`, `text-accent`, `text-text-muted`, etc. Canvas-drawing code reads the same tokens via `visualPalette()` (`features/player/visualizer.ts`) — never a color literal in a component or draw call.
-   3a. **No Tailwind magic numbers.** Never write arbitrary-value classes (`text-[13px]`, `gap-[10px]`, `duration-[120ms]`, etc.). Every size, spacing, duration, and radius must use a token defined in `src/app.css` `@theme` or Tailwind's dynamic 4px spacing scale (`px-3.75`, `h-47.5` are fine — they are scale values, not brackets). Grid templates that can't be expressed on the scale (`grid-cols-[repeat(auto-fill,minmax(180px,1fr))]`) are the one tolerated bracket form. Before writing any new size value, read `app.css` first and pick the closest existing token. If no token fits, add one to `@theme` with a semantic name.
-4. **Single theme, token-routed.** Janis ships one dark "prism" theme. All colors flow through the `@theme` tokens in `src/app.css`; adding a second theme later must only require a `[data-theme]` override block, so no component may hard-couple to a specific color value.
-5. **Slash-opacity syntax only.** Use `bg-accent/12`, never `bg-opacity-*`.
-6. **OKLCH for new colors.** Never add hex or HSL to `app.css`.
-7. **No regressions.** Before completing any task, verify every feature in `docs/specs.md` still works.
-8. **Keep `docs/specs.md` current.** Every new user-facing feature must be described there before the task is done.
-9. **`IconButtonIdentifier` enum.** Adding any new icon-only button requires a corresponding entry in `src/lib/design-system/atoms/IconButtonIdentifier.ts`.
-10. **No hard-coded UI strings.** All user-facing text must use `t('key')` from `$lib/i18n/LanguageStore.svelte`. New keys must be added to both JSON translation files (`en.json`, `fr.json`) — the `TranslationKey` type is derived automatically from `en.json`.
-11. **`*Screen.svelte` files are thin containers.** Screen components wire data, handle events, and assemble child components — they do not own detailed markup. When a logical UI group grows beyond a few lines, extract it into a dedicated named component at the correct layer (design-system if domain-agnostic, the feature folder otherwise).
-12. **Long-running task lifecycles, and any selection or filter a screen offers, are independent of UI lifecycles.** Playback, scans and long IPC calls live in stores, not in screen components — never tear down a task in `onDestroy` or any UI-bound hook; screens subscribe to task state, they do not own it. (The audio keeps playing whatever screen is open; the mini player is proof.) **Selections are persisted**: the router destroys and recreates a screen component on every navigation, so a plain `let x = $state(...)` declared inside one is lost the moment you leave it. Anything the user should still see when they come back — an album browsed in Library, a genre filter in Radio, a view toggle in Now Playing — belongs in a rune-class store with public `$state` fields (see the state-management table below) even when it has no persistence or IPC of its own, never in screen-local state.
-13. **Store shape follows persistence.** Stores that persist or have side effects (IPC, the audio engine) expose **setter methods** as the single chokepoint for writes — `playerStore.setVolume(v)`, `eqStore.setBand(i, v)`. Pure ephemeral state exposes **public `$state` fields**. Both shapes are rune classes in `.svelte.ts` files. Never expose a public `$state` field on a store that has persistence or side effects.
-14. **Persistent stores boot from `+layout.svelte`'s `bootPromise` and gate UI render on it.** Persistence is SQLite-backed (`janis.db`) via Tauri IPC, so store hydration is async. `+layout.svelte` builds a `bootPromise` (gated by `browser` so prerender stays a no-op) that fetches preferences + the library, then `{#await bootPromise then}` wraps the entire layout. Don't sprinkle `init()` calls across screens; don't put init in `onMount`.
-15. **Reuse-first.** Before writing new markup, check `src/lib/design-system/{atoms,molecules,organisms}/` **first**, then the active feature's own folder. Use existing components instead of duplicating their styling inline. A pattern repeated 3+ times in inline form is a missing atom — extract it. Inline re-implementation of an existing component is a bug.
-16. **New UI follows a search → ask → create decision tree.** Search the design system, then the feature folder. Exact match → use it. Close match needing a new variant/prop → STOP and ASK before extending (widening a design-system component's API changes the contract for every consumer). No match → create at the correct tier AND the correct layer (design-system only if genuinely domain-agnostic; otherwise the feature folder). Methodology in [`ATOMIC_DESIGN.md`](ATOMIC_DESIGN.md).
-17. **AST / LSP over string-pattern search.** For finding/refactoring code structure use `ast-grep` (`ast-grep run --lang ts -p '<pattern>'`, also `rust`); for resolving symbols use the LSP tool. Reach for `grep`/`rg` only for genuinely non-structural text. `.svelte` files are NOT parsed by the built-in `ts` grammar — use Grep/LSP for logic inside `.svelte` `<script>` blocks.
-18. **Domain logic lives behind the right boundary.** The whole audio path — decoding, the EQ, the analyser, output-device management, the transport, web radio, **and audio-file metadata parsing** — lives in the standalone **`audio-stack-rs`** crate (an MIT project of its own, consumed as a git dependency pinned to a tag), reached only through its facade. `src-tauri/src/audio/` is now just the Tauri bridge: the thin `#[tauri::command]` wrappers (`commands.rs`) and the `EventSink` that forwards engine output onto the webview channels (`mod.rs`). Library scanning, persistence and filesystem walking stay in Janis (`library.rs`, `persistence.rs`), calling the facade's `read_metadata`/`read_cover` for per-file parsing. Never import an audio/metadata crate (cpal, symphonia, lofty, …) into `src-tauri` directly — go through `audio-stack-rs`. Commands return pure data (wire types in `src/lib/models/`); PCM never crosses IPC, only 170-byte visualiser frames and transport events do. The frontend renders data and sends commands; it does not re-derive what Rust already computed.
-19. **Every mechanism is cross-platform.** Janis targets macOS, Windows and Linux. Data directories come from Tauri's path API, dialogs from the dialog plugin; the webview never touches the filesystem (audio decodes in Rust, cover art crosses IPC as base64 — the asset protocol is deliberately not enabled). Never adopt a platform-specific mechanism as _the_ design; platform names stay out of shared docs and APIs (the macOS-only `titleBarStyle: Overlay` is config, ignored elsewhere — the titlebar component adapts by platform).
-20. **Documentation describes the present, concisely.** What it is, why it exists, how it is used — nothing else. Never narrate the past in living documentation; that's the decision log's job (commit messages).
+1. **Tokens only.** Components never write a color, typeface, text size, font weight, radius, shadow or duration literal: every one comes from `ui/tokens.slint` (`Tokens`, `Fonts`, `Typography`, `Metrics`, `Motion`). Rust reads colors from the exported `Tokens` global, never from literals. Before adding a value, read `tokens.slint` and pick the closest existing token; if none fits, add one with a semantic name. Layout lengths — padding, spacing, the size of a fixed box — may be written where they are used.
+2. **Single theme, token-routed.** Janis ships one dark "prism" theme. A second theme must only require other values in `tokens.slint`, so no component may hard-couple to a specific color.
+3. **Look at every interface change.** Compiling is not seeing. After editing a `.slint` file, run the app with `JANIS_SNAPSHOT` (see Development hooks) and look at the picture.
+4. **No regressions.** Before completing any task, verify every feature in `docs/specs.md` still works.
+5. **Keep `docs/specs.md` current.** Every new user-facing feature must be described there before the task is done.
+6. **`IconButtonIdentifier` registry.** Adding any new icon-only button requires a corresponding entry in the `IconButtonIdentifier` global (`ui/atoms/icon_button.slint`); the button carries it as its accessible id.
+7. **No hard-coded UI strings.** Text in `.slint` comes from the `Strings` global (generated from `translations/en.json`, one property per key — a missing key does not compile); text built in Rust comes from `Translations`. New keys go in both `translations/en.json` and `fr.json`; a test checks they hold the same keys.
+8. **Screens are thin containers.** A screen lays out feature components and tells lists what is in view; it does not own detailed markup. When a group grows beyond a few lines, extract it into a named component at the correct layer (design system if domain-agnostic, the feature folder otherwise).
+9. **Long-running tasks, and any selection or filter a screen offers, are independent of screens.** A screen is created anew each time it is opened, so anything the listener should find again — an album browsed in Library, a genre filter in Radio, the queue card's view — lives in the application controller, never in a property of the screen. Playback, scans and connects are never tied to what is on screen.
+10. **State modules decide; the controller acts.** The modules that hold state (`player`, `equalizer`, `playback_options`, `notifications`) never touch the engine, the database or a timer: their methods update the state and return `Effect`s, and `Application` carries them out. That is what keeps every decision unit-tested without an audio device. Do not call the engine or the database from a state module, and do not put decisions in the controller.
+11. **Nothing slow on the interface thread.** File reads, picture decoding and scans run on a `background::Worker`; network waits run on the station runtime; results come back through `application::post`. Short SQLite writes of a preference are the one exception.
+12. **Refresh what changed.** Window callbacks push only the playback scalars (`refresh_player`). An action refreshes the lists it changed itself; `refresh_everything` is for a new library or another language. A volume drag must never rebuild a list.
+13. **Long lists draw only what is in view.** A list of fixed-height rows is windowed against its screen's `ScrollArea` (see `TrackList`, `LocalTable`, the Radio grid). Never instantiate a row per item of a list that can grow with the library.
+14. **Reuse-first.** Before writing new markup, check `ui/atoms`, `ui/molecules`, `ui/organisms` **first**, then the active feature's own folder. A pattern repeated 3+ times inline is a missing atom — extract it. Inline re-implementation of an existing component is a bug.
+15. **New UI follows a search → ask → create decision tree.** Search the design system, then the feature folder. Exact match → use it. Close match needing a new variant or property → STOP and ASK before extending (widening a design-system component's interface changes the contract for every consumer). No match → create at the correct tier AND the correct layer. Methodology in [`ATOMIC_DESIGN.md`](ATOMIC_DESIGN.md).
+16. **AST / LSP over string-pattern search.** For finding or refactoring Rust structure use `ast-grep` (`ast-grep run --lang rust -p '<pattern>'`); for resolving symbols use the LSP tool. Reach for `grep`/`rg` only for genuinely non-structural text, and for `.slint` files.
+17. **Domain logic lives behind the right boundary.** The whole audio path — decoding, the EQ, the analyser, output-device management, the transport, web radio, **and audio-file metadata parsing** — lives in the standalone **`audio-stack-rs`** crate (an MIT project of its own, consumed as a git dependency pinned to a tag), reached only through its facade, which `src/audio.rs` re-exports. Never import an audio or metadata crate (cpal, symphonia, lofty, …) directly, and never name `audio_stack_rs` outside `audio.rs`. Library scanning, persistence and filesystem walking stay in Janis (`library.rs`, `persistence.rs`).
+18. **Every mechanism is cross-platform.** Janis targets macOS, Windows and Linux. What differs by system lives in `src/platform.rs` behind a neutral name; platform names stay out of shared docs, interfaces and `.slint` files.
+19. **Documentation describes the present, concisely.** What it is, why it exists, how it is used — nothing else. Never narrate the past in living documentation; that's the decision log's job (commit messages).
 
 ## Tools to Use
 
-| Tool                                                                    | When                                                                                                      |
-| ----------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
-| `mcp__svelte__svelte-autofixer`                                         | After every `.svelte` edit (mandatory)                                                                    |
-| `mcp__svelte__get-documentation`                                        | Before writing Svelte 5 / SvelteKit 2 code                                                                |
-| `mcp__context7__resolve-library-id` + `mcp__context7__get-library-docs` | Tauri v2 plugin APIs, and the audio crates (cpal, symphonia, rubato) — use live docs, not training memory |
-| `ast-grep` / LSP                                                        | Structural code search & refactor (rule 17)                                                               |
+| Tool                                              | When                                                                                     |
+| ------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `mcp__context7__resolve-library-id` + `query-docs` | Slint (language and Rust API), winit, and the audio crates — use live docs, not memory   |
+| `ast-grep` / LSP                                  | Structural code search & refactor (rule 16)                                              |
+| `JANIS_SNAPSHOT` and the other development hooks  | After every interface change (rule 3)                                                    |
 
 ## Quick Reference
 
 ```bash
-pnpm tauri dev         # Full Tauri app with hot reload (preferred). Run inside the nix/direnv shell.
-nix run                # build + launch the release app — no dev shell, no pnpm install
-pnpm dev               # Vite dev server only (port 1420) — IPC calls fail outside Tauri
-pnpm tauri build       # Release bundle
-pnpm build             # SvelteKit static build to /build
-pnpm check             # svelte-check + TypeScript validation
-pnpm test:unit         # vitest
-just fmt-rust          # format the Rust sources; `fmt-rust-check` to verify only
-just clippy            # cargo clippy -D warnings
+cargo run              # the app (`just run`, or `run` in the dev shell). Run inside the nix/direnv shell.
+just check             # every gate: rustfmt check, clippy -D warnings, tests
+just release           # installers of this platform into dist/ (needs `cargo install cargo-packager`)
+nix run                # build + launch the release app — no dev shell
 ```
 
-The dev shell comes from `flake.nix` (composed from the `chess-flake` workspace's `tauriShell` bundle — Rust toolchain, Node 22, pnpm, prettier; the name is historical, the bundle is domain-agnostic — plus the Linux GTK/webkit/dbus stack Tauri links and the runtime env vars a shell-built binary needs). `direnv allow` once, or prefix commands with `nix develop --command`. The flake also packages the app itself: `nix run` (alias of `nix run .#janis`) builds frontend and backend in one derivation and launches the release binary — no dev shell, no `pnpm install`.
+The dev shell comes from `flake.nix` (composed from the `chess-flake` workspace's `rustShell` bundle — the Rust toolchain and its tools; the name is historical, the bundle is domain-agnostic — plus cmake for libopus and, on Linux, the libraries the window and the audio output need). `direnv allow` once, or prefix commands with `nix develop --command`.
+
+### Development hooks (debug builds only)
+
+| Variable                         | Effect                                                                    |
+| -------------------------------- | ------------------------------------------------------------------------- |
+| `JANIS_SNAPSHOT=<file.png>`      | Saves what the window shows after `JANIS_SNAPSHOT_SECONDS` (2) and quits  |
+| `JANIS_SCREEN=<identifier>`      | Opens on that screen (`now-playing`, `library`, `discover`, `radio`, `local`, `spotify`, `settings`) |
+| `JANIS_LIBRARY=<tab>[:<card>]`   | Opens a Library tab and, in a grid, the card at that place                |
+| `JANIS_SEARCH=<text>`            | Fills the search field                                                    |
+| `JANIS_EQUALIZER`                | Opens the equalizer sheet                                                 |
+| `JANIS_AUTOPLAY=<search>`        | Plays, silently, the tracks the library search finds                      |
+| `JANIS_STATION=<place>`          | Starts the station at that place in the Radio grid                        |
+| `JANIS_LOG=<level>`              | What the standard-error logger shows (all builds)                         |
 
 ## Quality gates — local; CI only builds releases
 
-Quality gates are the local suites: `pnpm check`, `pnpm test:unit`, `cargo test`, `cargo clippy`, `just fmt-rust-check`. Run them before completing any task.
+`just check` runs them all: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test`. Run it before completing any task.
 
 ## Distribution
 
-Bundles come from `.github/workflows/release.yml`: pushing a `vX.Y.Z` tag builds macOS (Apple Silicon + Intel DMGs), Windows (NSIS + MSI) and Linux (AppImage, deb, rpm; x86_64 + arm64) and opens a draft release. The workflow refuses a tag whose version differs from `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`, `package.json` or `flake.nix` — bump all four together. No signing certificate exists on any platform: macOS is ad-hoc signed (`bundle.macOS.signingIdentity` = `"-"`, so `pnpm tauri build` needs no Apple account or keychain identity), Windows and Linux are unsigned; README's Install section documents the first-launch step each platform asks for. `scripts/macos/install.sh` (run through `curl | sh`) is the prompt-free macOS route: it resolves the latest tag from the releases redirect, downloads the DMG for the machine's architecture, copies the app into Applications, verifies the signature and clears the quarantine flag. Nix users install from the flake itself (`nix profile install github:obazin/janis`, or `overlays.default` in a system configuration); on macOS the package builds with `--no-sign` (the bundler's codesign/xattr pass cannot run in the sandbox, and Nix ad-hoc signs the binary itself) and adds a `bin/Janis` symlink into the `.app` the Tauri hook installs under `Applications/`. Linux packages declare ALSA explicitly (`bundle.linux.deb/rpm.depends`) because the Tauri CLI only adds webkit and gtk on its own.
+Bundles come from `.github/workflows/release.yml`: pushing a `vX.Y.Z` tag builds macOS (Apple Silicon + Intel DMGs), Windows (NSIS + MSI) and Linux (AppImage, deb, rpm; x86_64 + arm64) and attaches them to a draft release. The workflow refuses a tag whose version differs from `Cargo.toml` or `flake.nix` — bump both together. The installers are built by `cargo packager`, configured in `Cargo.toml` (`[package.metadata.packager]`); the rpm, which the packager cannot make, by `cargo generate-rpm`. No signing certificate exists on any platform: macOS is ad-hoc signed (`signing-identity = "-"`), Windows and Linux are unsigned; README's Install section documents the first-launch step each platform asks for. `scripts/macos/install.sh` (run through `curl | sh`) is the prompt-free macOS route: it resolves the latest tag from the releases redirect, downloads the DMG for the machine's architecture, copies the app into Applications, verifies the signature and clears the quarantine flag. Nix users install from the flake itself (`nix profile install github:obazin/janis`, or `overlays.default` in a system configuration); the package is built with the workspace's Rust toolchain, and on macOS it installs `Applications/Janis.app` with `bin/Janis` pointing into it. Linux packages declare ALSA explicitly.
 
 ## Stack
 
-- **Frontend:** Svelte 5 (runes) + SvelteKit 2 + Tailwind v4 + TypeScript
-- **Backend:** Rust via Tauri v2 IPC commands (`tauri-plugin-single-instance`, `tauri-plugin-log`, `tauri-plugin-dialog`). Janis's `src-tauri` depends only on Tauri, `rusqlite`, `walkdir`, and the `audio-stack-rs` facade — no audio/metadata crate is a direct dependency.
-- **Audio:** the `audio-stack-rs` crate (MIT, a git dependency pinned to a tag; `Cargo.lock` records the exact commit) — a self-contained engine using `cpal` (output), `symphonia` (decode, plus a libopus-backed Opus decoder of its own), `rubato` (resampling), `biquad` (10 peaking filters, with a linear-phase FIR alternative behind the crate's `fir-eq` feature), `realfft` (analyser), `rtrb` (lock-free ring), `stream-download` + `icy-metadata` (web radio, plus station now-playing APIs), `ebur128` (loudness), and `lofty` (tags/properties/cover art). Janis injects two traits — `EventSink` (outbound events + frames) and `Store` (loudness persistence) — and drives the `AudioEngine` facade. There is no `<audio>` element: every source decodes in Rust
-- **Persistence:** SQLite (`rusqlite`, bundled) — `janis.db` in the app-data dir holds preferences + the track library
-- **Build:** Vite, adapter-static (SSG — no Node server at runtime)
+- **Interface:** Slint 1.18 (winit backend, FemtoVG renderer), compiled from `ui/app.slint` by `build.rs`. Fully custom components; no standard widget style.
+- **Application:** one Rust crate. Direct dependencies besides Slint: `audio-stack-rs`, `rusqlite`, `walkdir`, `image` (cover decoding), `base64`, `rfd` (file dialogs), `tokio` (the station runtime), `dirs`, `serde`/`serde_json`, `log`.
+- **Audio:** the `audio-stack-rs` crate (MIT, a git dependency pinned to a tag; `Cargo.lock` records the exact commit) — a self-contained engine using `cpal` (output), `symphonia` (decode, plus a libopus-backed Opus decoder of its own), `rubato` (resampling), `biquad` (10 peaking filters, with a linear-phase FIR alternative behind the crate's `fir-eq` feature), `realfft` (analyser), `rtrb` (lock-free ring), `stream-download` + `icy-metadata` (web radio, plus station now-playing APIs), `ebur128` (loudness), and `lofty` (tags/properties/cover art). Janis injects two traits — `EventSink` (outbound events + frames) and `Store` (loudness persistence) — and drives the `AudioEngine` facade.
+- **Persistence:** SQLite (`rusqlite`, bundled) — `janis.db` in the per-user data directory holds preferences + the track library.
 
 ## Architecture
 
-### Frontend-Backend Boundary
+### Modules (`src/`)
 
-No Node.js server. All backend logic runs in Rust, called via Tauri IPC:
-
-```typescript
-import { invoke } from '@tauri-apps/api/core';
-const result = await invoke<ReturnType>('command_name', { param: value });
-```
-
-### Tauri IPC Commands (registered in `src-tauri/src/main.rs`)
-
-`main.rs` is entry point + handler registration only; commands live in feature modules.
-
-| Command                                                    | Purpose                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Preference commands (6, in `src-tauri/src/persistence.rs`) | `get_preferences` — the single boot fetch (volume, EQ gains+preset, the EQ's linear-phase mode, playback switches, language). `set_volume(volume)` / `set_eq(gains, preset)` / `set_eq_linear_phase(enabled)` / `set_playback_option(option, enabled)` (closed enum: `gapless` \| `crossfade` \| `normalize` \| `exclusive`) / `set_language(language)` (`en` \| `fr`).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| Audio commands (21, in `src-tauri/src/audio/commands.rs`)  | `audio_subscribe(events, frames)` — attaches the two push channels and replays state (including the queue's track ids). Transport: `audio_load_queue(tracks, index)`, `audio_play_stream(stationId, url, nowPlaying)` (the one async command — it awaits the HTTP connect and prefetch so the engine thread never blocks on the network; `nowPlaying` names the station's metadata provider, or null), `audio_play` / `audio_pause` / `audio_toggle` / `audio_stop`, `audio_next` / `audio_previous` / `audio_jump_to(index)`, `audio_seek(positionSecs)`. Parameters: `audio_set_volume(volume)` / `audio_set_eq(gains)` (straight to the realtime atomics, so a slider is audible on the next buffer) / `audio_set_fir_eq(enabled)` (the linear-phase EQ mode — the same bands as an FIR in the decode chain, taking over from the realtime filters; echoed back as a `firEq` event carrying the latency it costs), `audio_set_shuffle` / `audio_set_repeat` / `audio_set_normalize(enabled)` / `audio_set_gapless(enabled)` / `audio_set_crossfade(enabled)` (the latter two choose how the engine joins one track into the next — see `docs/specs.md`). Output: `audio_devices` / `audio_set_device(deviceId)`. |
-| Library commands (7, in `src-tauri/src/library.rs`)        | `list_tracks` — the whole library, newest first. `list_watched_folders` — folders + per-folder counts. `add_watched_folder(path)` — register + scan (blocking pool; the walk runs without the DB lock), returns a `ScanReport`. `import_files(paths)` — ad-hoc single files (dialog / OS drag-and-drop), `folder_id NULL`. `remove_watched_folder(folderId)` — cascade-deletes its tracks. `rescan_library` — re-walk all folders + prune vanished files (only under still-reachable roots). `get_track_cover(trackId)` — embedded art as base64, `null` → frontend gradient fallback.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
-
-Wire types in `src/lib/models/` mirror the Rust structs via serde camelCase.
+| Module                                   | Holds                                                                                                              |
+| ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `main.rs`                                | Entry point: logger, single instance, backend, window, controller; the development hooks                           |
+| `application.rs`, `application/*.rs`     | The controller on the interface thread: boot, effects, engine events, covers, notifications, refreshes — and one file per group of screens (`library_screens`, `radio_screen`, `settings_screen`) |
+| `effects.rs`                             | `Effect`: what a state module asks the controller to do                                                            |
+| `player.rs`                              | The playback mirror: what plays, transport flags, position interpolation                                           |
+| `equalizer.rs`, `playback_options.rs`    | The EQ (bands, presets, linear phase) and the four playback switches                                               |
+| `notifications.rs`                       | Error notifications, deduplicated by key                                                                           |
+| `library_view.rs`                        | Pure functions over tracks: album and artist grouping, search, the Now Playing lists, the Library selection        |
+| `radio.rs`                               | The station catalog (`data/stations.json`) and its filters                                                         |
+| `visualizer.rs`, `halo.rs`               | The oscilloscope trace as path commands; the glow picture behind the Now Playing art                               |
+| `covers.rs`                              | Cover art from base64 to pixels, and the bounded thumbnail cache                                                   |
+| `translations.rs`, `text.rs`             | The catalogs and lookups; label ordering and formatting                                                            |
+| `library.rs`, `persistence.rs`           | The scanner, watched folders and cover lookup; the database, its migrations and the preferences                    |
+| `audio.rs`                               | The `audio-stack-rs` facade re-exports and the `EngineBridge` event sink                                           |
+| `background.rs`, `instance.rs`, `logging.rs`, `platform.rs` | Worker threads; the one-instance guard; the logger; what differs by operating system            |
 
 ### Playback data flow
 
 ```
-LibraryScreen/…  → playerStore.playQueue(tracks, i)
-                    → invoke('audio_load_queue')
-engine thread    → symphonia decode → rubato → SPSC ring
-cpal callback    → 10×biquad (EQ) → volume+track gain → analyser tap → device
+a screen          → callback on a Slint global (Library.song-clicked, Player.toggled, …)
+Application       → state module method → Vec<Effect> → Application::run
+                    → AudioEngine (load_queue, toggle, set_eq, …)  /  persistence  /  workers
+engine thread     → symphonia decode → rubato → SPSC ring
+cpal callback     → 10×biquad (EQ) → volume+track gain → analyser tap → device
                     (the only realtime context: no alloc, no lock, no log)
-engine → webview → Channel<EngineEvent>  (state, position, format, device)
-                 → Channel<raw bytes>    (170-byte visual frame, ~60 Hz)
-eqStore          → invoke('audio_set_eq')                (allowed edge eq → player)
-                 → invoke('audio_set_fir_eq')            (linear-phase mode; decode chain)
-WaveformCanvas   → visualizer.tick(frame, …)             (engine frame, or synthetic fallback)
-RadioScreen      → playerStore.playStation(station)
-                    → invoke('audio_play_stream')  (async: HTTP + prefetch off
-                      the engine thread) → same decode/EQ/analyser path
+engine            → EngineBridge → post() → Player::apply → effects → refresh_player
+                  → latest visual frame, read by the 60 Hz frame timer → Visualizer → path commands
+a station click   → Player::play_station → Effect::ConnectStation → the station runtime
+                    (HTTP connect + prefetch off the interface thread) → same decode/EQ/analyser path
 ```
 
-## Svelte 5 Patterns
+### Rust ↔ Slint boundary
 
-```typescript
-let { prop1, prop2 = default }: Props = $props();  // always type with interface Props {}
-let x = $state(initialValue)
-let y = $derived(x.length)
-let z = $derived.by(() => complexComputation())
-$effect(() => { /* DOM side effects, rAF loops */ })
-```
+The screens read exported globals and call their callbacks; `Application` fills the globals and handles the callbacks. Nothing else crosses.
 
-### State Management — pick the shape that matches the data
+| Global      | File                                    | Carries                                                              |
+| ----------- | --------------------------------------- | -------------------------------------------------------------------- |
+| `Shell`     | `ui/shell.slint`                        | Open screen, search text, equalizer sheet, notifications, window drag |
+| `Player`    | `ui/features/player/player.slint`       | What is playing, transport, waveform, queue card, artist spotlight   |
+| `Equalizer` | `ui/features/equalizer/equalizer.slint` | Gains, presets, linear phase                                         |
+| `Library`   | `ui/features/library/library.slint`     | Library, Local Files and Discover lists; library actions             |
+| `Covers`    | `ui/features/library/covers.slint`      | Thumbnails by track id, loaded as tiles appear                       |
+| `Radio`     | `ui/features/radio/radio.slint`         | Filter chips, stations, the loaded station                           |
+| `Settings`  | `ui/features/settings/settings.slint`   | Playback switches, output device, language                           |
+| `Strings`   | generated by `build.rs`                 | Every translated label                                               |
+| `Tokens`    | `ui/tokens.slint`                       | Design tokens (read by Rust for the glow's colors)                   |
 
-| Idiom                                                    | When to use                                                                                                                                                     | Examples                                                                      |
-| -------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
-| **Rune class with setter methods** in `*Store.svelte.ts` | Persistent or side-effecting state (IPC, the audio engine). Private `$state` + getters.                                                                         | `playerStore`, `eqStore`, `libraryStore`, `preferencesStore`, `languageStore` |
-| **Rune class with public `$state` fields**               | Ephemeral state that must still survive leaving and returning to a screen (rule 12) — a selection, filter or view toggle with no persistence or IPC of its own. | `libraryViewStore`, `radioViewStore`, `nowPlayingViewStore`                   |
-| **Bare `writable<T>`** in `*Store.ts`                    | Single primitive shared across screens for messaging.                                                                                                           | `searchQuery`, `eqOpen`                                                       |
+Which screen is open is interface state (`Shell.screen`, a string identifier); the sidebar sets it directly.
 
-- **`NavigationStore.svelte.ts`** is a getter over `$app/state.page` — a typed reactive view of the router. Never call `goto()` directly — `navigateTo()` is the chokepoint.
+## Slint notes
 
-## Navigation
-
-| Route          | Screen           |
-| -------------- | ---------------- |
-| `/now-playing` | NowPlayingScreen |
-| `/library`     | LibraryScreen    |
-| `/discover`    | DiscoverScreen   |
-| `/radio`       | RadioScreen      |
-| `/local`       | LocalFilesScreen |
-| `/spotify`     | SpotifyScreen    |
-| `/settings`    | SettingsScreen   |
-
-See `docs/specs.md` for full screen behavior.
+- Element-level `opacity` on an animated item forces an offscreen layer (hundreds of megabytes); carry transparency in the color.
+- A stroked `Path` is laid out inside its stroke: grow it by the stroke width to keep it on its grid (see `Glyph`, `Waveform`).
+- A `Path` with a viewbox keeps its aspect ratio; give it a viewbox equal to its own size to fill a box.
+- There is no blur and no dashed stroke. Soft edges are drawn into a picture (`halo.rs`); surfaces that were translucent-over-blur are nearly opaque.
+- `FlexboxLayout` wraps (chips, presets); the other layouts do not.
+- Some names cannot be property names (`color`, `row`, and an enum value's name shadowed by a property, e.g. `cover`).
 
 ## Design System
 
 Three layers with one-way dependencies between them (full methodology in [`ATOMIC_DESIGN.md`](ATOMIC_DESIGN.md)):
 
-- `design-system/` → ∅ — atoms `IconButton`, `Chip`, `Badge`, `PrimaryButton`, `GhostButton`, `SectionLabel`, `Eyebrow`, `Toggle`, `ArtTile`, `EmptyState` (+ `IconButtonIdentifier` registry, `accent.ts` maps); molecules `NavItem`, `ToggleRow`, `PlayCircle`; organism `SidebarNav`.
-- `features/<X>/` → `design-system/` first. Allowed cross-feature edges: `library → player`, `radio → player`, `settings → player` (every feature drives playback through the player's engine client), and the deliberately mutual pair `eq ↔ player` — the EQ store drives the engine's filters while the player's canvases and EQ affordance render EQ state; they are one signal path.
-- `screens/` → any feature + design system. Screens are the only layer that freely crosses feature boundaries (e.g. NowPlayingScreen resolves library data and hands it to the player's queue card).
+- Design system (`ui/atoms`, `ui/molecules`, `ui/organisms`) → tokens and icons only — atoms `Glyph`, `IconButton`, `Chip`, `Badge`, `PrimaryButton`, `GhostButton`, `SectionLabel`, `Eyebrow`, `Toggle`, `ArtTile`, `EmptyState`; molecules `NavItem`, `ToggleRow`, `PlayCircle`, `ScreenHeader`, `ScrollArea`; organisms `SidebarNav`, `Toaster`.
+- `ui/features/<x>/` → design system first. Allowed cross-feature edges: the pair `library ↔ player` (the artist spotlight plays through the player; the queue card shows library covers) and `player → equalizer` (the EQ buttons sit in the player's components). Feature components may read `Shell`.
+- `ui/screens/` → any feature + design system. Screens are the only layer that freely crosses feature boundaries.
 
-A grep for `design-system/` importing `features/`, or a feature-to-feature edge not on the list above, is a design smell — surface it.
+A design-system file importing from `features/`, or a feature-to-feature edge not on the list above, is a design smell — surface it.
 
-SVG glyphs live as path data in `src/lib/icons/paths.ts` and render through `IconButton` / `NavItem` — no inline `<svg>` markup duplication for a glyph that exists there.
+Glyphs live as path data in `ui/icons.slint` and render through the `Glyph` atom — no path data in a component.
