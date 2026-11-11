@@ -86,6 +86,8 @@ pub struct Application {
     tracks: RefCell<Vec<Track>>,
     albums: RefCell<Vec<AlbumGroup>>,
     artists: RefCell<Vec<ArtistGroup>>,
+    /// The Library tabs' alphabetical order, renewed with the library.
+    library_order: RefCell<library_view::LibraryOrder>,
     current_art: RefCell<CurrentArt>,
     thumbnails: RefCell<covers::BoundedCache<covers::CoverKey, Thumbnail>>,
     /// Which cover each library track shows, renewed with the library.
@@ -150,6 +152,9 @@ impl Application {
         let database = Arc::new(persistence::init(platform::data_directory()?)?);
         let preferences = persistence::get_preferences(&database)?;
         let tracks = library::list_tracks(&database)?;
+        let albums = library_view::albums(&tracks);
+        let artists = library_view::artists(&tracks);
+        let library_order = library_view::LibraryOrder::new(&tracks, &albums, &artists);
         let folders = library::list_watched_folders(&database)?;
         let mut favourite_stations = FavouriteStations::default();
         favourite_stations.restore(persistence::favourite_station_ids(&database)?);
@@ -184,8 +189,9 @@ impl Application {
             playback_options: RefCell::new(PlaybackOptions::default()),
             notifications: RefCell::new(Notifications::default()),
             visualizer: RefCell::new(Visualizer::default()),
-            albums: RefCell::new(library_view::albums(&tracks)),
-            artists: RefCell::new(library_view::artists(&tracks)),
+            albums: RefCell::new(albums),
+            artists: RefCell::new(artists),
+            library_order: RefCell::new(library_order),
             cover_keys: RefCell::new(covers::CoverKeys::new(&tracks)),
             tracks: RefCell::new(tracks),
             current_art: RefCell::new(CurrentArt::default()),

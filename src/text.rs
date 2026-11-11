@@ -7,16 +7,27 @@ use crate::library::Track;
 
 /// Compares two labels alphabetically, ignoring case and the accents of the
 /// languages Janis ships in — so "Électronique" sits with the E's rather than
-/// after Z, where a plain byte comparison would put it.
+/// after Z, where a plain byte comparison would put it — and what leads up to
+/// the first letter or digit, so "'Round Midnight" sits with the R's and a
+/// stray leading space does not put a title before every other.
 pub fn compare_labels(left: &str, right: &str) -> Ordering {
     collation_key(left)
         .cmp(&collation_key(right))
         .then_with(|| left.cmp(right))
 }
 
+/// What [`compare_labels`] compares, as a key: sorting a long list by a key
+/// worked out once per item spares rebuilding it at every comparison.
+pub fn label_key(label: &str) -> (String, String) {
+    (collation_key(label), label.to_owned())
+}
+
 fn collation_key(label: &str) -> String {
-    let mut key = String::with_capacity(label.len());
-    for character in label.chars().flat_map(char::to_lowercase) {
+    let start = label.trim_start_matches(|character: char| !character.is_alphanumeric());
+    // A label of punctuation only keeps it all, rather than sorting as blank.
+    let start = if start.is_empty() { label } else { start };
+    let mut key = String::with_capacity(start.len());
+    for character in start.chars().flat_map(char::to_lowercase) {
         match character {
             'à'..='å' => key.push('a'),
             'ç' => key.push('c'),
@@ -89,6 +100,34 @@ pub fn art_gradient_index(seed: &str) -> usize {
 mod tests {
     use super::*;
     use crate::library::test_support::track;
+
+    #[test]
+    fn labels_sort_from_their_first_letter_or_digit() {
+        let mut labels = vec![
+            "Zebra",
+            " Telecommunication",
+            "\"Live\" At Notodden",
+            "'Round Midnight",
+            "$ The Weed",
+            "'74 Jailbreak",
+            "...",
+            "Électronique",
+        ];
+        labels.sort_by(|left, right| compare_labels(left, right));
+        assert_eq!(
+            labels,
+            [
+                "...",
+                "'74 Jailbreak",
+                "Électronique",
+                "\"Live\" At Notodden",
+                "'Round Midnight",
+                " Telecommunication",
+                "$ The Weed",
+                "Zebra",
+            ]
+        );
+    }
 
     #[test]
     fn format_time_shows_minutes_and_zero_padded_seconds() {
