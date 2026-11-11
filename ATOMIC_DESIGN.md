@@ -334,31 +334,9 @@ sales pages just by swapping the organisms rendered into each region.
 
 ## 8. How Janis Applies This
 
-Janis separates **the design system** (generic, domain-agnostic primitives) from **the application** (audio-player components under `ui/features/`). Atomic-design tiering classifies components inside both layers.
+Janis separates **the design system** (generic, domain-agnostic primitives in `ui/atoms`, `ui/molecules` and `ui/organisms`) from **the application** (audio-player components under `ui/features/`), with **screens** (`ui/screens/`) composing features into what the listener sees and `ui/app.slint` as the template they slot into. Atomic-design tiering classifies components inside both layers.
 
-### The design system (`ui/atoms`, `ui/molecules`, `ui/organisms`)
-
-Could plausibly ship as a separate library — nothing here knows about audio.
-
-- **Atoms** — `Glyph`, `IconButton` (with the `IconButtonIdentifier` registry), `Chip`, `Badge`, `PrimaryButton`, `GhostButton`, `SectionLabel`, `Eyebrow`, `Toggle`, `ArtTile`, `EmptyState`.
-- **Molecules** — `NavItem`, `ToggleRow`, `PlayCircle`, `ScreenHeader`, `ScrollArea`.
-- **Organisms** — `SidebarNav`, `Toaster`.
-
-### The features (`ui/features/`)
-
-Each feature folder is **capability-shaped** — a coherent unit of functionality that screens compose. A feature owns its components and the global they read. Features do **not** own screens.
-
-- **`player/`** — global `Player`. Components: `MiniPlayer`, `Waveform`, `NowPlayingQueue`, `TransportControls`, `VolumeSlider`.
-- **`equalizer/`** — global `Equalizer`. Components: `EqualizerOverlay` (bottom sheet), `EqualizerBandSlider`, `OpenEqualizerButton`.
-- **`library/`** — globals `Library` and `Covers`. Components: `CoverArt`, `AlbumCard`, `CardGrid`, `TrackRow`, `TrackList`, `LibraryTrackAccordion`, `LocalRow`, `LocalTable`, `ShelfTile`, `Shelf`, `ArtistSpotlight`.
-- **`radio/`** — global `Radio`. Component: `StationCard`.
-- **`settings/`** — global `Settings`.
-
-### The screens (`ui/screens/`)
-
-Compositions that wire features together into what the listener sees. Atomic-design "pages" in the pure sense — they sit above the atomic tiers and consume from them: `NowPlayingScreen`, `LibraryScreen`, `DiscoverScreen`, `RadioScreen`, `LocalFilesScreen`, `SpotifyScreen`, `SettingsScreen`, and `AppTitlebar`, the window's own strip. `app.slint` is the template: title bar, sidebar, the open screen, the mini player, and what floats above them.
-
-The mandatory project rules in `CLAUDE.md` enforce the atomic discipline: tokens only, the icon-button registry, thin screens, reuse first, and search → ask → create for new components.
+The tiers as they stand — every component, the allowed dependencies between layers, how data flows to and from Rust, and the Slint specifics — are in [`.claude/rules/slint-ui.md`](.claude/rules/slint-ui.md), which is the reference to keep current when a component is added. The mandatory rules in `CLAUDE.md` enforce the discipline: atomic tiers, tokens only, reuse first, and search → ask → create for new components.
 
 ---
 
@@ -399,4 +377,4 @@ pattern, fix the pattern, not the page.
 - Propelius Technologies, _Atomic Design in React: Best Practices_ —
   <https://propelius.tech/blogs/atomic-design-in-react-best-practices/>
   (the source's React-specific advice has been translated to Slint idioms throughout this document)
-- Janis-specific application — `CLAUDE.md` (the mandatory rules, and the Design System section, which doubles as the component catalogue)
+- Janis-specific application — `CLAUDE.md` (the mandatory rules) and `.claude/rules/slint-ui.md` (the tiers and the component catalogue)
