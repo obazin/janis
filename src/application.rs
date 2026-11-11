@@ -278,6 +278,8 @@ impl Application {
         self.engine.set_volume(0.0);
     }
 
+    /// The library as loaded, for the development hook that searches it.
+    #[cfg(debug_assertions)]
     pub fn tracks(&self) -> Vec<Track> {
         self.tracks.borrow().clone()
     }
