@@ -14,7 +14,7 @@ A native application written in **Rust**, with a **[Slint](https://slint.dev)** 
 - **10-band EQ** — bottom-sheet graphic equalizer with presets (Rock, Jazz, Bass Boost, …), applied live to playback, persisted across launches.
 - **Settings** — playback switches (gapless, crossfade and normalization are live in the engine and on by default; exclusive output is persisted only), output info, language (English / Français).
 
-Playlists, Spotify integration and user-added stations are on the roadmap.
+Playlists and user-added stations are on the roadmap.
 
 ## Install
 
