@@ -5,12 +5,11 @@
 //! (`crate::audio::{read_metadata, read_cover, audio_extension}`); this module
 //! walks folders, upserts the results into `tracks` keyed by absolute path (so
 //! a rescan updates in place and never duplicates), and resolves playback gain.
-//! The webview never touches the filesystem — cover art reaches it as base64
-//! over IPC.
+//! Every scan here blocks for as long as the walk takes, so callers run them
+//! off the user-interface thread.
 
-use serde::Serialize;
 use std::path::{Path, PathBuf};
-use tauri::{AppHandle, Manager};
+use std::sync::Arc;
 use walkdir::WalkDir;
 
 use crate::audio::{
@@ -18,8 +17,7 @@ use crate::audio::{
 };
 use crate::persistence::DbState;
 
-#[derive(Serialize, Clone)]
-#[serde(rename_all = "camelCase")]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Track {
     pub id: i64,
     pub folder_id: Option<i64>,
@@ -46,21 +44,19 @@ pub struct Track {
     /// The album's own artist, which on a compilation is not the track's.
     pub album_artist: Option<String>,
     /// Playback gain in dB, already resolved from the ReplayGain tags or the
-    /// measured loudness. Zero when neither is known. Resolved here so the
-    /// frontend never has to re-derive it.
+    /// measured loudness. Zero when neither is known. Resolved here so
+    /// nothing downstream has to re-derive it.
     pub gain_db: f64,
 }
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Clone, Debug, PartialEq)]
 pub struct WatchedFolder {
     pub id: i64,
     pub path: String,
     pub track_count: i64,
 }
 
-#[derive(Serialize, Default)]
-#[serde(rename_all = "camelCase")]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct ScanReport {
     pub added: usize,
     pub updated: usize,
@@ -282,8 +278,7 @@ fn prune_missing(db: &DbState) -> Result<usize, String> {
     Ok(doomed.len())
 }
 
-#[tauri::command]
-pub fn list_tracks(db: tauri::State<'_, DbState>) -> Result<Vec<Track>, String> {
+pub fn list_tracks(db: &DbState) -> Result<Vec<Track>, String> {
     let conn = db.lock();
     let mut stmt = conn
         .prepare(
@@ -335,8 +330,7 @@ pub fn list_tracks(db: tauri::State<'_, DbState>) -> Result<Vec<Track>, String> 
     Ok(tracks)
 }
 
-#[tauri::command]
-pub fn list_watched_folders(db: tauri::State<'_, DbState>) -> Result<Vec<WatchedFolder>, String> {
+pub fn list_watched_folders(db: &DbState) -> Result<Vec<WatchedFolder>, String> {
     let conn = db.lock();
     let mut stmt = conn
         .prepare(
@@ -358,41 +352,32 @@ pub fn list_watched_folders(db: tauri::State<'_, DbState>) -> Result<Vec<Watched
     Ok(folders)
 }
 
-/// Registers a folder and scans it. The scan is a long walk + tag reads, so it
-/// runs on the blocking pool — the UI stays live and shows the report when it
-/// lands.
-#[tauri::command]
-pub async fn add_watched_folder(app: AppHandle, path: String) -> Result<ScanReport, String> {
-    let folder = PathBuf::from(&path);
+/// Registers a folder and scans it. The scan is a long walk + tag reads.
+pub fn add_watched_folder(db: &DbState, path: &str) -> Result<ScanReport, String> {
+    let folder = PathBuf::from(path);
     if !folder.is_dir() {
         return Err(format!("not a directory: {}", path));
     }
-    tauri::async_runtime::spawn_blocking(move || {
-        let db = app.state::<DbState>();
-        // The lock covers only the registration; the walk itself runs unlocked
-        // (see `scan_folder`).
-        let folder_id: i64 = {
-            let conn = db.lock();
-            conn.execute(
-                "INSERT OR IGNORE INTO watched_folders (path) VALUES (?1)",
-                [&path],
-            )
-            .map_err(|e| format!("register folder: {}", e))?;
-            conn.query_row(
-                "SELECT id FROM watched_folders WHERE path = ?1",
-                [&path],
-                |r| r.get(0),
-            )
-            .map_err(|e| format!("resolve folder id: {}", e))?
-        };
-        Ok(scan_folder(db.inner(), folder_id, &folder))
-    })
-    .await
-    .map_err(|e| format!("scan task: {}", e))?
+    // The lock covers only the registration; the walk itself runs unlocked
+    // (see `scan_folder`).
+    let folder_id: i64 = {
+        let conn = db.lock();
+        conn.execute(
+            "INSERT OR IGNORE INTO watched_folders (path) VALUES (?1)",
+            [path],
+        )
+        .map_err(|e| format!("register folder: {}", e))?;
+        conn.query_row(
+            "SELECT id FROM watched_folders WHERE path = ?1",
+            [path],
+            |r| r.get(0),
+        )
+        .map_err(|e| format!("resolve folder id: {}", e))?
+    };
+    Ok(scan_folder(db, folder_id, &folder))
 }
 
-#[tauri::command]
-pub fn remove_watched_folder(db: tauri::State<'_, DbState>, folder_id: i64) -> Result<(), String> {
+pub fn remove_watched_folder(db: &DbState, folder_id: i64) -> Result<(), String> {
     let conn = db.lock();
     conn.execute("DELETE FROM watched_folders WHERE id = ?1", [folder_id])
         .map_err(|e| format!("remove folder: {}", e))?;
@@ -402,75 +387,63 @@ pub fn remove_watched_folder(db: tauri::State<'_, DbState>, folder_id: i64) -> R
 /// Ad-hoc single-file import (the Add-music dialog and OS drag-and-drop). Files
 /// land with no watched folder; a rescan keeps them as long as the file still
 /// exists.
-#[tauri::command]
-pub async fn import_files(app: AppHandle, paths: Vec<String>) -> Result<ScanReport, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        let db = app.state::<DbState>();
-        let mut report = ScanReport::default();
-        // Same lock discipline as a folder scan: probe files unlocked, write
-        // in bursts.
-        let mut batch: Vec<(String, Metadata)> = Vec::with_capacity(SCAN_BATCH);
-        for p in paths {
-            match read_metadata(Path::new(&p)) {
-                Ok(meta) => {
-                    batch.push((p, meta));
-                    if batch.len() >= SCAN_BATCH {
-                        flush_batch(db.inner(), None, &mut batch, &mut report);
-                    }
-                }
-                Err(e) => {
-                    log::warn!("{}", e);
-                    report.skipped += 1;
+pub fn import_files(db: &DbState, paths: Vec<String>) -> ScanReport {
+    let mut report = ScanReport::default();
+    // Same lock discipline as a folder scan: probe files unlocked, write in
+    // bursts.
+    let mut batch: Vec<(String, Metadata)> = Vec::with_capacity(SCAN_BATCH);
+    for path in paths {
+        match read_metadata(Path::new(&path)) {
+            Ok(meta) => {
+                batch.push((path, meta));
+                if batch.len() >= SCAN_BATCH {
+                    flush_batch(db, None, &mut batch, &mut report);
                 }
             }
+            Err(e) => {
+                log::warn!("{}", e);
+                report.skipped += 1;
+            }
         }
-        flush_batch(db.inner(), None, &mut batch, &mut report);
-        Ok(report)
-    })
-    .await
-    .map_err(|e| format!("import task: {}", e))?
+    }
+    flush_batch(db, None, &mut batch, &mut report);
+    report
 }
 
 /// Re-walks every watched folder (picking up new + changed files) and prunes
 /// rows whose file is gone.
-#[tauri::command]
-pub async fn rescan_library(app: AppHandle) -> Result<ScanReport, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        let db = app.state::<DbState>();
-        let folders: Vec<(i64, String)> = {
-            let conn = db.lock();
-            conn.prepare("SELECT id, path FROM watched_folders")
-                .and_then(|mut stmt| {
-                    stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
-                        .collect()
-                })
-                .map_err(|e| format!("list folders: {}", e))?
-        };
-        let mut report = ScanReport::default();
-        for (id, path) in folders {
-            let root = Path::new(&path);
-            if !root.is_dir() {
-                // An ejected drive or offline share. WalkDir would swallow the
-                // error and report an empty, healthy-looking folder; skipping
-                // it keeps the report honest, and `prune_missing` independently
-                // refuses to touch its tracks.
-                log::warn!("watched folder unreachable, skipped: {}", path);
-                continue;
-            }
-            let sub = scan_folder(db.inner(), id, root);
-            report.added += sub.added;
-            report.updated += sub.updated;
-            report.skipped += sub.skipped;
+pub fn rescan_library(db: &DbState) -> Result<ScanReport, String> {
+    let folders: Vec<(i64, String)> = {
+        let conn = db.lock();
+        conn.prepare("SELECT id, path FROM watched_folders")
+            .and_then(|mut stmt| {
+                stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+                    .collect()
+            })
+            .map_err(|e| format!("list folders: {}", e))?
+    };
+    let mut report = ScanReport::default();
+    for (id, path) in folders {
+        let root = Path::new(&path);
+        if !root.is_dir() {
+            // An ejected drive or offline share. WalkDir would swallow the
+            // error and report an empty, healthy-looking folder; skipping
+            // it keeps the report honest, and `prune_missing` independently
+            // refuses to touch its tracks.
+            log::warn!("watched folder unreachable, skipped: {}", path);
+            continue;
         }
-        report.removed = prune_missing(db.inner())?;
-        Ok(report)
-    })
-    .await
-    .map_err(|e| format!("rescan task: {}", e))?
+        let sub = scan_folder(db, id, root);
+        report.added += sub.added;
+        report.updated += sub.updated;
+        report.skipped += sub.skipped;
+    }
+    report.removed = prune_missing(db)?;
+    Ok(report)
 }
 
 /// The engine's route to the loudness columns.
-pub struct LoudnessStore(pub AppHandle);
+pub struct LoudnessStore(pub Arc<DbState>);
 
 impl crate::audio::Store for LoudnessStore {
     fn needs_measurement(&self, track_id: i64) -> bool {
@@ -486,10 +459,7 @@ impl crate::audio::Store for LoudnessStore {
 ///
 /// True only when neither the file's tags nor a previous measurement said,
 /// which is what decides if playing it is worth measuring.
-pub fn needs_loudness(app: &AppHandle, track_id: i64) -> bool {
-    let Some(db) = app.try_state::<DbState>() else {
-        return false;
-    };
+pub fn needs_loudness(db: &DbState, track_id: i64) -> bool {
     let conn = db.lock();
     conn.query_row(
         "SELECT rg_track_gain_db IS NULL AND loudness_lufs IS NULL
@@ -505,10 +475,7 @@ pub fn needs_loudness(app: &AppHandle, track_id: i64) -> bool {
 ///
 /// Written outside `upsert_track` on purpose: a rescan re-reads tags and would
 /// otherwise wipe a measurement it knows nothing about.
-pub fn store_loudness(app: &AppHandle, track_id: i64, lufs: f64, peak: f64) {
-    let Some(db) = app.try_state::<DbState>() else {
-        return;
-    };
+pub fn store_loudness(db: &DbState, track_id: i64, lufs: f64, peak: f64) {
     let conn = db.lock();
     if let Err(e) = conn.execute(
         "UPDATE tracks SET loudness_lufs = ?2, loudness_peak = ?3 WHERE id = ?1",
@@ -518,28 +485,17 @@ pub fn store_loudness(app: &AppHandle, track_id: i64, lufs: f64, peak: f64) {
     }
 }
 
-/// Cover art for one track, base64-encoded for the IPC hop.
+/// Cover art for one track, as the file embeds it.
 ///
 /// Falls back to the rest of the album: a rip where only the first file carries
 /// the picture is common, and every track on that record should still show the
-/// sleeve. `None` only when nothing in the album has art — the frontend then
-/// draws its generated gradient.
-#[tauri::command]
-pub async fn get_track_cover(app: AppHandle, track_id: i64) -> Result<Option<CoverArt>, String> {
-    let paths = cover_candidates(&app, track_id);
-    if paths.is_empty() {
-        return Ok(None);
-    }
-    tauri::async_runtime::spawn_blocking(move || {
-        for path in paths {
-            if let Some(cover) = read_cover(&path) {
-                return Ok(Some(cover));
-            }
-        }
-        Ok(None)
-    })
-    .await
-    .map_err(|e| format!("cover task: {}", e))?
+/// sleeve. `None` only when nothing in the album has art — the tile then draws
+/// its generated gradient. Opens files, so it runs off the user-interface
+/// thread.
+pub fn track_cover(db: &DbState, track_id: i64) -> Option<CoverArt> {
+    cover_candidates(db, track_id)
+        .iter()
+        .find_map(|path| read_cover(path))
 }
 
 /// How many album siblings to open before giving up. A record whose first dozen
@@ -547,8 +503,7 @@ pub async fn get_track_cover(app: AppHandle, track_id: i64) -> Result<Option<Cov
 const COVER_SIBLING_LIMIT: usize = 12;
 
 /// The track's own file first, then its album siblings in playing order.
-fn cover_candidates(app: &AppHandle, track_id: i64) -> Vec<String> {
-    let db = app.state::<DbState>();
+fn cover_candidates(db: &DbState, track_id: i64) -> Vec<String> {
     let conn = db.lock();
 
     let Ok(own) = conn.query_row("SELECT path FROM tracks WHERE id = ?1", [track_id], |r| {
@@ -582,6 +537,39 @@ fn cover_candidates(app: &AppHandle, track_id: i64) -> Vec<String> {
     paths.push(own);
     paths.extend(siblings);
     paths
+}
+
+/// A blank track for tests across the crate to fill in.
+#[cfg(test)]
+pub mod test_support {
+    use super::Track;
+
+    pub fn track(id: i64, title: &str) -> Track {
+        Track {
+            id,
+            folder_id: None,
+            path: format!("/music/{id}.flac"),
+            title: title.to_owned(),
+            artist: None,
+            album: None,
+            composer: None,
+            duration_secs: 0.0,
+            format: "FLAC".to_owned(),
+            sample_rate: None,
+            bit_depth: None,
+            channels: None,
+            lossless: true,
+            added_at: 0,
+            track_number: None,
+            track_total: None,
+            disc_number: None,
+            disc_total: None,
+            year: None,
+            genre: None,
+            album_artist: None,
+            gain_db: 0.0,
+        }
+    }
 }
 
 #[cfg(test)]

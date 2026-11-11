@@ -7,32 +7,18 @@ license = "GPL-3.0-only"
 edition = "2021"
 publish = false
 
-# Compiled binary is "Janis" (capitalized) so macOS shows "Janis" in the dock
-# during `tauri dev` — the dev binary runs without an .app wrapper, so its
-# filename is what AppKit displays. Matches `mainBinaryName` in tauri.conf.json.
+# The binary is "Janis" (capitalized) so the operating system shows that name
+# for a build run outside its application bundle.
 [[bin]]
 name = "Janis"
 path = "src/main.rs"
 
-[build-dependencies]
-tauri-build = { version = "2.5", features = [] }
-
 [dependencies]
-# No `protocol-asset`: nothing in the webview loads files. Audio is decoded
-# in Rust and cover art crosses IPC as base64, so the webview has no path to
-# the filesystem at all.
-tauri = { version = "2.10", features = [] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
-tokio = { version = "1", features = ["full"] }
-tauri-plugin-dialog = "2.7"
-tauri-plugin-log = "2.8"
-# Second-launch guard: a second Janis process must never run — it would race
-# the SQLite write lock on `janis.db`. The plugin hands the second launch to
-# the running instance (which focuses its window) and exits it. Registered
-# FIRST in the builder so the guard exists before any state/setup work.
-tauri-plugin-single-instance = "2.4.3"
 log = "0.4.29"
+# Resolves the per-user data directory on every platform.
+dirs = "6"
 # `bundled` ships SQLite with the binary so we don't depend on the system
 # library version. `janis.db` holds the track library and user preferences.
 rusqlite = { version = "0.31", features = ["bundled"] }
@@ -44,10 +30,10 @@ walkdir = "2"
 # The whole audio path — engine, web radio, and audio-file metadata parsing —
 # lives in this standalone MIT crate (https://github.com/obazin/audio-stack-rs).
 # Janis imports only its facade: none of the audio/metadata crates (cpal,
-# symphonia, lofty, stream-download, opus, …) are direct dependencies here any
-# more. Pinned to a tag; `Cargo.lock` records the exact commit. Janis's
-# dev-profile `opt-level = 2` override below still applies to it (and its
-# transitive deps), so realtime DSP stays fast.
+# symphonia, lofty, stream-download, opus, …) are direct dependencies here.
+# Pinned to a tag; `Cargo.lock` records the exact commit. The dev-profile
+# `opt-level = 2` override below still applies to it (and its transitive
+# deps), so realtime DSP stays fast.
 #
 # `fir-eq` opts into the linear-phase EQ: the same ten bands with no
 # inter-band phase distortion, offered by the equalizer sheet as a quality
@@ -56,10 +42,6 @@ walkdir = "2"
 audio-stack-rs = { git = "https://github.com/obazin/audio-stack-rs", tag = "spectral-dsp", features = [
     "fir-eq",
 ] }
-
-[features]
-# This feature is used for production builds or when a dev server is not specified, DO NOT REMOVE!!
-custom-protocol = ["tauri/custom-protocol"]
 
 # Audio DSP is unusably slow under the default dev profile (opt-level 0 in
 # every dependency means the decoder cannot keep the ring fed). Optimise

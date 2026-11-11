@@ -1,0 +1,259 @@
+//! The web-radio catalog and the filters the Radio screen offers over it.
+//!
+//! The curated station list ships as static JSON (`stations.json`) — a merge of
+//! hand-picked flagship streams and the most-listened stations per country
+//! from the Radio Browser community database, baked in at build time. No
+//! network call is made to list stations.
+
+use std::collections::HashMap;
+
+use serde::Deserialize;
+
+use crate::audio::Source;
+use crate::text::compare_labels;
+use crate::translations::Translations;
+
+const STATIONS: &str = include_str!("lib/features/radio/stations.json");
+
+/// The genre chip that clears the genre filter.
+pub const ALL_GENRES_KEY: &str = "radio.genre.all";
+/// The country chip that clears the country filter.
+pub const ALL_COUNTRIES_KEY: &str = "radio.country.all";
+
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Station {
+    pub id: String,
+    pub name: String,
+    /// ISO 3166-1 alpha-2 country code (uppercase) — drives the country filter.
+    pub country: String,
+    /// Translation key for the genre label — also the genre filter's value.
+    pub genre_key: String,
+    pub kbps: u32,
+    pub url: String,
+    /// Index into the generated-art gradients.
+    #[serde(rename = "gradIndex")]
+    pub gradient_index: usize,
+    /// Where the station publishes what it is playing. Absent when it only
+    /// carries metadata in the stream itself, or none at all.
+    #[serde(default)]
+    pub now_playing: Option<Source>,
+}
+
+/// Translation key for a country's name, e.g. "US" → `radio.country.us`.
+pub fn country_label_key(code: &str) -> String {
+    format!("radio.country.{}", code.to_lowercase())
+}
+
+pub struct Catalog {
+    stations: Vec<Station>,
+    /// Every genre present, in order of first appearance.
+    genres: Vec<String>,
+    /// Every country present, most stations first.
+    countries: Vec<String>,
+}
+
+impl Catalog {
+    /// The catalog compiled into the binary.
+    pub fn bundled() -> Self {
+        // Compiled in and covered by the tests below, so a parse failure
+        // cannot reach a user.
+        Self::new(serde_json::from_str(STATIONS).unwrap_or_default())
+    }
+
+    pub fn new(stations: Vec<Station>) -> Self {
+        let mut genres: Vec<String> = Vec::new();
+        let mut countries: Vec<String> = Vec::new();
+        let mut station_counts: HashMap<&str, usize> = HashMap::new();
+        for station in &stations {
+            if !genres.contains(&station.genre_key) {
+                genres.push(station.genre_key.clone());
+            }
+            let count = station_counts.entry(&station.country).or_insert(0);
+            if *count == 0 {
+                countries.push(station.country.clone());
+            }
+            *count += 1;
+        }
+        // Stable, so countries with as many stations keep their first-seen order.
+        countries.sort_by_key(|country| std::cmp::Reverse(station_counts[country.as_str()]));
+        Self {
+            stations,
+            genres,
+            countries,
+        }
+    }
+
+    pub fn stations(&self) -> &[Station] {
+        &self.stations
+    }
+
+    pub fn station_by_id(&self, id: &str) -> Option<&Station> {
+        self.stations.iter().find(|station| station.id == id)
+    }
+
+    /// Country codes for the filter chips, most-populated first.
+    pub fn countries(&self) -> &[String] {
+        &self.countries
+    }
+
+    /// Genre keys for the filter chips, by their label in the current language.
+    pub fn genres_by_label(&self, translations: &Translations) -> Vec<String> {
+        let mut genres = self.genres.clone();
+        genres.sort_by(|left, right| {
+            compare_labels(&translations.text(left), &translations.text(right))
+        });
+        genres
+    }
+
+    /// The stations the screen shows. Both filters are multi-select and an
+    /// empty one means "all"; the search matches the station's name or its
+    /// genre label in the current language.
+    pub fn filtered(
+        &self,
+        countries: &[String],
+        genres: &[String],
+        search: &str,
+        translations: &Translations,
+    ) -> Vec<&Station> {
+        let query = search.trim().to_lowercase();
+        self.stations
+            .iter()
+            .filter(|station| {
+                (countries.is_empty() || countries.contains(&station.country))
+                    && (genres.is_empty() || genres.contains(&station.genre_key))
+                    && (query.is_empty()
+                        || station.name.to_lowercase().contains(&query)
+                        || translations
+                            .text(&station.genre_key)
+                            .to_lowercase()
+                            .contains(&query))
+            })
+            .collect()
+    }
+}
+
+/// Flips one value of a multi-select filter.
+pub fn toggle_filter(selected: &mut Vec<String>, value: &str) {
+    match selected.iter().position(|candidate| candidate == value) {
+        Some(position) => {
+            selected.remove(position);
+        }
+        None => selected.push(value.to_owned()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::translations::Language;
+
+    fn station(id: &str, name: &str, country: &str, genre: &str) -> Station {
+        Station {
+            id: id.to_owned(),
+            name: name.to_owned(),
+            country: country.to_owned(),
+            genre_key: format!("radio.genre.{genre}"),
+            kbps: 128,
+            url: format!("https://example.invalid/{id}"),
+            gradient_index: 0,
+            now_playing: None,
+        }
+    }
+
+    fn small_catalog() -> Catalog {
+        Catalog::new(vec![
+            station("one", "Groove Salad", "US", "ambient"),
+            station("two", "FIP", "FR", "eclectic"),
+            station("three", "FIP Jazz", "FR", "jazz"),
+            station("four", "Jazz24", "US", "jazz"),
+            station("five", "TSF Jazz", "FR", "jazz"),
+        ])
+    }
+
+    #[test]
+    fn the_bundled_catalog_parses_and_every_label_is_translated() {
+        let catalog = Catalog::bundled();
+        assert!(catalog.stations().len() > 1000);
+        let translations = Translations::new(Language::English);
+        let keys: Vec<&str> = translations.keys().collect();
+        for station in catalog.stations() {
+            assert!(
+                keys.contains(&station.genre_key.as_str()),
+                "{}",
+                station.genre_key
+            );
+            let country = country_label_key(&station.country);
+            assert!(keys.contains(&country.as_str()), "{country}");
+        }
+        assert!(keys.contains(&ALL_GENRES_KEY));
+        assert!(keys.contains(&ALL_COUNTRIES_KEY));
+    }
+
+    #[test]
+    fn the_bundled_catalog_keeps_its_now_playing_providers_and_unique_ids() {
+        let catalog = Catalog::bundled();
+        let groove_salad = catalog
+            .station_by_id("soma-groovesalad")
+            .expect("the first curated station");
+        assert_eq!(
+            groove_salad.now_playing,
+            Some(Source::Somafm("groovesalad".to_owned()))
+        );
+        let mut ids: Vec<&str> = catalog.stations().iter().map(|s| s.id.as_str()).collect();
+        ids.sort_unstable();
+        let total = ids.len();
+        ids.dedup();
+        assert_eq!(ids.len(), total);
+    }
+
+    #[test]
+    fn countries_are_listed_most_populated_first() {
+        assert_eq!(small_catalog().countries(), ["FR", "US"]);
+    }
+
+    #[test]
+    fn genres_are_listed_by_their_label_in_the_current_language() {
+        let catalog = small_catalog();
+        let english = Translations::new(Language::English);
+        let genres = catalog.genres_by_label(&english);
+        let mut labels: Vec<String> = genres.iter().map(|key| english.text(key)).collect();
+        let listed = labels.clone();
+        labels.sort_by(|left, right| compare_labels(left, right));
+        assert_eq!(listed, labels);
+        assert_eq!(genres.len(), 3);
+    }
+
+    #[test]
+    fn empty_filters_show_everything_and_filters_combine() {
+        let catalog = small_catalog();
+        let translations = Translations::new(Language::English);
+        let ids = |countries: &[&str], genres: &[&str], search: &str| -> Vec<String> {
+            let countries: Vec<String> = countries.iter().map(|c| c.to_string()).collect();
+            let genres: Vec<String> = genres.iter().map(|g| format!("radio.genre.{g}")).collect();
+            catalog
+                .filtered(&countries, &genres, search, &translations)
+                .iter()
+                .map(|station| station.id.clone())
+                .collect()
+        };
+
+        assert_eq!(ids(&[], &[], "").len(), 5);
+        assert_eq!(ids(&["FR"], &[], ""), ["two", "three", "five"]);
+        assert_eq!(ids(&["FR"], &["jazz"], ""), ["three", "five"]);
+        assert_eq!(ids(&["FR", "US"], &["jazz", "ambient"], "").len(), 4);
+        assert_eq!(ids(&[], &[], "  fip "), ["two", "three"]);
+        // The search also reads the genre label, not only the station name.
+        assert_eq!(ids(&[], &[], "ambient"), ["one"]);
+    }
+
+    #[test]
+    fn toggling_a_filter_value_adds_then_removes_it() {
+        let mut selected = Vec::new();
+        toggle_filter(&mut selected, "FR");
+        toggle_filter(&mut selected, "US");
+        assert_eq!(selected, ["FR", "US"]);
+        toggle_filter(&mut selected, "FR");
+        assert_eq!(selected, ["US"]);
+    }
+}
