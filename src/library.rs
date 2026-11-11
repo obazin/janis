@@ -90,7 +90,9 @@ fn upsert_track(
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12,
                  ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23)
          ON CONFLICT(path) DO UPDATE SET
-             folder_id = excluded.folder_id,
+             -- An ad-hoc import of a file a watched folder already holds
+             -- leaves it in that folder.
+             folder_id = COALESCE(excluded.folder_id, tracks.folder_id),
              title = excluded.title,
              artist = excluded.artist,
              album = excluded.album,
@@ -166,9 +168,16 @@ fn scan_folder(db: &DbState, folder_id: i64, folder: &Path) -> ScanReport {
         if audio_extension(path).is_none() {
             continue;
         }
+        // Paths are stored as text. One that is not valid Unicode could only
+        // be stored altered, as the path of a file that does not exist.
+        let Some(path_text) = path.to_str() else {
+            log::warn!("skipped, its path is not valid Unicode: {}", path.display());
+            report.skipped += 1;
+            continue;
+        };
         match read_metadata(path) {
             Ok(meta) => {
-                batch.push((path.to_string_lossy().into_owned(), meta));
+                batch.push((path_text.to_owned(), meta));
                 if batch.len() >= SCAN_BATCH {
                     flush_batch(db, Some(folder_id), &mut batch, &mut report);
                 }
@@ -204,18 +213,28 @@ fn flush_batch(
             return;
         }
     };
+    let mut written = ScanReport::default();
     for (path, meta) in batch.drain(..) {
         match upsert_track(&tx, folder_id, &path, &meta) {
-            Ok(true) => report.added += 1,
-            Ok(false) => report.updated += 1,
+            Ok(true) => written.added += 1,
+            Ok(false) => written.updated += 1,
             Err(e) => {
                 log::warn!("{}", e);
-                report.skipped += 1;
+                written.skipped += 1;
             }
         }
     }
-    if let Err(e) = tx.commit() {
-        log::warn!("scan batch commit: {}", e);
+    match tx.commit() {
+        Ok(()) => {
+            report.added += written.added;
+            report.updated += written.updated;
+            report.skipped += written.skipped;
+        }
+        // Nothing of the batch was kept.
+        Err(e) => {
+            log::warn!("scan batch commit: {}", e);
+            report.skipped += written.added + written.updated + written.skipped;
+        }
     }
 }
 
@@ -224,9 +243,9 @@ fn flush_batch(
 /// "Vanished" requires the place the file lived to still be reachable: a track
 /// is only pruned when its watched folder's root (or, for an ad-hoc import, its
 /// parent directory) is a directory right now and the file is not in it.
-/// Without that guard, a rescan with an external drive ejected read every row
-/// as missing and silently deleted the whole library — along with the loudness
-/// measurements a rescan can never rebuild.
+/// The guard is what keeps a rescan with an external drive ejected from
+/// reading every row as missing and deleting the whole library — along with
+/// the loudness measurements a rescan can never rebuild.
 fn prune_missing(db: &DbState) -> Result<usize, String> {
     let (tracks, folders) = {
         let conn = db.lock();
@@ -600,8 +619,30 @@ mod tests {
         wav.extend_from_slice(&vec![0u8; data_len as usize]);
         std::fs::create_dir_all(path.parent().expect("has a parent")).expect("temp dir");
         std::fs::File::create(path)
-            .and_then(|mut f| f.write_all(&wav))
+            .and_then(|mut file| file.write_all(&wav))
             .expect("write test wav");
+    }
+
+    #[test]
+    fn importing_a_file_of_a_watched_folder_leaves_it_in_that_folder() {
+        let dir = std::env::temp_dir().join("janis-import-test");
+        let _ = std::fs::remove_dir_all(&dir);
+        let db = crate::persistence::init(dir.clone()).expect("db");
+        let folder = dir.join("watched");
+        let file = folder.join("song.wav");
+        write_wav(&file);
+
+        let scanned = add_watched_folder(&db, &folder.to_string_lossy()).expect("scan");
+        assert_eq!(scanned.added, 1);
+        let imported = import_files(&db, vec![file.to_string_lossy().into_owned()]);
+        assert_eq!(imported.updated, 1);
+
+        let folders = list_watched_folders(&db).expect("folders");
+        assert_eq!(folders[0].track_count, 1);
+        let tracks = list_tracks(&db).expect("tracks");
+        assert_eq!(tracks[0].folder_id, Some(folders[0].id));
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -651,8 +692,8 @@ mod tests {
             .expect("count");
         assert_eq!(
             survivors, 2,
-            "the unreachable volume's track must survive — ejecting a drive \
-             and pressing Rescan used to silently delete its whole library"
+            "the unreachable volume's track must survive: an ejected drive \
+             must not empty the library"
         );
 
         let _ = std::fs::remove_dir_all(&dir);
