@@ -26,6 +26,9 @@ pub struct Track {
     pub folder_id: Option<i64>,
     /// The media server the song lives on; `None` for a file on disk.
     pub server_id: Option<i64>,
+    /// The server item whose picture is the song's cover — its own, or its
+    /// album's. `None` for a file, and for a server song with no picture.
+    pub artwork_item: Option<String>,
     pub path: String,
     pub title: String,
     pub artist: Option<String>,
@@ -338,7 +341,7 @@ pub fn list_tracks(db: &DbState) -> Result<Vec<Track>, String> {
                     track_number, track_total, disc_number, disc_total,
                     year, genre, album_artist,
                     rg_track_gain_db, rg_track_peak, loudness_lufs, loudness_peak,
-                    server_id
+                    server_id, artwork_item
              FROM tracks ORDER BY added_at DESC, id DESC",
         )
         .map_err(|e| format!("prepare list_tracks: {}", e))?;
@@ -348,6 +351,7 @@ pub fn list_tracks(db: &DbState) -> Result<Vec<Track>, String> {
                 id: row.get(0)?,
                 folder_id: row.get(1)?,
                 server_id: row.get(25)?,
+                artwork_item: row.get(26)?,
                 path: row.get(2)?,
                 title: row.get(3)?,
                 artist: row.get(4)?,
@@ -716,6 +720,7 @@ pub mod test_support {
             id,
             folder_id: None,
             server_id: None,
+            artwork_item: None,
             path: format!("/music/{id}.flac"),
             title: title.to_owned(),
             artist: None,
@@ -870,6 +875,11 @@ mod tests {
         assert_eq!(tracks.len(), 1);
         assert_eq!(tracks[0].title, "One again");
         assert_eq!(tracks[0].server_id, Some(server_id));
+        assert_eq!(
+            tracks[0].artwork_item.as_deref(),
+            Some("album-of-a"),
+            "the listing carries the song's picture"
+        );
         assert_eq!(tracks[0].id, a_id, "a re-listed song keeps its row");
         assert!(!needs_loudness(&db, a_id), "and its loudness measurement");
         assert_eq!(

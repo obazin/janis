@@ -11,6 +11,7 @@ use super::{
     album_gradient_index, gradient_index, interface_id, post, with_application, Application,
 };
 use crate::audio;
+use crate::covers;
 use crate::library::{self, ScanReport, Track, WatchedFolder};
 use crate::library_view::{
     self, AlbumGroup, ArtistGroup, LibraryTab, Selection, SelectionKind, RECENT_TRACK_COUNT,
@@ -478,6 +479,7 @@ impl Application {
     pub(super) fn take_library(&self, snapshot: LibrarySnapshot) {
         *self.albums.borrow_mut() = library_view::albums(&snapshot.tracks);
         *self.artists.borrow_mut() = library_view::artists(&snapshot.tracks);
+        *self.cover_keys.borrow_mut() = covers::CoverKeys::new(&snapshot.tracks);
         *self.tracks.borrow_mut() = snapshot.tracks;
         *self.folders.borrow_mut() = snapshot.folders;
         {
