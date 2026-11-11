@@ -8,6 +8,8 @@ use rusqlite::Connection;
 use std::path::PathBuf;
 use std::sync::{Mutex, MutexGuard};
 
+use crate::audio::EQ_BAND_COUNT;
+
 pub struct DbState(Mutex<Connection>);
 
 impl DbState {
@@ -142,10 +144,11 @@ fn migrate(conn: &Connection) -> Result<(), String> {
             // The failed batch never reached its COMMIT, so its transaction
             // is still open; close it before touching the file again.
             let _ = conn.execute_batch("ROLLBACK;");
-            // A database wounded by the old split write (columns present,
-            // version behind) fails exactly here. The migrations are
-            // append-only ALTERs, so a duplicate column proves this one
-            // already ran — adopt it rather than refuse to boot forever.
+            // A database whose columns are present with the version behind
+            // (a migration applied but never stamped) fails exactly here.
+            // The migrations are append-only ALTERs, so a duplicate column
+            // proves this one already ran — adopt it rather than refuse to
+            // boot forever.
             if e.to_string().contains("duplicate column name") {
                 conn.pragma_update(None, "user_version", target)
                     .map_err(|e| format!("stamp schema version {}: {}", target, e))?;
@@ -208,7 +211,8 @@ pub fn get_preferences(db: &DbState) -> Result<Preferences, String> {
             let gains_json: String = row.get(1)?;
             Ok(Preferences {
                 volume: row.get(0)?,
-                eq_gains: serde_json::from_str(&gains_json).unwrap_or_else(|_| vec![0.0; 10]),
+                eq_gains: serde_json::from_str(&gains_json)
+                    .unwrap_or_else(|_| vec![0.0; EQ_BAND_COUNT]),
                 eq_preset: row.get(2)?,
                 eq_linear_phase: row.get::<_, i64>(3)? != 0,
                 gapless: row.get::<_, i64>(4)? != 0,
@@ -234,11 +238,15 @@ pub fn set_volume(db: &DbState, volume: f64) -> Result<(), String> {
 }
 
 pub fn set_eq(db: &DbState, gains: &[f64], preset: &str) -> Result<(), String> {
-    if gains.len() != 10 {
-        return Err(format!("expected 10 EQ gains, got {}", gains.len()));
+    if gains.len() != EQ_BAND_COUNT {
+        return Err(format!(
+            "expected {} EQ gains, got {}",
+            EQ_BAND_COUNT,
+            gains.len()
+        ));
     }
-    let gains: Vec<f64> = gains.iter().map(|g| g.clamp(-12.0, 12.0)).collect();
-    let gains_json = serde_json::to_string(&gains).map_err(|e| e.to_string())?;
+    // The equalizer bounds the gains; they are stored as it hands them over.
+    let gains_json = serde_json::to_string(gains).map_err(|e| e.to_string())?;
     let conn = db.lock();
     conn.execute(
         "UPDATE user_preferences SET eq_gains = ?1, eq_preset = ?2, updated_at = unixepoch()
@@ -279,10 +287,9 @@ pub fn set_playback_option(
     Ok(())
 }
 
+/// `language` is a code `translations::Language` names; an unknown one reads
+/// back as English.
 pub fn set_language(db: &DbState, language: &str) -> Result<(), String> {
-    if !matches!(language, "en" | "fr") {
-        return Err(format!("unsupported language: {}", language));
-    }
     let conn = db.lock();
     conn.execute(
         "UPDATE user_preferences SET language = ?1, updated_at = unixepoch() WHERE id = 1",
@@ -395,12 +402,11 @@ mod tests {
     }
 
     #[test]
-    fn a_database_wounded_by_the_old_split_stamp_still_boots() {
-        // The old code committed a migration's DDL and stamped user_version
-        // as a separate write; a crash between the two left the columns
-        // present with the version behind, and every later launch then died
-        // on "duplicate column name" — permanently unbootable. Such a file
-        // must be adopted, not refused.
+    fn a_database_with_a_migration_applied_but_not_stamped_still_boots() {
+        // A file can carry a migration's columns with the version behind:
+        // the DDL committed, the stamp did not. Running that migration again
+        // dies on "duplicate column name" at every launch. Such a file must
+        // be adopted, not refused.
         let dir = temp_dir("wounded");
         std::fs::create_dir_all(&dir).expect("temp dir");
         {
