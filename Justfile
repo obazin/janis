@@ -1,8 +1,9 @@
 # Janis tasks. `just` lists them; `run` in the dev shell forwards to `just run`.
 #
 # Release recipes build the installers of one platform into dist/, with
-# `cargo packager` (`cargo install cargo-packager --locked`). Each is tied to
-# its operating system, so run it there:
+# `cargo packager`: the Nix dev shell provides it on macOS, the other systems
+# install it with `cargo install cargo-packager --locked`. Each is tied to its
+# operating system, so run it there:
 #
 #   just release-macos     macOS, inside the Nix dev shell   → Janis.app + .dmg
 #   just release-linux     Linux distro, outside Nix          → .AppImage, .deb, .rpm
@@ -43,7 +44,7 @@ fmt-rust-check:
 release-macos:
     #!/usr/bin/env bash
     set -euo pipefail
-    cargo packager --version >/dev/null 2>&1 || { echo "error: cargo-packager missing: cargo install cargo-packager --locked"; exit 1; }
+    cargo packager --version >/dev/null 2>&1 || { echo "error: cargo-packager missing: enter the Nix dev shell (direnv allow, or nix develop)"; exit 1; }
 
     version=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -1)
     case "$(uname -m)" in arm64) architecture=aarch64 ;; *) architecture=x64 ;; esac

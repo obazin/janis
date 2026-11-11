@@ -30,6 +30,28 @@
           # and so the whole backend — does not compile.
           audioTools = [ pkgs.cmake ];
 
+          # `just release-macos` and `install-macos` build the application
+          # bundle and its disk image with `cargo packager`, which nixpkgs
+          # does not carry: it is built here from the published crate, with
+          # the lock file that crate ships. macOS only — the Linux release
+          # recipe runs outside this shell, on the distribution it targets.
+          cargoPackager = rustPlatform.buildRustPackage (finalAttrs: {
+            pname = "cargo-packager";
+            version = "0.11.8";
+
+            src = pkgs.fetchCrate {
+              inherit (finalAttrs) pname version;
+              hash = "sha256-DjqrsomwtM5JzGrBIjfREZ15pUijza+/p+3CwXe+dSY=";
+            };
+
+            cargoHash = "sha256-rSNBn8CkqJN52ApHjhH6wJpy23DLv5BSN/rjWZrl5mk=";
+
+            # The crate's tests reach the network.
+            doCheck = false;
+          });
+
+          releaseTools = pkgs.lib.optionals pkgs.stdenv.isDarwin [ cargoPackager ];
+
           # alsa-lib: cpal's Linux backend links ALSA through pkg-config.
           # macOS reaches CoreAudio through the SDK and needs nothing here.
           audioLibs = pkgs.lib.optionals pkgs.stdenv.isLinux [ pkgs.alsa-lib ];
@@ -123,7 +145,7 @@
               name = "janis";
             }).overrideAttrs
               (old: {
-                nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ shorthands ++ audioTools;
+                nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ shorthands ++ audioTools ++ releaseTools;
                 buildInputs = (old.buildInputs or [ ]) ++ audioLibs ++ windowLibs;
                 # Prepended: the bundle's own hook exec's into zsh, so anything
                 # appended after it would never run.
