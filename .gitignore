@@ -1,46 +1,20 @@
-/package
-.env
-.env.*
-!.env.example
-vite.config.js.timestamp-*
-vite.config.ts.timestamp-*
-
-# Node.js dependencies and logs
-node_modules/
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-yarn.lock
-
-# Logs
-logs/
-*.log
-
-# SvelteKit build output
-.svelte-kit/
-
-# Vite build output
-dist/
-build/
-
-# Tailwind CSS generated files (if any)
-public/build/
-*.css.map
-
 # Rust
 /target/
 .cargo/
 
-# Tauri-specific files
-/src-tauri/target/
-/src-tauri/gen/
+# Installers built by `just release`
+/dist/
 *.dmg
 *.exe
 *.app
 *.msi
 *.deb
 *.rpm
+*.AppImage
+
+# Logs
+logs/
+*.log
 
 # OS-generated files
 .DS_Store
@@ -53,11 +27,14 @@ $RECYCLE.BIN/
 .idea/
 
 # Miscellaneous
+.env
+.env.*
+!.env.example
 *.tmp
 *.swp
 *~
 
-# Provided by chess-flake dev shell (symlinked from nix store on entry)
+# Provided by the workspace dev shell (symlinked from the nix store on entry)
 .prettierrc.json
 
 # Local env
@@ -65,3 +42,9 @@ $RECYCLE.BIN/
 
 # Nix build output symlink
 /result
+
+# Left over from the web frontend this application once had
+node_modules/
+/build/
+.svelte-kit/
+/src-tauri/

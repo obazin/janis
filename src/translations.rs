@@ -1,13 +1,13 @@
 //! Every piece of text the user reads, in the languages Janis ships in.
 //!
-//! The catalogs are the JSON files under `src/lib/i18n/`, compiled into the
+//! The catalogs are the JSON files under `translations/`, compiled into the
 //! binary. English is the reference: a key missing from another language falls
 //! back to it, and a key missing everywhere shows as the key itself.
 
 use std::collections::HashMap;
 
-const ENGLISH_CATALOG: &str = include_str!("lib/i18n/en.json");
-const FRENCH_CATALOG: &str = include_str!("lib/i18n/fr.json");
+const ENGLISH_CATALOG: &str = include_str!("../translations/en.json");
+const FRENCH_CATALOG: &str = include_str!("../translations/fr.json");
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Language {

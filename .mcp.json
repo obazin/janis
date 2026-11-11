@@ -1,9 +1,5 @@
 {
     "mcpServers": {
-        "svelte": {
-            "type": "http",
-            "url": "https://mcp.svelte.dev/mcp"
-        },
         "context7": {
             "type": "http",
             "url": "https://mcp.context7.com/mcp"
