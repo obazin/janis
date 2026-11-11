@@ -12,10 +12,10 @@ Each component belongs to exactly one tier and only uses tiers below it. One com
 | Tier | Where | Components |
 |---|---|---|
 | Tokens and data | `tokens.slint`, `icons.slint`, `shell.slint` | `Tokens` (colours, gradients, shadows), `Fonts`, `Typography`, `Metrics` (radii, frame sizes), `Motion` (durations), `Accent`, `Icons`; `Shell` (open screen, search, equalizer sheet, notifications) |
-| Atoms | `atoms/` | `Glyph`, `IconButton` (with the `IconButtonIdentifier` registry), `Chip`, `Badge`, `PrimaryButton`, `GhostButton`, `SectionLabel`, `Eyebrow`, `Toggle`, `ArtTile`, `EmptyState` |
+| Atoms | `atoms/` | `Glyph`, `IconButton` (with the `IconButtonIdentifier` registry), `Chip`, `Badge`, `PrimaryButton`, `GhostButton`, `SectionLabel`, `Eyebrow`, `Toggle`, `TextField` (with `TextFieldKind`), `ArtTile`, `EmptyState` |
 | Molecules | `molecules/` | `NavItem`, `ToggleRow`, `PlayCircle`, `ScreenHeader`, `ScrollArea` |
 | Organisms | `organisms/` | `SidebarNav`, `Toaster` |
-| Features | `features/<name>/` | player: `MiniPlayer`, `Waveform`, `TransportControls`, `VolumeSlider`, `NowPlayingQueue` · equalizer: `EqualizerOverlay`, `EqualizerBandSlider`, `OpenEqualizerButton` · library: `CoverArt`, `AlbumCard`, `CardGrid`, `TrackRow`, `TrackList`, `LibraryTrackAccordion`, `LocalRow`, `LocalTable`, `ShelfTile`, `Shelf`, `ArtistSpotlight` · radio: `StationCard` |
+| Features | `features/<name>/` | player: `MiniPlayer`, `Waveform`, `TransportControls`, `VolumeSlider`, `NowPlayingQueue` · equalizer: `EqualizerOverlay`, `EqualizerBandSlider`, `OpenEqualizerButton` · library: `CoverArt`, `AlbumCard`, `CardGrid`, `TrackRow`, `TrackList`, `LibraryTrackAccordion`, `LocalRow`, `LocalTable`, `ShelfTile`, `Shelf`, `ArtistSpotlight` · radio: `StationCard` · jellyfin: `JellyfinCard` |
 | Screens | `screens/` | `AppTitlebar`, `NowPlayingScreen`, `LibraryScreen`, `DiscoverScreen`, `RadioScreen`, `LocalFilesScreen`, `SettingsScreen` |
 | Page | `app.slint` | `AppWindow`: title bar, sidebar, the open screen, the mini player, and what floats above them |
 
@@ -23,7 +23,7 @@ Dependencies run one way. The design system (atoms, molecules, organisms) import
 
 ## Data flow
 
-- Rust and Slint meet only at the exported globals: `Shell`, `Player`, `Equalizer`, `Library`, `Covers`, `Radio`, `Settings`, `Strings` and `Tokens`. Each feature's global sits in its folder; the controller fills its properties and handles its callbacks.
+- Rust and Slint meet only at the exported globals: `Shell`, `Player`, `Equalizer`, `Library`, `Covers`, `Radio`, `Settings`, `Jellyfin`, `Strings` and `Tokens`. Each feature's global sits in its folder; the controller fills its properties and handles its callbacks.
 - Design-system components take everything through `in` properties and report through callbacks. They never read a feature global or name a translation key: the caller passes `Strings.<key>`.
 - Feature components read their feature's global and call its callbacks. They never compute what Rust already did: formatting, lists, counts and headings arrive ready.
 - Screens lay features out and hold layout state only. A screen is created anew each time it is opened, so anything the listener should find again (a tab, a selection, a filter) lives in the controller.

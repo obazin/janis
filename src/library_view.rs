@@ -152,16 +152,17 @@ pub fn search_library(tracks: &[Track], search: &str) -> Vec<Track> {
         .collect()
 }
 
-/// The tracks the Local Files screen's search keeps: title or artist.
+/// The tracks the Local Files screen's search keeps: files on disk whose
+/// title or artist matches. A media server's songs are in the library, not
+/// among the local files.
 pub fn search_local_files(tracks: &[Track], search: &str) -> Vec<Track> {
     let query = normalized_query(search);
-    if query.is_empty() {
-        return tracks.to_vec();
-    }
     tracks
         .iter()
+        .filter(|track| track.server_id.is_none())
         .filter(|track| {
-            track.title.to_lowercase().contains(&query)
+            query.is_empty()
+                || track.title.to_lowercase().contains(&query)
                 || track
                     .artist
                     .as_ref()
@@ -509,6 +510,18 @@ mod tests {
         track.artist = Some(artist.to_owned());
         track.track_number = number;
         track
+    }
+
+    #[test]
+    fn local_files_lists_only_the_files_on_disk() {
+        let file = track(1, "Alive");
+        let mut song = track(2, "Alive again");
+        song.server_id = Some(7);
+        let tracks = vec![file.clone(), song];
+
+        assert_eq!(search_local_files(&tracks, ""), vec![file.clone()]);
+        assert_eq!(search_local_files(&tracks, "alive"), vec![file]);
+        assert!(search_local_files(&tracks, "nothing").is_empty());
     }
 
     fn titles(tracks: &[Track]) -> Vec<&str> {

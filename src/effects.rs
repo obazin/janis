@@ -7,7 +7,7 @@
 //! be tested without an audio device or a database.
 
 use crate::library::Track;
-use crate::persistence::PlaybackOption;
+use crate::persistence::{MediaServer, PlaybackOption};
 use crate::radio::Station;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -65,6 +65,27 @@ pub enum Effect {
         favourite: bool,
     },
 
+    // ── Media server ─────────────────────────────────────────────────────────
+    /// Sign in to a Jellyfin server off the user-interface thread and keep
+    /// the token, then report back through `MediaServerState::sign_in_finished`
+    /// with the same `epoch`.
+    SignInMediaServer {
+        address: String,
+        user_name: String,
+        password: Secret,
+        epoch: u64,
+    },
+    /// Read the server's songs into the library, then report back through
+    /// `MediaServerState::sync_finished` with the same `epoch`.
+    SyncMediaServer {
+        server: MediaServer,
+        epoch: u64,
+    },
+    /// End the session on the server and forget it, with its songs.
+    SignOutMediaServer {
+        server: MediaServer,
+    },
+
     // ── Presentation ─────────────────────────────────────────────────────────
     /// Show this track's cover art as the current art; `None` clears it.
     LoadCover(Option<i64>),
@@ -83,4 +104,25 @@ pub enum Effect {
         /// Collapses a burst of the same failure into one notification.
         dedupe_key: Option<&'static str>,
     },
+}
+
+/// A password on its way to the server. It never shows in a log: its
+/// debugging form hides it.
+#[derive(Clone, PartialEq, Eq)]
+pub struct Secret(String);
+
+impl Secret {
+    pub fn new(text: String) -> Self {
+        Self(text)
+    }
+
+    pub fn expose(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Debug for Secret {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("Secret(…)")
+    }
 }

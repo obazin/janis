@@ -1,10 +1,10 @@
 //! Cover art, from bytes to pixels the interface can draw.
 //!
 //! Art arrives base64-encoded — embedded in a file, through the audio facade,
-//! or announced by a station as a `data:` URL. Decoding and scaling are slow
-//! enough to belong on a background thread, so everything here returns a
-//! pixel buffer, which can cross threads; the interface thread turns it into
-//! an image.
+//! or announced by a station as a `data:` URL — or as a picture file a media
+//! server sends. Decoding and scaling are slow enough to belong on a
+//! background thread, so everything here returns a pixel buffer, which can
+//! cross threads; the interface thread turns it into an image.
 
 use std::collections::{HashMap, VecDeque};
 
@@ -52,6 +52,12 @@ fn decode_base64(encoded: &str, longest_side: u32) -> Result<Pixels, String> {
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(encoded)
         .map_err(|error| format!("decode cover base64: {error}"))?;
+    picture_cover(bytes, longest_side)
+}
+
+/// A picture file's bytes — as a media server sends them — scaled to fit
+/// `longest_side`.
+pub fn picture_cover(bytes: Vec<u8>, longest_side: u32) -> Result<Pixels, String> {
     let mut reader = image::ImageReader::new(std::io::Cursor::new(bytes))
         .with_guessed_format()
         .map_err(|error| format!("recognise cover image: {error}"))?;

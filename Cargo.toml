@@ -43,6 +43,14 @@ tokio = { version = "1", features = ["rt-multi-thread"] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
 log = "0.4.29"
+# The Jellyfin client: a few JSON calls and cover pictures, made on a worker
+# thread. The version and rustls stack `audio-stack-rs` already links for web
+# radio, so no second TLS implementation is built.
+reqwest = { version = "0.13", default-features = false, features = [
+    "blocking",
+    "json",
+    "rustls",
+] }
 # Resolves the per-user data directory on every platform.
 dirs = "6"
 # `bundled` ships SQLite with the binary so we don't depend on the system
@@ -119,3 +127,8 @@ assets = [
 
 [package.metadata.generate-rpm.requires]
 "libasound.so.2()(64bit)" = "*"
+
+# TEMPORARY while the remote queue entries are developed in the sibling
+# checkout; removed when the new tag is published.
+[patch."https://github.com/obazin/audio-stack-rs"]
+audio-stack-rs = { path = "../audio-stack-rs" }

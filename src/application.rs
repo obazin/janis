@@ -8,6 +8,7 @@
 
 mod artwork;
 mod equalizer_sheet;
+mod jellyfin_settings;
 mod library_screens;
 mod notices;
 mod now_playing_screen;
@@ -32,6 +33,7 @@ use crate::equalizer::Equalizer;
 use crate::favourites::FavouriteStations;
 use crate::library::{self, LoudnessStore, ScanReport, Track, WatchedFolder};
 use crate::library_view::{self, AlbumGroup, ArtistGroup, QueueView};
+use crate::media_server::MediaServerState;
 use crate::notifications::Notifications;
 use crate::persistence::{self, DbState, Preferences};
 use crate::platform;
@@ -112,6 +114,12 @@ pub struct Application {
     discover_artists: Rc<VecModel<user_interface::LibraryCard>>,
     library_worker: Worker,
     favourite_stations: RefCell<FavouriteStations>,
+    /// The Jellyfin server the listener signed in to, as Settings shows it.
+    media_server: RefCell<MediaServerState>,
+    /// Where the calls to the media server run, one after another.
+    server_worker: Worker,
+    /// How this installation names itself to a media server.
+    device_identifier: String,
     radio_screen: RefCell<radio_screen::RadioScreen>,
     radio_countries: Rc<VecModel<user_interface::RadioChip>>,
     radio_genres: Rc<VecModel<user_interface::RadioChip>>,
@@ -143,6 +151,8 @@ impl Application {
         let folders = library::list_watched_folders(&database)?;
         let mut favourite_stations = FavouriteStations::default();
         favourite_stations.restore(persistence::favourite_station_ids(&database)?);
+        let media_server = persistence::media_server(&database)?;
+        let device_identifier = persistence::device_identifier(&database)?;
 
         let bridge = Arc::new(EngineBridge::new(|event| {
             post(move |application| application.on_engine_event(event));
@@ -201,6 +211,9 @@ impl Application {
             discover_artists: Rc::new(VecModel::default()),
             library_worker: Worker::new("janis library")?,
             favourite_stations: RefCell::new(favourite_stations),
+            media_server: RefCell::new(MediaServerState::default()),
+            server_worker: Worker::new("janis media server")?,
+            device_identifier,
             radio_screen: RefCell::new(radio_screen::RadioScreen::default()),
             radio_countries: Rc::new(VecModel::default()),
             radio_genres: Rc::new(VecModel::default()),
@@ -228,6 +241,10 @@ impl Application {
         application.apply_strings();
         application.connect_window();
         application.restore(&preferences);
+        // A server kept from the last run is read again in the background;
+        // the window opens on the songs already in the library.
+        let effects = application.media_server.borrow_mut().restore(media_server);
+        application.run(effects);
         // The engine answers with its current state, as events.
         application.engine.describe();
         application.refresh_player();
@@ -239,6 +256,7 @@ impl Application {
         application.refresh_local_files();
         application.refresh_radio();
         application.refresh_settings();
+        application.refresh_jellyfin();
         Ok(application)
     }
 
@@ -324,6 +342,7 @@ impl Application {
         self.connect_library();
         self.connect_radio();
         self.connect_settings();
+        self.connect_jellyfin();
         self.connect_player();
         self.connect_equalizer();
         self.connect_covers();
@@ -377,6 +396,7 @@ impl Application {
         self.refresh_local_files();
         self.refresh_radio();
         self.refresh_settings();
+        self.refresh_jellyfin();
         self.refresh_toasts();
     }
 
@@ -430,9 +450,13 @@ impl Application {
     fn run(&self, effects: Vec<Effect>) {
         for effect in effects {
             match effect {
-                Effect::LoadQueue { tracks, index } => self
-                    .engine
-                    .load_queue(tracks.iter().map(audio::queue_entry).collect(), index),
+                Effect::LoadQueue { tracks, index } => self.engine.load_queue(
+                    tracks
+                        .iter()
+                        .map(|track| audio::queue_entry(track, self.track_location(track)))
+                        .collect(),
+                    index,
+                ),
                 Effect::ConnectStation { station, epoch } => self.connect_station(station, epoch),
                 Effect::Toggle => self.engine.toggle(),
                 Effect::Next => self.engine.next(),
@@ -481,6 +505,14 @@ impl Application {
                     "favourite-station",
                     persistence::set_favourite_station(&self.database, &station_id, favourite),
                 ),
+                Effect::SignInMediaServer {
+                    address,
+                    user_name,
+                    password,
+                    epoch,
+                } => self.sign_in_media_server(address, user_name, password, epoch),
+                Effect::SyncMediaServer { server, epoch } => self.sync_media_server(server, epoch),
+                Effect::SignOutMediaServer { server } => self.sign_out_media_server(server),
                 Effect::LoadCover(track_id) => self.load_current_cover(track_id),
                 Effect::ShowStreamCover(url) => self.show_stream_cover(url),
                 Effect::LinearPhaseReported {
