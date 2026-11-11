@@ -48,7 +48,7 @@ export component LibraryTrackAccordion inherits Rectangle {
             Rectangle {
                 width: 34px;
                 height: 34px;
-                border-radius: 17px;
+                border-radius: self.width / 2;
                 background: Tokens.chip-hover;
                 IconButton {
                     identifier: IconButtonIdentifier.library-collapse-selection;

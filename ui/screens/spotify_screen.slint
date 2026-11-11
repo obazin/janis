@@ -22,7 +22,7 @@ export component SpotifyScreen inherits Rectangle {
                     Rectangle {
                         width: 80px;
                         height: 80px;
-                        border-radius: 40px;
+                        border-radius: self.width / 2;
                         background: Tokens.spotify;
                         drop-shadow-offset-y: Tokens.shadow-card.offset-y;
                         drop-shadow-blur: Tokens.shadow-card.blur;
