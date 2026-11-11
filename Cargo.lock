@@ -2728,6 +2728,7 @@ name = "janis"
 version = "0.1.0"
 dependencies = [
  "audio-stack-rs",
+ "base64 0.22.1",
  "dirs",
  "image",
  "log",
@@ -2736,6 +2737,7 @@ dependencies = [
  "serde_json",
  "slint",
  "slint-build",
+ "tokio",
  "walkdir",
 ]
 

@@ -21,6 +21,7 @@ const AMPLITUDE: f32 = 0.42;
 /// resumes where it was instead of leaping ahead.
 const LONGEST_STEP_SECONDS: f32 = 0.05;
 const IDLE_ENERGY: f32 = 0.04;
+const REST_TOLERANCE: f32 = 0.002;
 
 pub struct Visualizer {
     wave: [f32; WAVE_POINTS],
@@ -63,6 +64,13 @@ impl Visualizer {
                 }
             }
         }
+    }
+
+    /// True once the trace has stopped visibly moving: nothing plays and the
+    /// fallback has eased down to its resting level. Ticking can stop until
+    /// playback resumes.
+    pub fn at_rest(&self, playing: bool) -> bool {
+        !playing && (self.energy - IDLE_ENERGY).abs() < REST_TOLERANCE
     }
 
     /// The trace, each point in −1..1.
@@ -126,6 +134,9 @@ mod tests {
         }
         let settled = peak(&visualizer);
         assert!(settled > 0.0 && settled < 0.05, "{settled}");
+
+        assert!(visualizer.at_rest(false));
+        assert!(!visualizer.at_rest(true));
 
         // Playing with no frame yet: the fallback swells toward full scale.
         for _ in 0..200 {

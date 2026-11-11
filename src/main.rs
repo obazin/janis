@@ -10,11 +10,15 @@
 //! render in `player`, `equalizer`, `playback_options`, `library_view`,
 //! `radio`, `notifications` and `visualizer`.
 
+mod application;
 mod audio;
+mod background;
+mod covers;
 mod effects;
 mod equalizer;
 mod library;
 mod library_view;
+mod logging;
 mod notifications;
 mod persistence;
 mod platform;
@@ -36,8 +40,8 @@ use std::process::ExitCode;
 
 use slint::ComponentHandle;
 
-use translations::{Language, Translations};
-use user_interface::{AppWindow, Strings};
+use application::Application;
+use user_interface::AppWindow;
 
 fn main() -> ExitCode {
     match run() {
@@ -50,26 +54,21 @@ fn main() -> ExitCode {
 }
 
 fn run() -> Result<(), String> {
-    slint::BackendSelector::new()
-        .backend_name("winit".into())
-        .renderer_name("femtovg".into())
-        .select()
-        .map_err(|error| format!("select the windowing backend: {error}"))?;
-
-    let directory = platform::data_directory()?;
-    let database = persistence::init(directory)?;
-    let preferences = persistence::get_preferences(&database)?;
-    let translations = Translations::new(Language::from_code(&preferences.language));
-
+    logging::init();
+    platform::select_backend()?;
     let window = AppWindow::new().map_err(|error| format!("create the window: {error}"))?;
-    user_interface::apply_strings(&window.global::<Strings>(), &|key| translations.text(key));
+    let application = Application::start(window.clone_strong())?;
 
     #[cfg(debug_assertions)]
     let _snapshot_timer = development::snapshot_when_asked(&window);
+    #[cfg(debug_assertions)]
+    development::play_when_asked(&application);
 
-    window
+    let outcome = window
         .run()
-        .map_err(|error| format!("run the event loop: {error}"))
+        .map_err(|error| format!("run the event loop: {error}"));
+    application.shut_down();
+    outcome
 }
 
 /// Development-only helpers, absent from release builds.
@@ -79,7 +78,20 @@ mod development {
 
     use slint::{ComponentHandle, Timer, TimerMode};
 
+    use crate::application::Application;
     use crate::user_interface::AppWindow;
+
+    /// With `JANIS_AUTOPLAY=<search>` set, starts playing the tracks the
+    /// library search finds for it at launch — silently — so playback can be
+    /// exercised without a person clicking or listening. An empty value plays
+    /// from the top of the library.
+    pub fn play_when_asked(application: &Application) {
+        if let Ok(search) = std::env::var("JANIS_AUTOPLAY") {
+            application.silence();
+            let found = crate::library_view::search_library(&application.tracks(), &search);
+            application.play_queue(found.into_iter().take(5).collect(), 0);
+        }
+    }
 
     /// With `JANIS_SNAPSHOT=<file.png>` set, saves what the window shows after
     /// `JANIS_SNAPSHOT_SECONDS` (2 by default) and quits — how a change to the

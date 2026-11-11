@@ -1,0 +1,42 @@
+// What is playing, as the player's components show it. Filled by the
+// application; the callbacks are the listener's transport actions.
+
+export global Player {
+    // ── Transport ─────────────────────────────────────────────────────────
+    // False when nothing is loaded.
+    in property <bool> active;
+    in property <bool> playing;
+    in property <bool> shuffle;
+    in property <bool> repeat;
+    in property <float> volume: 0.8;
+
+    // ── What the mini player names ────────────────────────────────────────
+    in property <string> title: "—";
+    in property <string> subtitle;
+    in property <image> cover;
+    in property <int> gradient-index;
+    in property <bool> cover-unavailable;
+
+    // ── Waveform ──────────────────────────────────────────────────────────
+    // Each waveform view reports its size, and gets the trace back as path
+    // commands in its own coordinates.
+    in-out property <length> big-wave-width;
+    in-out property <length> big-wave-height;
+    in-out property <length> mini-wave-width;
+    in-out property <length> mini-wave-height;
+    in property <string> big-wave-commands;
+    in property <string> mini-wave-commands;
+    // Progress through the current local track, 0 when there is none.
+    in property <float> progress;
+    // Where the trace sits at the playhead, as a share of the view's height.
+    in property <float> playhead-level: 0.5;
+
+    callback toggled();
+    callback next();
+    callback previous();
+    callback shuffle-toggled();
+    callback repeat-toggled();
+    callback volume-changed(volume: float);
+    // A fraction of the current track.
+    callback seek(fraction: float);
+}

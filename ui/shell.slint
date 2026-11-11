@@ -1,0 +1,21 @@
+// The state of the window's frame: which screen is open, the search field,
+// the equalizer sheet, and the notifications.
+
+import { Toast } from "organisms/toaster.slint";
+
+export global Shell {
+    // The open screen, by its identifier: now-playing, library, discover,
+    // radio, local, spotify or settings.
+    in-out property <string> screen: "now-playing";
+    // The title bar's search field; list screens filter by it.
+    in-out property <string> search;
+    in-out property <bool> equalizer-open;
+    in property <[Toast]> toasts;
+    // True where the system draws its window buttons over the title bar.
+    in property <bool> overlay-title-bar;
+
+    callback search-edited(text: string);
+    callback toast-dismissed(id: int);
+    // The pointer went down on an empty part of the title bar.
+    callback window-drag-started();
+}

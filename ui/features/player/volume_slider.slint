@@ -1,0 +1,43 @@
+import { Tokens } from "../../tokens.slint";
+import { Player } from "player.slint";
+
+// The volume rail: click or drag along it.
+export component VolumeSlider inherits Rectangle {
+    in property <string> label;
+
+    width: 110px;
+    height: 16px;
+    accessible-role: slider;
+    accessible-label: root.label;
+    accessible-value-minimum: 0;
+    accessible-value-maximum: 100;
+    accessible-value: round(Player.volume * 100);
+
+    Rectangle {
+        y: (root.height - self.height) / 2;
+        height: 6px;
+        border-radius: 3px;
+        background: Tokens.rail;
+        clip: true;
+        Rectangle {
+            x: 0;
+            width: parent.width * Player.volume;
+            border-radius: 3px;
+            background: Tokens.volume;
+        }
+    }
+
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        pointer-event(event) => {
+            if event.kind == PointerEventKind.down {
+                Player.volume-changed(self.mouse-x / self.width);
+            }
+        }
+        moved => {
+            if self.pressed {
+                Player.volume-changed(self.mouse-x / self.width);
+            }
+        }
+    }
+}

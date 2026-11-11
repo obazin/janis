@@ -1,0 +1,124 @@
+import { Tokens, Typography, Metrics } from "../../tokens.slint";
+import { Icons } from "../../icons.slint";
+import { Strings } from "strings.slint";
+import { ArtTile } from "../../atoms/art_tile.slint";
+import { GlyphMode } from "../../atoms/glyph.slint";
+import { IconButton, IconButtonIdentifier, IconButtonTone } from "../../atoms/icon_button.slint";
+import { PlayCircle, PlayCircleVariant } from "../../molecules/play_circle.slint";
+import { OpenEqualizerButton } from "../equalizer/open_equalizer_button.slint";
+import { Shell } from "../../shell.slint";
+import { Player } from "player.slint";
+import { Waveform } from "waveform.slint";
+
+// The bar along the bottom of the window: what is playing, the transport, a
+// small trace, and the way into the equalizer. Present on every screen.
+export component MiniPlayer inherits Rectangle {
+    height: Metrics.mini-player-height;
+    background: Tokens.mini-player;
+
+    Rectangle {
+        y: 0;
+        height: 1px;
+        background: Tokens.border;
+    }
+
+    HorizontalLayout {
+        padding-left: 20px;
+        padding-right: 20px;
+        spacing: 18px;
+
+        Rectangle {
+            width: 250px;
+            accessible-role: button;
+            accessible-label: Strings.nav-now-playing;
+            accessible-action-default => { Shell.screen = "now-playing"; }
+            HorizontalLayout {
+                spacing: 13px;
+                VerticalLayout {
+                    alignment: center;
+                    ArtTile {
+                        width: 48px;
+                        height: 48px;
+                        radius: Metrics.radius-thumb;
+                        cover: Player.cover;
+                        gradient-index: Player.gradient-index;
+                        unavailable: Player.cover-unavailable;
+                    }
+                }
+                VerticalLayout {
+                    alignment: center;
+                    Text {
+                        text: Player.title;
+                        font-size: Typography.body-em;
+                        font-weight: Typography.bold;
+                        color: Tokens.text;
+                        horizontal-alignment: left;
+                        overflow: elide;
+                    }
+                    Text {
+                        text: Player.subtitle;
+                        font-size: Typography.caption;
+                        color: Tokens.text-muted;
+                        horizontal-alignment: left;
+                        overflow: elide;
+                    }
+                }
+            }
+            TouchArea {
+                mouse-cursor: pointer;
+                clicked => { Shell.screen = "now-playing"; }
+            }
+        }
+
+        HorizontalLayout {
+            spacing: 16px;
+            VerticalLayout {
+                alignment: center;
+                IconButton {
+                    identifier: IconButtonIdentifier.mini-previous;
+                    icon: Icons.previous;
+                    label: Strings.player-previous;
+                    mode: GlyphMode.fill;
+                    tone: IconButtonTone.secondary;
+                    clicked => { Player.previous(); }
+                }
+            }
+            VerticalLayout {
+                alignment: center;
+                PlayCircle {
+                    identifier: IconButtonIdentifier.mini-play-pause;
+                    variant: PlayCircleVariant.mini;
+                    playing: Player.playing;
+                    label: Player.playing ? Strings.player-pause : Strings.player-play;
+                    clicked => { Player.toggled(); }
+                }
+            }
+            VerticalLayout {
+                alignment: center;
+                IconButton {
+                    identifier: IconButtonIdentifier.mini-next;
+                    icon: Icons.next;
+                    label: Strings.player-next;
+                    mode: GlyphMode.fill;
+                    tone: IconButtonTone.secondary;
+                    clicked => { Player.next(); }
+                }
+            }
+        }
+
+        VerticalLayout {
+            horizontal-stretch: 1;
+            alignment: center;
+            Waveform {
+                height: 44px;
+            }
+        }
+
+        VerticalLayout {
+            alignment: center;
+            OpenEqualizerButton {
+                label: Strings.player-eq;
+            }
+        }
+    }
+}
