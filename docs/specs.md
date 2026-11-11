@@ -1,18 +1,18 @@
 # Janis — Feature Specs
 
-The canonical description of user-facing behavior. Every new feature lands here before its task is done (CLAUDE.md rule 8).
+The canonical description of user-facing behavior. Every new feature lands here before its task is done (CLAUDE.md rule 5).
 
 ## App shell
 
-- **Titlebar** — prism logo mark + JANIS wordmark + "Open source" badge; centered search field. The field filters the Library, Local Files and Radio screens live (`searchQuery` channel). On macOS the native traffic lights overlay the left edge (`titleBarStyle: Overlay`); empty areas drag the window.
-- **Sidebar** — three sections (Playing / Library / Sources) + Settings pinned at the bottom. Active row: pink→violet wash + accent ring. Navigation goes through `navigateTo()`; routes mirror screen names.
+- **Titlebar** — prism logo mark + JANIS wordmark + "Open source" badge; centered search field. The field filters the Library, Local Files and Radio screens live. Where the system draws its window buttons over the title bar, the bar leaves them room; its empty areas drag the window.
+- **Sidebar** — three sections (Playing / Library / Sources) + Settings pinned at the bottom. Active row: pink→violet wash + accent ring.
 - **Mini player** — persistent bottom bar: current art + title/artist (click → Now Playing), prev/play/next, live mini waveform, EQ button. Playback continues across all screens (task lifecycle independent of UI).
 - **Boot** — the window opens only once the preferences and the library are read, so screens always show hydrated state. Volume, EQ, playback switches and language persist in `janis.db`.
 - **OS drag-and-drop** — dropping audio files anywhere in the window imports them; what is not an audio file is left out.
 - **Error toasts** — failures surface, they never fail silently. A `Toaster` mounted in the shell shows an error toast (click to dismiss, auto-dismisses) whenever playback fails (the engine reports an unplayable/unreachable track), a radio station won't connect, or cover art can't load — the last case is deduplicated by key, so a disconnected source (e.g. a NAS going offline mid-session) raises one toast, not one per track. Messages carry a translation key, not resolved text, so a toast follows a change of language. Cover tiles whose art was expected but failed to load show a muted "unavailable" mark rather than the normal gradient, so a failed load reads differently from art that simply doesn't exist.
 - **One instance** — launching Janis while it runs brings the running window to the front instead of starting a second one.
 
-## Now Playing (`/now-playing`)
+## Now Playing
 
 - Empty state (nothing loaded): icon + "Add music" CTA → file picker.
 - Left column (sticky): album art — embedded cover art when the file has one, else a deterministic prism-gradient tile with title initials — ringed by a slow-spinning conic glow. Below: quality badge ("Hi-Res · FLAC 24/96" — Hi-Res when >16-bit or >48 kHz) and a lime "Lossless" badge for lossless formats. Radio mode shows genre + LIVE badges instead.
@@ -22,7 +22,7 @@ The canonical description of user-facing behavior. Every new feature lands here 
 - **Queue card** — three-way segmented toggle: **Up Next** (remaining queue after the current track, wrapping once), **Playlist** (the full play queue, current track highlighted), **Album** (the current track's album from the library grouping). Rows show art, title/artist and duration; clicking a row plays from it. An "EQ" pill in the card header opens the equalizer overlay. The toggle survives navigating away and back.
 - **Artist spotlight** (local tracks with library matches) — two columns under the queue card: up to 4 more tracks by the current artist (click plays within the artist's tracks) and up to 4 of their albums (click plays the album).
 
-## Library (`/library`)
+## Library
 
 - Header: violet eyebrow, title, gradient "Add music" button (multi-file picker).
 - Tabs (chips): **Playlists** (roadmap placeholder), **Artists** (grid), **Albums** (grid), **Songs** (numbered rows: art, title/artist, composer, duration; click plays from that row within the filtered list).
@@ -30,11 +30,11 @@ The canonical description of user-facing behavior. Every new feature lands here 
 - "Recently added" rows (first 8, newest scan first) under the grid tabs when nothing is selected.
 - Empty library → empty state with "Add folder" CTA. Titlebar search filters every view.
 
-## Discover (`/discover`)
+## Discover
 
 - Teal eyebrow. Shelves derived from the local library only: "Recently added albums", "Rediscover" (oldest additions), "Artists in your library". Horizontal scroll tiles; click plays the group. Empty library → explanatory empty state.
 
-## Web Radio (`/radio`)
+## Web Radio
 
 - Ember eyebrow. Two chip rows: country chips ("All" first, then every country present, most-populated first) above genre chips ("All" first, then every genre present sorted by label in the active language). The country chips show the country name only (no flag). Both rows are multi-select — clicking a chip toggles it, so several countries and several genres can be active at once; "All" is a clear that deselects everything in its row, and an empty row means no filter. A station shows when it matches any selected country **and** any selected genre. Selections survive navigating away and back. Station cards: gradient tile, name, genre · kbps, red LIVE dot. Click streams the station through the engine, so the EQ and the live visualiser apply exactly as they do to a local file. The card shows "Connecting…" while the stream buffers, then "Live". Active station gets an ember border. Search filters by station name **and** genre label, within the active countries and genres.
 - The catalog ships ~1,300 stations across 22 countries (Europe, the UK, the USA and Brazil) and ~45 genres, baked in as static JSON. It merges the hand-picked flagship streams — the SomaFM channels, the Radio France webradios (FIP, France Musique, Mouv'), Radio Paradise mixes, Radio Swiss, French independents (TSF Jazz, Nova, Meuh, Jazz Radio, FG, OÜI FM, Latina), US public/independent stations (KEXP, KCRW, WFMU, KUSC, WQXR, The Jazz Groove, SmoothJazz.com), international independents (NTS, Rinse FM, dublab, Venice Classic) and electronic specialists (Nightwave Plaza, Nightride FM, Ambient Sleeping Pill, Hirschmilch, Sunshine Live, Bassdrive) — with the most-listened stations per country from the [Radio Browser](https://www.radio-browser.info) community database, plus tag-targeted top-ups for genres the per-country lists leave thin (jazz, funk, blues, rock, pop, classical, bossa nova), deduplicated and genre-mapped at build time. No network call is made to browse; only the chosen stream is opened.
@@ -61,18 +61,18 @@ The canonical description of user-facing behavior. Every new feature lands here 
 - **Shuffle** walks a real permutation of the queue, so every track is heard once before any repeats, and reshuffles when a repeating queue wraps.
 - The visualiser is fed by the engine at ~60 Hz as a compact binary frame (160 waveform points + 10 band magnitudes).
 
-## Local Files (`/local`)
+## Local Files
 
 - Lime eyebrow. Dashed drop zone: click opens the file picker; OS drag-and-drop works window-wide. Formats: MP3, FLAC, WAV, AAC/M4A, OGG/Vorbis, Opus, AIFF — all decoded in Rust. Opus is mono or stereo; multichannel Opus is not supported.
 - "Scanned library · N files" header with the last scan report (added/updated/skipped), "Add folder" and "Rescan" ghost buttons.
 - Table: title, artist, lime format chip, duration. Click plays from the filtered list.
 - Watched folders list: path, track count, per-folder Remove (cascade-deletes its tracks). Rescan re-walks all folders and prunes files that vanished — but only under roots that are still reachable, so rescanning with an external drive ejected leaves that drive's library (and its accumulated loudness measurements) intact.
 
-## Spotify (`/spotify`)
+## Spotify
 
 - Connect screen (green mark, pitch, feature bullets). The CTA is honest: clicking shows "integration is planned — not available yet". No fake account linking.
 
-## Settings (`/settings`)
+## Settings
 
 - Violet eyebrow. **Equalizer presets** chips (apply immediately + persist) and a "fine-tune" link opening the EQ sheet.
 - **Playback** toggles: normalization, gapless and crossfade are all live in the engine, on by default; exclusive output is still a persisted preference the engine does not act on yet. Toggling normalization is heard immediately, mid-track. Gapless and crossfade take effect from the next track boundary (crossfade turned off mid-fade stops it immediately instead of letting it finish).
