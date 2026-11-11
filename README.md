@@ -58,7 +58,7 @@ just clippy           # cargo clippy -D warnings
 just test-rust        # cargo test
 ```
 
-`just release-macos` (or `release-linux`, `release-windows`) builds that platform's installers into `dist/`, ad-hoc signed on macOS; it needs [cargo-packager](https://github.com/crabnebula-dev/cargo-packager) (`cargo install cargo-packager --locked`). `just install-macos` then replaces the Janis in `/Applications` with the one just built. Publishing a release means bumping the version in `Cargo.toml` and `flake.nix`, then pushing a `vX.Y.Z` tag: the `release` workflow checks that the tag matches both, builds every platform and opens a draft release holding the bundles.
+`just release-macos` (or `release-linux`, `release-windows`) builds that platform's installers into `dist/`, ad-hoc signed on macOS; it needs [cargo-packager](https://github.com/crabnebula-dev/cargo-packager), which the Nix dev shell provides on macOS (elsewhere: `cargo install cargo-packager --locked`). `just install-macos` then replaces the Janis in `/Applications` with the one just built. Publishing a release means bumping the version in `Cargo.toml` and `flake.nix`, then pushing a `vX.Y.Z` tag: the `release` workflow checks that the tag matches both, builds every platform and opens a draft release holding the bundles.
 
 `nix run` (or `nix build .#janis`) builds and launches the app through Nix alone, with no dev shell required.
 

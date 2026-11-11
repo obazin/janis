@@ -87,6 +87,10 @@ Debug builds can save what the window shows and be put in a state by environment
 `cargo packager` builds the DMG, the NSIS and MSI installers, the AppImage and the deb, with the artifact names the first version's bundles had, so the macOS install script and the release notes kept working. It has no rpm format; `cargo generate-rpm` builds that from the same binary. No signing certificate exists: macOS is ad-hoc signed, the others unsigned.
 Superseded: the Tauri bundler and `tauri-action` (D23a, first version).
 
+**D30 · The dev shell builds cargo-packager on macOS** — *current*
+nixpkgs does not carry `cargo-packager`, and `just release-macos` and `install-macos` run inside the dev shell, so `flake.nix` builds it from the published crate at a pinned version, with the lock file the crate ships. Linux and Windows keep `cargo install cargo-packager --locked`: their release recipes run outside Nix, as does the release workflow.
+Superseded: a separate `cargo install cargo-packager --locked` on macOS too (D30a), which left the recipe failing in a fresh shell.
+
 **D24 · A locally built macOS bundle is pointed at the system's libraries** — *current*
 A binary built in the Nix dev shell links libiconv from the Nix store. A signed bundle with the hardened runtime refuses a library signed by someone else, so the bundle crashed at launch from Finder while the bare binary ran from a terminal. `just release-macos` rewrites the reference to the system's copy before packaging and fails if the bundle still reaches into the store. Release builds from the workflow never had the store path.
 
