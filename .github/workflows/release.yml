@@ -100,7 +100,9 @@ jobs:
             # Each runner builds for its own architecture, and the packager
             # makes every format its platform has.
             - name: Build the bundles
-              run: cargo packager --release
+              run: |
+                  cargo build --release
+                  cargo packager --release
 
             # The packager has no rpm format; this one is built from the same
             # release binary.
