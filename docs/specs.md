@@ -68,10 +68,6 @@ The canonical description of user-facing behavior. Every new feature lands here 
 - Table: title, artist, lime format chip, duration. Click plays from the filtered list.
 - Watched folders list: path, track count, per-folder Remove (cascade-deletes its tracks). Rescan re-walks all folders and prunes files that vanished — but only under roots that are still reachable, so rescanning with an external drive ejected leaves that drive's library (and its accumulated loudness measurements) intact.
 
-## Spotify
-
-- Connect screen (green mark, pitch, feature bullets). The CTA is honest: clicking shows "integration is planned — not available yet". No fake account linking.
-
 ## Settings
 
 - Violet eyebrow. **Equalizer presets** chips (apply immediately + persist) and a "fine-tune" link opening the EQ sheet.

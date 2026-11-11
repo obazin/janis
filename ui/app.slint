@@ -18,7 +18,6 @@ import { LibraryScreen } from "screens/library_screen.slint";
 import { LocalFilesScreen } from "screens/local_files_screen.slint";
 import { RadioScreen } from "screens/radio_screen.slint";
 import { DiscoverScreen } from "screens/discover_screen.slint";
-import { SpotifyScreen } from "screens/spotify_screen.slint";
 import { SettingsScreen } from "screens/settings_screen.slint";
 import { Settings } from "features/settings/settings.slint";
 import { Radio } from "features/radio/radio.slint";
@@ -59,8 +58,7 @@ export component AppWindow inherits Window {
                         label: Strings.nav-section-sources,
                         items: [
                             { id: "radio", label: Strings.nav-radio, icon: Icons.radio },
-                            { id: "local", label: Strings.nav-local, icon: Icons.local-files },
-                            { id: "spotify", label: Strings.nav-spotify, icon: Icons.spotify }
+                            { id: "local", label: Strings.nav-local, icon: Icons.local-files }
                         ]
                     }
                 ];
@@ -78,7 +76,6 @@ export component AppWindow inherits Window {
                 if Shell.screen == "local": LocalFilesScreen { }
                 if Shell.screen == "radio": RadioScreen { }
                 if Shell.screen == "discover": DiscoverScreen { }
-                if Shell.screen == "spotify": SpotifyScreen { }
                 if Shell.screen == "settings": SettingsScreen { }
             }
         }

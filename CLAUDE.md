@@ -38,7 +38,7 @@ Development hooks, debug builds only:
 | Variable | Effect |
 |---|---|
 | `JANIS_SNAPSHOT=<file.png>` | Saves what the window shows after `JANIS_SNAPSHOT_SECONDS` (2) and quits |
-| `JANIS_SCREEN=<identifier>` | Opens on that screen: `now-playing`, `library`, `discover`, `radio`, `local`, `spotify`, `settings` |
+| `JANIS_SCREEN=<identifier>` | Opens on that screen: `now-playing`, `library`, `discover`, `radio`, `local`, `settings` |
 | `JANIS_LIBRARY=<tab>[:<card>]` | Opens a Library tab and, in a grid, the card at that place |
 | `JANIS_SEARCH=<text>` | Fills the search field |
 | `JANIS_EQUALIZER` | Opens the equalizer sheet |

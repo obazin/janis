@@ -16,7 +16,7 @@ Each component belongs to exactly one tier and only uses tiers below it. One com
 | Molecules | `molecules/` | `NavItem`, `ToggleRow`, `PlayCircle`, `ScreenHeader`, `ScrollArea` |
 | Organisms | `organisms/` | `SidebarNav`, `Toaster` |
 | Features | `features/<name>/` | player: `MiniPlayer`, `Waveform`, `TransportControls`, `VolumeSlider`, `NowPlayingQueue` · equalizer: `EqualizerOverlay`, `EqualizerBandSlider`, `OpenEqualizerButton` · library: `CoverArt`, `AlbumCard`, `CardGrid`, `TrackRow`, `TrackList`, `LibraryTrackAccordion`, `LocalRow`, `LocalTable`, `ShelfTile`, `Shelf`, `ArtistSpotlight` · radio: `StationCard` |
-| Screens | `screens/` | `AppTitlebar`, `NowPlayingScreen`, `LibraryScreen`, `DiscoverScreen`, `RadioScreen`, `LocalFilesScreen`, `SpotifyScreen`, `SettingsScreen` |
+| Screens | `screens/` | `AppTitlebar`, `NowPlayingScreen`, `LibraryScreen`, `DiscoverScreen`, `RadioScreen`, `LocalFilesScreen`, `SettingsScreen` |
 | Page | `app.slint` | `AppWindow`: title bar, sidebar, the open screen, the mini player, and what floats above them |
 
 Dependencies run one way. The design system (atoms, molecules, organisms) imports tokens and icons only and knows nothing about audio. A feature imports the design system; the allowed feature-to-feature edges are the pair `library ↔ player` (the artist spotlight plays through the player; the queue card shows library covers) and `player → equalizer` (the EQ buttons). Screens import anything. A design-system file importing from `features/`, or another feature edge, is a design smell: surface it.
