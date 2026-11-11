@@ -121,6 +121,16 @@ mod development {
                 }
             }
         }
+        // `JANIS_STATION=<place>` starts the station at that place in the
+        // Radio grid; pair it with `JANIS_AUTOPLAY` to keep it silent.
+        if let Some(station) = std::env::var("JANIS_STATION")
+            .ok()
+            .and_then(|place| place.parse().ok())
+        {
+            window
+                .global::<crate::user_interface::Radio>()
+                .invoke_station_clicked(station);
+        }
         if let Ok(search) = std::env::var("JANIS_SEARCH") {
             shell.set_search(search.as_str().into());
             shell.invoke_search_edited(search.into());

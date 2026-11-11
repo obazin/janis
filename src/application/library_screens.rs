@@ -57,15 +57,23 @@ impl Application {
         view.on_tab_selected(
             self.handler(|application, identifier: slint::SharedString| {
                 if let Some(tab) = LibraryTab::from_identifier(&identifier) {
-                    let mut screen = application.library_screen.borrow_mut();
-                    screen.tab = tab;
-                    screen.selection = None;
+                    {
+                        let mut screen = application.library_screen.borrow_mut();
+                        screen.tab = tab;
+                        screen.selection = None;
+                    }
+                    application.refresh_library();
                 }
             }),
         );
         view.on_album_clicked(self.handler(|application, index: i32| {
-            let mut screen = application.library_screen.borrow_mut();
-            let Some(album) = screen.shown_albums.get(row(index)).cloned() else {
+            let album = application
+                .library_screen
+                .borrow()
+                .shown_albums
+                .get(row(index))
+                .cloned();
+            let Some(album) = album else {
                 return;
             };
             let label = album.album.clone().unwrap_or_else(|| {
@@ -74,30 +82,29 @@ impl Application {
                     .borrow()
                     .text("common.unknownAlbum")
             });
-            library_view::toggle_selection(
-                &mut screen.selection,
-                Selection {
-                    kind: SelectionKind::Album,
-                    key: album.key,
-                    label,
-                    tracks: album.tracks,
-                },
-            );
+            application.toggle_selection(Selection {
+                kind: SelectionKind::Album,
+                key: album.key,
+                label,
+                tracks: album.tracks,
+            });
         }));
         view.on_artist_clicked(self.handler(|application, index: i32| {
-            let mut screen = application.library_screen.borrow_mut();
-            let Some(artist) = screen.shown_artists.get(row(index)).cloned() else {
+            let artist = application
+                .library_screen
+                .borrow()
+                .shown_artists
+                .get(row(index))
+                .cloned();
+            let Some(artist) = artist else {
                 return;
             };
-            library_view::toggle_selection(
-                &mut screen.selection,
-                Selection {
-                    kind: SelectionKind::Artist,
-                    key: artist.artist.clone(),
-                    label: artist.artist,
-                    tracks: artist.tracks,
-                },
-            );
+            application.toggle_selection(Selection {
+                kind: SelectionKind::Artist,
+                key: artist.artist.clone(),
+                label: artist.artist,
+                tracks: artist.tracks,
+            });
         }));
         view.on_song_clicked(self.handler(|application, index: i32| {
             let tracks = application.library_screen.borrow().shown_tracks.clone();
@@ -127,6 +134,7 @@ impl Application {
         }));
         view.on_selection_closed(self.action(|application| {
             application.library_screen.borrow_mut().selection = None;
+            application.refresh_library();
         }));
         view.set_local_tracks(self.library_local.clone().into());
         view.set_folders(self.library_folders.clone().into());
@@ -140,6 +148,11 @@ impl Application {
         }));
         view.on_add_music(self.action(Application::add_files));
         view.on_add_folder(self.action(Application::add_folder));
+    }
+
+    fn toggle_selection(&self, selection: Selection) {
+        library_view::toggle_selection(&mut self.library_screen.borrow_mut().selection, selection);
+        self.refresh_library();
     }
 
     /// Rebuilds what the Library screen shows from the library, the search
@@ -345,7 +358,7 @@ impl Application {
                 self.notify_error("error.library", vec![("message", error)], None);
             }
         }
-        self.refresh_after_action();
+        self.refresh_everything();
     }
 
     /// Replaces the library the screens are built from.

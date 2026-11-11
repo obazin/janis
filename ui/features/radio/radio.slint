@@ -1,0 +1,33 @@
+// The web-radio catalog as the Radio screen shows it. Filled by the
+// application; the callbacks are the listener's actions.
+
+// A country or genre filter chip.
+export struct RadioChip {
+    key: string,
+    label: string,
+    active: bool,
+}
+
+export struct StationRow {
+    id: string,
+    name: string,
+    // Genre and bit rate.
+    detail: string,
+    gradient-index: int,
+}
+
+export global Radio {
+    // The "all" chip first, then one per country or genre.
+    in property <[RadioChip]> countries;
+    in property <[RadioChip]> genres;
+    // The stations the filters and the search kept.
+    in property <[StationRow]> stations;
+    // The station loaded in the player; empty when none is.
+    in property <string> active-station-id;
+    // True while that station is still connecting.
+    in property <bool> connecting;
+
+    callback country-toggled(key: string);
+    callback genre-toggled(key: string);
+    callback station-clicked(index: int);
+}

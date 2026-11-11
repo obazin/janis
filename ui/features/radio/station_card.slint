@@ -1,0 +1,80 @@
+import { Tokens, Typography, Metrics, Motion } from "../../tokens.slint";
+import { Strings } from "strings.slint";
+import { ArtTile } from "../../atoms/art_tile.slint";
+import { StationRow } from "radio.slint";
+
+// A station: its tile, name, genre and bit rate — and, once it is the one
+// loaded, whether it is connecting or live.
+export component StationCard inherits Rectangle {
+    in property <StationRow> station;
+    in property <bool> active;
+    in property <bool> connecting;
+    callback clicked();
+
+    property <color> status: root.connecting ? Tokens.text-muted : Tokens.live;
+
+    border-radius: Metrics.radius-card;
+    border-width: 1px;
+    border-color: root.active ? Tokens.station-active-outline : Tokens.border;
+    background: touch.has-hover ? Tokens.panel-hover : Tokens.panel;
+    animate background { duration: Motion.base; }
+    accessible-role: button;
+    accessible-label: root.station.name;
+    accessible-action-default => { root.clicked(); }
+
+    HorizontalLayout {
+        padding: 14px;
+        spacing: 14px;
+        ArtTile {
+            width: 54px;
+            height: 54px;
+            radius: 12px;
+            gradient-index: root.station.gradient-index;
+        }
+        VerticalLayout {
+            horizontal-stretch: 1;
+            alignment: center;
+            Text {
+                text: root.station.name;
+                font-size: Typography.heading-sm;
+                font-weight: Typography.bold;
+                color: Tokens.text;
+                horizontal-alignment: left;
+                overflow: elide;
+            }
+            Text {
+                text: root.station.detail;
+                font-size: Typography.caption;
+                color: Tokens.text-muted;
+                horizontal-alignment: left;
+                overflow: elide;
+            }
+        }
+        if root.active: HorizontalLayout {
+            spacing: 5px;
+            VerticalLayout {
+                alignment: center;
+                Rectangle {
+                    width: 7px;
+                    height: 7px;
+                    border-radius: 3.5px;
+                    background: root.status;
+                    drop-shadow-blur: root.connecting ? 0px : 8px;
+                    drop-shadow-color: root.connecting ? transparent : Tokens.live;
+                }
+            }
+            Text {
+                text: (root.connecting ? Strings.radio-connecting : Strings.radio-live).to-uppercase();
+                font-size: Typography.label;
+                font-weight: Typography.bold;
+                color: root.status;
+                vertical-alignment: center;
+            }
+        }
+    }
+
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}

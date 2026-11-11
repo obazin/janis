@@ -1,0 +1,86 @@
+import { Accent } from "../tokens.slint";
+import { Strings } from "strings.slint";
+import { Chip } from "../atoms/chip.slint";
+import { ScreenHeader } from "../molecules/screen_header.slint";
+import { ScrollArea } from "../molecules/scroll_area.slint";
+import { Radio } from "../features/radio/radio.slint";
+import { StationCard } from "../features/radio/station_card.slint";
+
+// Web radio: the country and genre filters over a grid of stations, of which
+// only the rows in view are drawn.
+export component RadioScreen inherits Rectangle {
+    property <length> side: 44px;
+    property <length> content-width: page.content-width - root.side - 32px;
+    property <length> gap: 16px;
+    property <length> narrowest-card: 280px;
+    property <length> card-height: 82px;
+    property <int> columns: max(1, floor((root.content-width + root.gap) / (root.narrowest-card + root.gap)));
+    property <length> card-width: (root.content-width - (root.columns - 1) * root.gap) / root.columns;
+    property <length> line-height: root.card-height + root.gap;
+    property <int> line-count: ceil(Radio.stations.length / root.columns);
+    property <int> first-line: max(0, floor((page.scroll-offset - grid.y) / root.line-height));
+    property <int> shown-lines: ceil(page.height / root.line-height) + 1;
+
+    page := ScrollArea {
+        content-height: grid.y + grid.height + 40px;
+
+        header := VerticalLayout {
+            x: root.side;
+            y: 0;
+            width: root.content-width;
+            height: self.preferred-height;
+            padding-top: 36px;
+            ScreenHeader {
+                eyebrow: Strings.radio-eyebrow;
+                tone: Accent.ember;
+                title: Strings.radio-title;
+            }
+        }
+
+        countries := FlexboxLayout {
+            x: root.side;
+            y: header.height + 20px;
+            width: root.content-width;
+            height: self.preferred-height;
+            spacing: 8px;
+            for chip in Radio.countries: Chip {
+                label: chip.label;
+                active: chip.active;
+                clicked => { Radio.country-toggled(chip.key); }
+            }
+        }
+
+        genres := FlexboxLayout {
+            x: root.side;
+            y: countries.y + countries.height + 12px;
+            width: root.content-width;
+            height: self.preferred-height;
+            spacing: 8px;
+            for chip in Radio.genres: Chip {
+                label: chip.label;
+                active: chip.active;
+                clicked => { Radio.genre-toggled(chip.key); }
+            }
+        }
+
+        grid := Rectangle {
+            x: root.side;
+            y: genres.y + genres.height + 26px;
+            width: root.content-width;
+            height: root.line-count * root.line-height;
+
+            for offset in root.shown-lines * root.columns: StationCard {
+                property <int> index: root.first-line * root.columns + offset;
+                x: mod(self.index, root.columns) * (root.card-width + root.gap);
+                y: floor(self.index / root.columns) * root.line-height;
+                width: root.card-width;
+                height: root.card-height;
+                visible: self.index < Radio.stations.length;
+                station: Radio.stations[self.index];
+                active: self.station.id == Radio.active-station-id;
+                connecting: self.active && Radio.connecting;
+                clicked => { Radio.station-clicked(self.index); }
+            }
+        }
+    }
+}
