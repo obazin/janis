@@ -258,13 +258,15 @@ pub fn item_song(item: &Item, server_identifier: &str) -> ServerSong {
         .map(|person| person.name.as_str())
         .collect();
 
-    let artwork_item = if item.image_tags.primary.is_some() {
-        Some(item.id.clone())
-    } else if item.album_primary_image_tag.is_some() {
-        item.album_id.clone()
-    } else {
-        None
-    };
+    // The album's picture first, so the songs of an album share one picture,
+    // asked for and cached once — Jellyfin gives a song a picture of its own
+    // whenever its file embeds one, usually the same sleeve. The song's own
+    // picture stands in when its album has none.
+    let artwork_item = item
+        .album_primary_image_tag
+        .as_ref()
+        .and(item.album_id.clone())
+        .or_else(|| item.image_tags.primary.as_ref().map(|_| item.id.clone()));
 
     ServerSong {
         address: song_address(server_identifier, &item.id),
@@ -817,6 +819,18 @@ mod tests {
     }
 
     #[test]
+    fn a_song_with_a_picture_of_its_own_still_shows_its_albums() {
+        let item: Item = serde_json::from_str(
+            r#"{"Id": "song", "AlbumId": "album", "ImageTags": {"Primary": "own"}, "AlbumPrimaryImageTag": "sleeve"}"#,
+        )
+        .expect("an item parses");
+        assert_eq!(
+            item_song(&item, "server").artwork_item.as_deref(),
+            Some("album")
+        );
+    }
+
+    #[test]
     fn a_sparse_song_still_maps() {
         let item: Item = serde_json::from_str(
             r#"{"Id": "bare", "Container": "mov,mp4,m4a", "MediaSources": [{"MediaStreams": [{"Type": "Audio", "Codec": "aac"}]}]}"#,
@@ -846,7 +860,7 @@ mod tests {
         assert_eq!(
             song.artwork_item.as_deref(),
             Some("alac"),
-            "its own picture first"
+            "its own picture when its album has none"
         );
     }
 }
