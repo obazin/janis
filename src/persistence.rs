@@ -1,11 +1,10 @@
 //! `janis.db` — the app's single SQLite store (user preferences + track
-//! library). Opened once at setup in the OS app-data directory (resolved via
-//! Tauri's path API, cross-platform by construction) and shared behind a
-//! mutex: every command is a short read or write, so one connection is
+//! library). Opened once at boot in the per-user data directory (resolved by
+//! `platform::data_directory`, cross-platform by construction) and shared
+//! behind a mutex: every call is a short read or write, so one connection is
 //! plenty and keeps SQLite's locking model trivial.
 
 use rusqlite::Connection;
-use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::{Mutex, MutexGuard};
 
@@ -95,7 +94,7 @@ const MIGRATIONS: &[&str] = &[
 ];
 
 /// Opens (creating if needed) `janis.db` under the app-data directory and
-/// brings it up to date. Called once from `main.rs`'s setup hook.
+/// brings it up to date. Called once at boot.
 pub fn init(app_data_dir: PathBuf) -> Result<DbState, String> {
     std::fs::create_dir_all(&app_data_dir)
         .map_err(|e| format!("create app data dir {}: {}", app_data_dir.display(), e))?;
@@ -164,8 +163,7 @@ fn migrate(conn: &Connection) -> Result<(), String> {
     Ok(())
 }
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Preferences {
     pub volume: f64,
     pub eq_gains: Vec<f64>,
@@ -178,10 +176,9 @@ pub struct Preferences {
     pub language: String,
 }
 
-/// The four playback switches, as a closed enum so the column an invoke can
+/// The four playback switches, as a closed enum so the column a write can
 /// touch is an allowlist rather than an interpolated string.
-#[derive(Deserialize, Clone, Copy)]
-#[serde(rename_all = "lowercase")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PlaybackOption {
     Gapless,
     Crossfade,
@@ -200,8 +197,7 @@ impl PlaybackOption {
     }
 }
 
-#[tauri::command]
-pub fn get_preferences(db: tauri::State<'_, DbState>) -> Result<Preferences, String> {
+pub fn get_preferences(db: &DbState) -> Result<Preferences, String> {
     let conn = db.lock();
     conn.query_row(
         "SELECT volume, eq_gains, eq_preset, eq_linear_phase, gapless, crossfade, normalize,
@@ -226,8 +222,7 @@ pub fn get_preferences(db: tauri::State<'_, DbState>) -> Result<Preferences, Str
     .map_err(|e| format!("read preferences: {}", e))
 }
 
-#[tauri::command]
-pub fn set_volume(db: tauri::State<'_, DbState>, volume: f64) -> Result<(), String> {
+pub fn set_volume(db: &DbState, volume: f64) -> Result<(), String> {
     let volume = volume.clamp(0.0, 1.0);
     let conn = db.lock();
     conn.execute(
@@ -238,12 +233,7 @@ pub fn set_volume(db: tauri::State<'_, DbState>, volume: f64) -> Result<(), Stri
     Ok(())
 }
 
-#[tauri::command]
-pub fn set_eq(
-    db: tauri::State<'_, DbState>,
-    gains: Vec<f64>,
-    preset: String,
-) -> Result<(), String> {
+pub fn set_eq(db: &DbState, gains: &[f64], preset: &str) -> Result<(), String> {
     if gains.len() != 10 {
         return Err(format!("expected 10 EQ gains, got {}", gains.len()));
     }
@@ -262,8 +252,7 @@ pub fn set_eq(
 /// The equalizer's quality mode. Separate from `set_eq` because the gains are
 /// persisted debounced (a drag emits dozens a second) while this is one
 /// discrete switch.
-#[tauri::command]
-pub fn set_eq_linear_phase(db: tauri::State<'_, DbState>, enabled: bool) -> Result<(), String> {
+pub fn set_eq_linear_phase(db: &DbState, enabled: bool) -> Result<(), String> {
     let conn = db.lock();
     conn.execute(
         "UPDATE user_preferences SET eq_linear_phase = ?1, updated_at = unixepoch() WHERE id = 1",
@@ -273,9 +262,8 @@ pub fn set_eq_linear_phase(db: tauri::State<'_, DbState>, enabled: bool) -> Resu
     Ok(())
 }
 
-#[tauri::command]
 pub fn set_playback_option(
-    db: tauri::State<'_, DbState>,
+    db: &DbState,
     option: PlaybackOption,
     enabled: bool,
 ) -> Result<(), String> {
@@ -291,9 +279,8 @@ pub fn set_playback_option(
     Ok(())
 }
 
-#[tauri::command]
-pub fn set_language(db: tauri::State<'_, DbState>, language: String) -> Result<(), String> {
-    if !matches!(language.as_str(), "en" | "fr") {
+pub fn set_language(db: &DbState, language: &str) -> Result<(), String> {
+    if !matches!(language, "en" | "fr") {
         return Err(format!("unsupported language: {}", language));
     }
     let conn = db.lock();
