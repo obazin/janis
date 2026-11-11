@@ -16,13 +16,13 @@ export component VolumeSlider inherits Rectangle {
     Rectangle {
         y: (root.height - self.height) / 2;
         height: 6px;
-        border-radius: 3px;
+        border-radius: self.height / 2;
         background: Tokens.rail;
         clip: true;
         Rectangle {
             x: 0;
             width: parent.width * Player.volume;
-            border-radius: 3px;
+            border-radius: parent.height / 2;
             background: Tokens.volume;
         }
     }

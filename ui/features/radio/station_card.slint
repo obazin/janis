@@ -57,7 +57,7 @@ export component StationCard inherits Rectangle {
                 Rectangle {
                     width: 7px;
                     height: 7px;
-                    border-radius: 3.5px;
+                    border-radius: self.width / 2;
                     background: root.status;
                     drop-shadow-blur: root.connecting ? 0px : 8px;
                     drop-shadow-color: root.connecting ? transparent : Tokens.live;

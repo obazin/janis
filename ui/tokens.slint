@@ -114,6 +114,16 @@ export global Tokens {
         tone == Accent.violet ? root.violet : tone == Accent.teal ? root.teal : tone == Accent.lime ? root.lime : tone == Accent.ember ? root.ember : root.accent
     }
 
+    // The faint wash of an accent, behind a tinted badge.
+    public pure function accent-tint(tone: Accent) -> color {
+        root.accent-color(tone).with-alpha(0.12)
+    }
+
+    // The hero play button's ring as it swells from 0 to 1, fading as it goes.
+    public pure function play-pulse-at(swell: float) -> color {
+        root.play-pulse.with-alpha(0.45 * (1 - swell))
+    }
+
     // The gradient generated art wears; the index comes from the seed's hash.
     public pure function art-gradient(index: int) -> brush {
         index == 1 ? @linear-gradient(140deg, #22E0D2 0%, #7C5CFF 100%) : index == 2 ? @linear-gradient(140deg, #FF6B2C 0%, #FF2D9B 100%) : index == 3 ? @linear-gradient(140deg, #C6F135 0%, #22E0D2 100%) : index == 4 ? @linear-gradient(140deg, #7C5CFF 0%, #FF2D9B 100%) : index == 5 ? @linear-gradient(140deg, #22E0D2 0%, #C6F135 100%) : @linear-gradient(140deg, #FF2D9B 0%, #7C5CFF 100%)
@@ -162,6 +172,10 @@ export global Metrics {
     out property <length> radius-panel: 16px;   // spectrum panel, grid cards
     out property <length> radius-thumb: 10px;   // mini-player art
     out property <length> radius-art: 22px;     // Now Playing album art, equalizer sheet
+    out property <length> radius-inset: 12px;   // a card inside a card
+    out property <length> radius-tile: 8px;     // small square tiles, a segmented control
+    out property <length> radius-segment: 6px;  // one segment of a segmented control
+    out property <length> radius-tag: 2px;      // the outlined format tag
     out property <length> sidebar-width: 232px;
     out property <length> titlebar-height: 52px;
     out property <length> mini-player-height: 76px;

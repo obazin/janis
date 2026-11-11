@@ -16,7 +16,7 @@ export component Badge inherits Rectangle {
     border-radius: self.height / 2;
     border-width: root.outline ? 1px : 0px;
     border-color: Tokens.border-emphasis;
-    background: root.outline ? transparent : root.variant == BadgeVariant.tint ? root.tint.with-alpha(0.12) : Tokens.chip;
+    background: root.outline ? transparent : root.variant == BadgeVariant.tint ? Tokens.accent-tint(root.tone) : Tokens.chip;
 
     HorizontalLayout {
         padding-left: root.outline ? 7px : 12px;

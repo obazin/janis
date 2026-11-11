@@ -33,7 +33,7 @@ export component PlayCircle inherits Rectangle {
         width: root.side + 2 * root.ring;
         height: self.width;
         border-radius: self.width / 2;
-        background: Tokens.play-pulse.with-alpha(0.45 * (1 - root.swell));
+        background: Tokens.play-pulse-at(root.swell);
     }
 
     Rectangle {

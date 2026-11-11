@@ -15,7 +15,7 @@ component OutputCard inherits Rectangle {
     in property <string> value;
 
     horizontal-stretch: 1;
-    border-radius: 12px;
+    border-radius: Metrics.radius-inset;
     border-width: 1px;
     border-color: Tokens.border;
     background: Tokens.panel;
@@ -186,7 +186,7 @@ export component SettingsScreen inherits Rectangle {
                         Rectangle {
                             width: 36px;
                             height: 36px;
-                            border-radius: 8px;
+                            border-radius: Metrics.radius-tile;
                             background: Tokens.prism-conic;
                         }
                     }

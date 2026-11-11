@@ -1,4 +1,4 @@
-import { Tokens, Fonts, Typography, Motion } from "../../tokens.slint";
+import { Tokens, Fonts, Typography, Metrics, Motion } from "../../tokens.slint";
 import { LibraryTrack } from "library.slint";
 
 // A row of the Local Files table: title, artist, format, duration.
@@ -50,7 +50,7 @@ export component LocalRow inherits Rectangle {
                 alignment: center;
                 Rectangle {
                     width: self.preferred-width;
-                    border-radius: 2px;
+                    border-radius: Metrics.radius-tag;
                     border-width: 1px;
                     border-color: Tokens.format-outline;
                     HorizontalLayout {

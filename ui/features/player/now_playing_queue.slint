@@ -15,7 +15,7 @@ component QueueTab inherits Rectangle {
 
     width: self.preferred-width;
     height: self.preferred-height;
-    border-radius: 6px;
+    border-radius: Metrics.radius-segment;
     background: root.active ? Tokens.accent : transparent;
     animate background { duration: Motion.fast; }
     accessible-role: button;
@@ -141,7 +141,7 @@ export component NowPlayingQueue inherits Rectangle {
             spacing: 12px;
             Rectangle {
                 width: self.preferred-width;
-                border-radius: 8px;
+                border-radius: Metrics.radius-tile;
                 background: Tokens.well;
                 HorizontalLayout {
                     padding: 4px;

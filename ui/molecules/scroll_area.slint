@@ -42,7 +42,7 @@ export component ScrollArea inherits Rectangle {
         Rectangle {
             y: root.scroll-offset / root.content-height * root.height;
             height: max(24px, root.height / root.content-height * root.height);
-            border-radius: 4px;
+            border-radius: parent.width / 2;
             background: bar.has-hover || bar.pressed ? Tokens.scrollbar-hover : Tokens.scrollbar;
         }
 
