@@ -28,7 +28,7 @@ Every release on the [releases page](https://github.com/obazin/janis/releases) c
 
     Or download the DMG by hand (`Janis_x.y.z_aarch64.dmg` for Apple Silicon, `Janis_x.y.z_x64.dmg` for Intel) and drag Janis to Applications: the app is ad-hoc signed and not notarized, so the first launch then shows "Apple could not verify Janis is free of malware". Click **Done**, open **System Settings → Privacy & Security** and click **Open Anyway** next to Janis, or clear the flag once from a terminal: `xattr -dr com.apple.quarantine /Applications/Janis.app`.
 
-- **Windows** (`Janis_x.y.z_x64-setup.exe`, or the `.msi`) — the installer is unsigned, so SmartScreen shows "Windows protected your PC". Click **More info → Run anyway**.
+- **Windows** (`Janis_x.y.z_x64-setup.exe`) — the installer is unsigned, so SmartScreen shows "Windows protected your PC". Click **More info → Run anyway**.
 - **Linux** (x86_64 and arm64) — `.AppImage`: `chmod +x` and run (needs FUSE 2, `libfuse2` on Debian/Ubuntu). `.deb`: `sudo apt install ./Janis_x.y.z_amd64.deb`. `.rpm`: `sudo dnf install ./Janis-x.y.z-1.x86_64.rpm`. The packages depend on ALSA, and on the fontconfig, xkbcommon and OpenGL libraries a desktop already has.
 
 - **Nix** (Linux and macOS) — the flake packages the app, built from source on your machine, so nothing is downloaded from the releases page and macOS never quarantines it:
