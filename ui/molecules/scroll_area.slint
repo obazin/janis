@@ -1,0 +1,66 @@
+import { Tokens } from "../tokens.slint";
+
+// A vertically scrolling box with the thin accent scroll bar.
+//
+// Long lists draw only the rows in view: a list of fixed-height rows asks
+// `first-row` and `row-count` which rows those are, and places each at
+// `index * row-height` inside a `content-height` of all of them.
+export component ScrollArea inherits Rectangle {
+    in property <length> content-height;
+    out property <length> scroll-offset: -flickable.content-y;
+    out property <length> content-width: flickable.width;
+
+    property <length> furthest: max(0px, root.content-height - root.height);
+    property <bool> scrollable: root.furthest > 0;
+
+    public pure function first-row(row-height: length) -> int {
+        max(0, floor(root.scroll-offset / row-height))
+    }
+
+    public pure function row-count(row-height: length) -> int {
+        ceil(root.height / row-height) + 1
+    }
+
+    public function scroll-to(offset: length) {
+        flickable.content-y = -max(0px, min(root.furthest, offset));
+    }
+
+    flickable := Flickable {
+        // The scroll bar's gutter is always kept, so content does not shift
+        // when a list grows long enough to scroll.
+        width: root.width - 12px;
+        x: 0;
+        interactive: false;
+        content-width: self.width;
+        content-height: max(root.content-height, self.height);
+        @children
+    }
+
+    if root.scrollable: Rectangle {
+        x: root.width - 8px;
+        width: 8px;
+        Rectangle {
+            y: root.scroll-offset / root.content-height * root.height;
+            height: max(24px, root.height / root.content-height * root.height);
+            border-radius: 4px;
+            background: bar.has-hover || bar.pressed ? Tokens.scrollbar-hover : Tokens.scrollbar;
+        }
+
+        bar := TouchArea {
+            function follow() {
+                root.scroll-to(self.mouse-y / root.height * root.content-height - root.height / 2);
+            }
+
+            pointer-event(event) => {
+                if event.kind == PointerEventKind.down {
+                    self.follow();
+                }
+            }
+            moved => {
+                if self.pressed {
+                    self.follow();
+                }
+            }
+        }
+    }
+}

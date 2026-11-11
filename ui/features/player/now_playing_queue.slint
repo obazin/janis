@@ -1,0 +1,212 @@
+import { Tokens, Fonts, Typography, Metrics, Motion } from "../../tokens.slint";
+import { Icons } from "../../icons.slint";
+import { Strings } from "strings.slint";
+import { Glyph, GlyphMode } from "../../atoms/glyph.slint";
+import { SectionLabel } from "../../atoms/section_label.slint";
+import { ScrollArea } from "../../molecules/scroll_area.slint";
+import { CoverArt } from "../library/cover_art.slint";
+import { OpenEqualizerButton } from "../equalizer/open_equalizer_button.slint";
+import { Player, QueueView, QueueRow } from "player.slint";
+
+component QueueTab inherits Rectangle {
+    in property <string> label;
+    in property <bool> active;
+    callback clicked();
+
+    width: self.preferred-width;
+    height: self.preferred-height;
+    border-radius: 6px;
+    background: root.active ? Tokens.accent : transparent;
+    animate background { duration: Motion.fast; }
+    accessible-role: button;
+    accessible-label: root.label;
+    accessible-checkable: true;
+    accessible-checked: root.active;
+    accessible-action-default => { root.clicked(); }
+
+    HorizontalLayout {
+        padding-left: 13px;
+        padding-right: 13px;
+        padding-top: 6px;
+        padding-bottom: 6px;
+        Text {
+            text: root.label;
+            font-size: Typography.caption;
+            font-weight: Typography.bold;
+            color: root.active ? Tokens.on-accent : touch.has-hover ? Tokens.text-secondary : Tokens.text-soft;
+        }
+    }
+
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+component QueueRowView inherits Rectangle {
+    in property <QueueRow> item;
+    callback clicked();
+
+    border-radius: Metrics.radius-card;
+    background: touch.has-hover ? Tokens.row-hover : root.item.current ? Tokens.row-current : transparent;
+    animate background { duration: Motion.fast; }
+    accessible-role: button;
+    accessible-label: root.item.title;
+    accessible-action-default => { root.clicked(); }
+
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+        spacing: 12px;
+        Rectangle {
+            width: 26px;
+            if root.item.current: Glyph {
+                width: 14px;
+                height: 14px;
+                icon: Icons.play;
+                mode: GlyphMode.fill;
+                tint: Tokens.accent;
+            }
+            if !root.item.current: Text {
+                text: root.item.number;
+                font-family: Fonts.mono;
+                font-size: Typography.caption;
+                color: Tokens.text-faint;
+            }
+        }
+        VerticalLayout {
+            alignment: center;
+            CoverArt {
+                width: 34px;
+                height: 34px;
+                radius: 8px;
+                track-id: root.item.track-id;
+                gradient-index: root.item.gradient-index;
+            }
+        }
+        VerticalLayout {
+            horizontal-stretch: 1;
+            alignment: center;
+            Text {
+                text: root.item.title;
+                font-size: Typography.body;
+                font-weight: Typography.semibold;
+                color: root.item.current ? Tokens.accent : Tokens.text;
+                horizontal-alignment: left;
+                overflow: elide;
+            }
+            Text {
+                text: root.item.artist;
+                font-size: Typography.caption;
+                color: Tokens.text-muted;
+                horizontal-alignment: left;
+                overflow: elide;
+            }
+        }
+        Text {
+            text: root.item.duration;
+            font-family: Fonts.mono;
+            font-size: Typography.caption;
+            color: Tokens.text-muted;
+            vertical-alignment: center;
+        }
+    }
+
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+// Now Playing's "what's next" card: a three-way toggle over the live play
+// queue, the full queue as a playlist, and the current album — with the way
+// into the equalizer in its header.
+export component NowPlayingQueue inherits Rectangle {
+    property <length> row-height: 52px;
+    property <length> longest-list: 236px;
+
+    height: self.preferred-height;
+    border-radius: Metrics.radius-panel;
+    border-width: 1px;
+    border-color: Tokens.border;
+    background: Tokens.well-soft;
+
+    VerticalLayout {
+        padding-left: 18px;
+        padding-right: 18px;
+        padding-top: 16px;
+        padding-bottom: 16px;
+
+        HorizontalLayout {
+            spacing: 12px;
+            Rectangle {
+                width: self.preferred-width;
+                border-radius: 8px;
+                background: Tokens.well;
+                HorizontalLayout {
+                    padding: 4px;
+                    spacing: 4px;
+                    QueueTab {
+                        label: Strings.now-tab-up-next;
+                        active: Player.queue-view == QueueView.up-next;
+                        clicked => { Player.queue-view-selected(QueueView.up-next); }
+                    }
+                    QueueTab {
+                        label: Strings.now-tab-playlist;
+                        active: Player.queue-view == QueueView.playlist;
+                        clicked => { Player.queue-view-selected(QueueView.playlist); }
+                    }
+                    QueueTab {
+                        label: Strings.now-tab-album;
+                        active: Player.queue-view == QueueView.album;
+                        clicked => { Player.queue-view-selected(QueueView.album); }
+                    }
+                }
+            }
+            Rectangle {
+                horizontal-stretch: 1;
+            }
+            VerticalLayout {
+                alignment: center;
+                OpenEqualizerButton {
+                    label: Strings.now-eq;
+                }
+            }
+        }
+
+        Rectangle {
+            height: 14px;
+        }
+
+        SectionLabel {
+            label: Player.queue-heading;
+        }
+
+        Rectangle {
+            height: 6px;
+        }
+
+        if Player.queue-rows.length == 0: Text {
+            height: 72px;
+            text: Strings.now-queue-empty;
+            font-size: Typography.body;
+            color: Tokens.text-muted;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+
+        if Player.queue-rows.length > 0: list := ScrollArea {
+            height: min(root.longest-list, self.content-height);
+            content-height: Player.queue-rows.length * root.row-height;
+            for offset in list.row-count(root.row-height): QueueRowView {
+                property <int> index: list.first-row(root.row-height) + offset;
+                y: self.index * root.row-height;
+                height: root.row-height;
+                width: list.content-width;
+                visible: self.index < Player.queue-rows.length;
+                item: Player.queue-rows[self.index];
+                clicked => { Player.queue-row-clicked(self.index); }
+            }
+        }
+    }
+}

@@ -6,6 +6,8 @@
 //! pixel buffer, which can cross threads; the interface thread turns it into
 //! an image.
 
+use std::collections::{HashMap, VecDeque};
+
 use base64::Engine as _;
 use slint::{Rgba8Pixel, SharedPixelBuffer};
 
@@ -18,6 +20,8 @@ pub type Pixels = SharedPixelBuffer<Rgba8Pixel>;
 pub const HERO_SIDE: u32 = 800;
 /// The longest side of the art shown in lists and grids, in pixels.
 pub const THUMBNAIL_SIDE: u32 = 256;
+/// Covers kept in memory at once for lists and grids.
+pub const THUMBNAIL_LIMIT: usize = 300;
 
 /// A track's cover, scaled to fit `longest_side`. `Ok(None)` when neither the
 /// file nor its album carries art; `Err` when art exists but cannot be read.
@@ -59,6 +63,49 @@ fn decode_base64(encoded: &str, longest_side: u32) -> Result<Pixels, String> {
     ))
 }
 
+/// A cache that forgets its oldest entries past a limit.
+///
+/// Covers are pinned in memory while cached, so a long session scrolling a
+/// big library must not keep every cover it ever showed; what falls out is
+/// simply loaded again if it scrolls back in.
+pub struct BoundedCache<Value> {
+    entries: HashMap<i64, Value>,
+    /// Keys from oldest to newest insertion.
+    order: VecDeque<i64>,
+    limit: usize,
+}
+
+impl<Value> BoundedCache<Value> {
+    pub fn new(limit: usize) -> Self {
+        Self {
+            entries: HashMap::new(),
+            order: VecDeque::new(),
+            limit,
+        }
+    }
+
+    pub fn get(&self, key: i64) -> Option<&Value> {
+        self.entries.get(&key)
+    }
+
+    /// Stores `value`, replacing what the key held without renewing its age.
+    pub fn insert(&mut self, key: i64, value: Value) {
+        if self.entries.insert(key, value).is_none() {
+            self.order.push_back(key);
+        }
+        while self.order.len() > self.limit {
+            if let Some(oldest) = self.order.pop_front() {
+                self.entries.remove(&oldest);
+            }
+        }
+    }
+
+    pub fn clear(&mut self) {
+        self.entries.clear();
+        self.order.clear();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -79,6 +126,23 @@ mod tests {
         let pixels = data_url_cover(&url, 100).expect("a valid picture decodes");
 
         assert_eq!((pixels.width(), pixels.height()), (100, 50));
+    }
+
+    #[test]
+    fn the_cache_forgets_its_oldest_entries_past_the_limit() {
+        let mut cache = BoundedCache::new(2);
+        cache.insert(1, "one");
+        cache.insert(2, "two");
+        // Replacing an entry does not make it newer.
+        cache.insert(1, "uno");
+        cache.insert(3, "three");
+
+        assert_eq!(cache.get(1), None);
+        assert_eq!(cache.get(2), Some(&"two"));
+        assert_eq!(cache.get(3), Some(&"three"));
+
+        cache.clear();
+        assert_eq!(cache.get(3), None);
     }
 
     #[test]

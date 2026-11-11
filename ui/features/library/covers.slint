@@ -1,0 +1,12 @@
+// Cover art for lists and grids, fetched as tiles come into view.
+
+export global Covers {
+    // Bumped whenever a cover finishes loading, so tiles look theirs up again.
+    in property <int> revision;
+
+    // The cover of `track-id`, or an empty image while it loads and when the
+    // file has none. Asking is what starts the load.
+    pure callback thumbnail(track-id: int, revision: int) -> image;
+    // True when the track's art exists but could not be read.
+    pure callback unavailable(track-id: int, revision: int) -> bool;
+}

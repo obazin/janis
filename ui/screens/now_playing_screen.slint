@@ -1,0 +1,271 @@
+import { Tokens, Fonts, Typography, Metrics, Motion, Accent } from "../tokens.slint";
+import { Icons } from "../icons.slint";
+import { Strings } from "strings.slint";
+import { ArtTile } from "../atoms/art_tile.slint";
+import { Badge, BadgeVariant } from "../atoms/badge.slint";
+import { EmptyState } from "../atoms/empty_state.slint";
+import { Eyebrow } from "../atoms/eyebrow.slint";
+import { SectionLabel } from "../atoms/section_label.slint";
+import { ScrollArea } from "../molecules/scroll_area.slint";
+import { Player } from "../features/player/player.slint";
+import { Waveform, WaveformVariant } from "../features/player/waveform.slint";
+import { TransportControls } from "../features/player/transport_controls.slint";
+import { NowPlayingQueue } from "../features/player/now_playing_queue.slint";
+import { ArtistSpotlight } from "../features/library/artist_spotlight.slint";
+
+// One labelled fact about what is playing; hidden when it has nothing to say.
+component Detail inherits VerticalLayout {
+    in property <string> label;
+    in property <string> value;
+    in property <string> note;
+    in property <color> tint: Tokens.text;
+    in property <int> weight: Typography.bold;
+
+    visible: root.value != "";
+    spacing: 4px;
+    alignment: start;
+
+    SectionLabel {
+        label: root.label;
+    }
+    Text {
+        text: root.value;
+        font-size: Typography.heading-md;
+        font-weight: root.weight;
+        color: root.tint;
+        horizontal-alignment: left;
+        overflow: elide;
+    }
+    if root.note != "": Text {
+        text: root.note;
+        font-size: Typography.caption;
+        color: Tokens.text-faint;
+        horizontal-alignment: left;
+        overflow: elide;
+    }
+}
+
+// The facts about what is playing, side by side, wrapping onto further lines
+// when they do not fit. A local track shows its artist, composer, album and
+// genre; a station shows the announced artist and album, its name and genre.
+component DetailFlow inherits Rectangle {
+    property <length> gap: 40px;
+    property <length> line-gap: 18px;
+    property <length> line-height: max(first.preferred-height, second.preferred-height, third.preferred-height, fourth.preferred-height);
+
+    // Each fact takes its natural width, up to the whole line, or none when hidden.
+    property <length> first-width: first.visible ? min(first.preferred-width, root.width) : 0px;
+    property <length> second-width: second.visible ? min(second.preferred-width, root.width) : 0px;
+    property <length> third-width: third.visible ? min(third.preferred-width, root.width) : 0px;
+    property <length> fourth-width: fourth.visible ? min(fourth.preferred-width, root.width) : 0px;
+
+    // Where each line stands after a fact: the x the next one would start at.
+    property <length> after-first: root.first-width > 0 ? root.first-width + root.gap : 0px;
+    property <bool> second-wraps: root.after-first + root.second-width > root.width;
+    property <length> second-x: root.second-wraps ? 0px : root.after-first;
+    property <int> second-line: root.second-wraps ? 1 : 0;
+    property <length> after-second: root.second-width > 0 ? root.second-x + root.second-width + root.gap : root.after-first;
+    property <bool> third-wraps: root.after-second + root.third-width > root.width;
+    property <length> third-x: root.third-wraps ? 0px : root.after-second;
+    property <int> third-line: root.second-line + (root.third-wraps ? 1 : 0);
+    property <length> after-third: root.third-width > 0 ? root.third-x + root.third-width + root.gap : root.after-second;
+    property <bool> fourth-wraps: root.after-third + root.fourth-width > root.width;
+    property <length> fourth-x: root.fourth-wraps ? 0px : root.after-third;
+    property <int> fourth-line: root.third-line + (root.fourth-wraps ? 1 : 0);
+
+    height: (root.fourth-line + 1) * root.line-height + root.fourth-line * root.line-gap;
+
+    first := Detail {
+        x: 0;
+        y: 0;
+        width: root.first-width;
+        label: Strings.now-artist;
+        value: Player.artist;
+    }
+
+    second := Detail {
+        x: root.second-x;
+        y: root.second-line * (root.line-height + root.line-gap);
+        width: root.second-width;
+        label: Player.radio ? Strings.now-album : Strings.now-composer;
+        value: Player.radio ? Player.album : Player.composer;
+        tint: Player.radio ? Tokens.text-secondary : Tokens.teal;
+        weight: Player.radio ? Typography.semibold : Typography.bold;
+    }
+
+    third := Detail {
+        x: root.third-x;
+        y: root.third-line * (root.line-height + root.line-gap);
+        width: root.third-width;
+        label: Player.radio ? Strings.now-station : Strings.now-album;
+        value: Player.radio ? Player.station-name : Player.album;
+        note: Player.radio ? "" : Player.album-line;
+        tint: Player.radio ? Tokens.text : Tokens.text-secondary;
+        weight: Player.radio ? Typography.bold : Typography.semibold;
+    }
+
+    fourth := Detail {
+        x: root.fourth-x;
+        y: root.fourth-line * (root.line-height + root.line-gap);
+        width: root.fourth-width;
+        label: Player.radio ? Strings.radio-title : Strings.now-genre;
+        value: Player.radio ? Player.station-genre : Player.genre;
+        tint: Player.radio ? Tokens.text : Tokens.text-secondary;
+        weight: Player.radio ? Typography.bold : Typography.semibold;
+    }
+}
+
+// The screen about what is playing: its art, what it is, the waveform, the
+// transport, what comes next, and more by the same artist.
+export component NowPlayingScreen inherits Rectangle {
+    callback add-music();
+
+    if !Player.active: EmptyState {
+        icon: Icons.now-playing;
+        title: Strings.now-empty-title;
+        description: Strings.now-empty-desc;
+        action-label: Strings.now-empty-cta;
+        action-icon: Icons.plus;
+        action-clicked => { root.add-music(); }
+    }
+
+    if Player.active: HorizontalLayout {
+        padding-left: 44px;
+        padding-right: 32px;
+        spacing: 48px;
+
+        // The art stays put while the details scroll.
+        VerticalLayout {
+            min-width: 300px;
+            preferred-width: 380px;
+            max-width: 380px;
+            padding-top: 36px;
+            alignment: start;
+            spacing: 22px;
+
+            art := Rectangle {
+                height: self.width;
+                Image {
+                    width: art.width * 1.45;
+                    height: self.width;
+                    source: Player.halo;
+                    transform-rotation: Math.mod(animation-tick(), Motion.halo-turn) / Motion.halo-turn * 360deg;
+                }
+
+                ArtTile {
+                    radius: Metrics.radius-art;
+                    cover: Player.cover;
+                    gradient-index: Player.gradient-index;
+                    initials: Player.initials;
+                    unavailable: Player.cover-unavailable;
+                    drop-shadow-offset-y: Tokens.shadow-art.offset-y;
+                    drop-shadow-blur: Tokens.shadow-art.blur;
+                    drop-shadow-spread: Tokens.shadow-art.spread;
+                    drop-shadow-color: Tokens.shadow-art.color;
+                }
+
+                Rectangle {
+                    border-radius: Metrics.radius-art;
+                    border-width: 1px;
+                    border-color: Tokens.border-emphasis;
+                }
+            }
+
+            HorizontalLayout {
+                alignment: center;
+                spacing: 10px;
+                if Player.local: Badge {
+                    text: Player.quality;
+                }
+                if Player.local && Player.lossless: Badge {
+                    text: Strings.now-lossless;
+                    variant: BadgeVariant.tint;
+                    tone: Accent.lime;
+                }
+                if Player.radio: Badge {
+                    text: Player.station-genre;
+                }
+                if Player.radio: Badge {
+                    text: Strings.radio-live;
+                    variant: BadgeVariant.tint;
+                    tone: Accent.ember;
+                }
+            }
+        }
+
+        details := ScrollArea {
+            horizontal-stretch: 1;
+            content-height: column.preferred-height;
+            column := VerticalLayout {
+                width: details.content-width;
+                padding-top: 36px;
+                padding-bottom: 40px;
+                padding-right: 12px;
+                spacing: 22px;
+                alignment: start;
+
+                VerticalLayout {
+                    spacing: 12px;
+                    Eyebrow {
+                        label: Player.eyebrow;
+                        tone: Accent.accent;
+                        overflow: elide;
+                    }
+                    Text {
+                        text: Player.hero-title;
+                        font-family: Fonts.display;
+                        font-weight: Typography.black;
+                        font-size: Typography.hero;
+                        letter-spacing: Typography.tracking-tight * Typography.hero;
+                        color: Tokens.text;
+                        horizontal-alignment: left;
+                        wrap: word-wrap;
+                    }
+                }
+
+                DetailFlow { }
+
+                VerticalLayout {
+                    spacing: 8px;
+                    SectionLabel {
+                        label: Strings.now-waveform;
+                    }
+                    Rectangle {
+                        height: 120px;
+                        border-radius: Metrics.radius-card;
+                        border-width: 1px;
+                        border-color: Tokens.border;
+                        background: Tokens.well;
+                        clip: true;
+                        Waveform {
+                            variant: WaveformVariant.big;
+                            seek-label: Strings.player-seek;
+                        }
+                    }
+                    HorizontalLayout {
+                        Text {
+                            text: Player.elapsed;
+                            font-family: Fonts.mono;
+                            font-size: Typography.caption;
+                            color: Tokens.text-muted;
+                            horizontal-alignment: left;
+                        }
+                        Text {
+                            text: Player.total;
+                            font-family: Fonts.mono;
+                            font-size: Typography.caption;
+                            color: Tokens.text-muted;
+                            horizontal-alignment: right;
+                        }
+                    }
+                }
+
+                TransportControls { }
+
+                NowPlayingQueue { }
+
+                if Player.spotlight-shown: ArtistSpotlight { }
+            }
+        }
+    }
+}
