@@ -1,0 +1,14 @@
+import { Tokens, Typography, Accent } from "../tokens.slint";
+
+// The colored uppercase line above a screen title.
+export component Eyebrow inherits Text {
+    in property <string> label;
+    in property <Accent> tone: Accent.accent;
+
+    text: root.label.to-uppercase();
+    font-size: Typography.caption;
+    font-weight: Typography.bold;
+    letter-spacing: Typography.tracking-eyebrow * Typography.caption;
+    color: Tokens.accent-color(root.tone);
+    horizontal-alignment: left;
+}

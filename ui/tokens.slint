@@ -1,0 +1,163 @@
+// Janis design tokens. Single dark "prism" theme.
+//
+// Every color, typeface, text size, radius, shadow and duration a component
+// uses comes from here; a second theme would only replace these values.
+
+import "../static/fonts/HankenGrotesk.ttf";
+import "../static/fonts/FamiljenGrotesk.ttf";
+import "../static/fonts/SpaceMono-Regular.ttf";
+import "../static/fonts/SpaceMono-Bold.ttf";
+
+// The five prism accents. Each screen keys its identity to one of them
+// (now playing = accent, library and settings = violet, discover = teal,
+// radio = ember, local files = lime).
+export enum Accent { accent, violet, teal, lime, ember }
+
+export struct Shadow {
+    offset-y: length,
+    blur: length,
+    spread: length,
+    color: color,
+}
+
+export global Tokens {
+    // ── Surfaces ──────────────────────────────────────────────────────────
+    out property <color> canvas: #0C0714;              // window base
+    out property <color> canvas-top: #160B26;          // gradient top
+    out property <brush> window: @linear-gradient(180deg, #160B26 0%, #0C0714 100%);
+    out property <color> panel: #ffffff08;             // cards, list rows
+    out property <color> panel-hover: #ffffff12;
+    out property <color> chip: #ffffff0d;              // inactive chips
+    out property <color> chip-hover: #ffffff14;
+    out property <color> titlebar: #ffffff05;
+    out property <color> divider: #ffffff0d;           // row separators, sidebar edge
+    out property <color> border: #ffffff0f;            // card borders
+    out property <color> border-strong: #ffffff14;     // chip and input borders
+    out property <color> border-emphasis: #ffffff1f;   // badge outline, art inset ring
+    out property <color> input-background: #00000059;  // search field, volume rail base
+    out property <color> well: #00000047;              // waveform well
+    out property <color> well-soft: #0000003d;         // spectrum panel
+    out property <color> well-deep: #00000059;         // equalizer slider track
+    out property <color> rail: #ffffff1f;              // volume slider rail
+    out property <color> scrim: #08060Eb8;             // overlay backdrop
+    out property <color> mini-player: #0B0614f2;       // bottom bar
+    out property <color> toast: #0B0614f2;             // notification surface
+    out property <brush> equalizer-sheet: @linear-gradient(180deg, #1B1030 0%, #120A20 100%);
+
+    // ── Text ──────────────────────────────────────────────────────────────
+    out property <color> text: #F3ECFB;
+    out property <color> text-secondary: #C9BBDD;
+    out property <color> text-soft: #B7A9CC;
+    out property <color> text-muted: #8B7BA6;
+    out property <color> text-faint: #6B5D82;
+    out property <color> nav-idle: #9384AB;
+
+    // ── Prism accents ─────────────────────────────────────────────────────
+    out property <color> accent: #FF2D9B;              // pink
+    out property <color> violet: #7C5CFF;
+    out property <color> teal: #22E0D2;
+    out property <color> lime: #C6F135;
+    out property <color> ember: #FF6B2C;
+    out property <color> live: #FF3B3B;                // radio LIVE dot
+    out property <color> spotify: #1DB954;
+    out property <color> on-accent: #0C0714;           // dark foreground on bright accent fills
+
+    // ── Semantic status ───────────────────────────────────────────────────
+    out property <color> success: #5BBE62;
+    out property <color> warning: #F2A618;
+    out property <color> error: #FC4447;
+
+    // ── Derived tints ─────────────────────────────────────────────────────
+    out property <color> accent-ring: #FF2D9B59;       // active navigation row outline
+    out property <color> error-border: #FC444766;      // notification outline
+    out property <color> unavailable-mark: #8B7BA6b3;  // "art unavailable" glyph
+    out property <color> art-initials: #F3ECFBd9;      // monogram over generated art
+    out property <color> play-glow: #FF2D9B99;         // hero play button halo
+    out property <color> play-pulse: #FF2D9B73;        // hero play button ring, at its start
+    out property <color> scrollbar: #FF2D9B4d;
+    out property <color> scrollbar-hover: #FF2D9B80;
+
+    // ── Gradients ─────────────────────────────────────────────────────────
+    // Prism conic identity — logo mark, open-source banner mark.
+    out property <brush> prism-conic: @conic-gradient(#FF2D9B 0deg, #7C5CFF 90deg, #22E0D2 180deg, #C6F135 270deg, #FF2D9B 360deg);
+    out property <brush> call-to-action: @linear-gradient(90deg, #FF2D9B 0%, #FF6B2C 100%);
+    out property <brush> play: @linear-gradient(135deg, #FF2D9B 0%, #FF6B2C 100%);
+    out property <brush> nav-active: @linear-gradient(90deg, #FF2D9B33 0%, #7C5CFF14 100%);
+    out property <brush> volume: @linear-gradient(90deg, #FF2D9B 0%, #22E0D2 100%);
+    out property <brush> equalizer-band: @linear-gradient(180deg, #FF2D9B 0%, #7C5CFF 100%);
+    out property <brush> banner: @linear-gradient(90deg, #FF2D9B1a 0%, #7C5CFF0f 100%);
+    out property <brush> waveform: @linear-gradient(90deg, #FF2D9B 0%, #7C5CFF 50%, #22E0D2 100%);
+    // Gloss sweep laid over generated art tiles.
+    out property <brush> art-gloss: @linear-gradient(140deg, #ffffff38 0%, #ffffff00 50%);
+
+    // ── Shadows ───────────────────────────────────────────────────────────
+    out property <Shadow> shadow-card: { offset-y: 12px, blur: 30px, spread: -12px, color: #000000b3 };   // grid-card art
+    out property <Shadow> shadow-tile: { offset-y: 14px, blur: 34px, spread: -14px, color: #000000b3 };   // discover tiles
+    out property <Shadow> shadow-art: { offset-y: 24px, blur: 70px, spread: -20px, color: #000000cc };    // hero album art
+    out property <Shadow> shadow-sheet: { offset-y: -30px, blur: 80px, spread: -20px, color: #000000cc }; // equalizer sheet
+    out property <Shadow> shadow-play: { offset-y: 12px, blur: 40px, spread: -8px, color: #FF2D9B99 };    // hero play button
+
+    public pure function accent-color(tone: Accent) -> color {
+        tone == Accent.violet ? root.violet : tone == Accent.teal ? root.teal : tone == Accent.lime ? root.lime : tone == Accent.ember ? root.ember : root.accent
+    }
+
+    // The gradient generated art wears; the index comes from the seed's hash.
+    public pure function art-gradient(index: int) -> brush {
+        index == 1 ? @linear-gradient(140deg, #22E0D2 0%, #7C5CFF 100%) : index == 2 ? @linear-gradient(140deg, #FF6B2C 0%, #FF2D9B 100%) : index == 3 ? @linear-gradient(140deg, #C6F135 0%, #22E0D2 100%) : index == 4 ? @linear-gradient(140deg, #7C5CFF 0%, #FF2D9B 100%) : index == 5 ? @linear-gradient(140deg, #22E0D2 0%, #C6F135 100%) : @linear-gradient(140deg, #FF2D9B 0%, #7C5CFF 100%)
+    }
+}
+
+export global Fonts {
+    out property <string> sans: "Familjen Grotesk";
+    out property <string> display: "Hanken Grotesk";
+    out property <string> mono: "Space Mono";
+}
+
+export global Typography {
+    // ── Sizes ─────────────────────────────────────────────────────────────
+    out property <length> micro: 10px;       // spectrum frequency labels
+    out property <length> label: 11px;       // uppercase section headers
+    out property <length> caption: 12px;     // eyebrows, secondary info, badges
+    out property <length> body: 13px;        // primary content, chips
+    out property <length> body-em: 14px;     // row titles, buttons
+    out property <length> heading-sm: 15px;  // card titles, brand wordmark
+    out property <length> heading-md: 22px;  // artist and composer names, drop title
+    out property <length> heading-lg: 24px;  // overlay and panel titles
+    out property <length> display-sm: 34px;  // connect-screen title
+    out property <length> display: 40px;     // screen titles
+    out property <length> hero: 52px;        // Now Playing track title
+
+    // ── Weights ───────────────────────────────────────────────────────────
+    out property <int> regular: 400;
+    out property <int> medium: 500;
+    out property <int> semibold: 600;
+    out property <int> bold: 700;
+    out property <int> extrabold: 800;
+    out property <int> black: 900;
+
+    // ── Letter spacing, as a share of the text size ───────────────────────
+    out property <float> tracking-eyebrow: 0.17;   // colored eyebrows
+    out property <float> tracking-section: 0.14;   // uppercase section headers
+    out property <float> tracking-brand: 0.13;     // JANIS wordmark
+    out property <float> tracking-pill: 0.04;      // small badge pills
+    out property <float> tracking-tight: -0.02;    // display headings
+}
+
+export global Metrics {
+    out property <length> radius-button: 11px;  // buttons, navigation rows, search field
+    out property <length> radius-card: 14px;    // list containers, station cards
+    out property <length> radius-panel: 16px;   // spectrum panel, grid cards
+    out property <length> radius-thumb: 10px;   // mini-player art
+    out property <length> radius-art: 22px;     // Now Playing album art, equalizer sheet
+    out property <length> sidebar-width: 232px;
+    out property <length> titlebar-height: 52px;
+    out property <length> mini-player-height: 76px;
+}
+
+export global Motion {
+    out property <duration> fast: 150ms;    // hover feedback, chips, navigation
+    out property <duration> base: 180ms;    // cards, drop zone, toggles
+    out property <duration> float: 400ms;   // screen entrance
+    out property <duration> halo-turn: 18s; // one turn of the Now Playing halo
+    out property <duration> pulse: 2.4s;    // one beat of the hero play button
+}

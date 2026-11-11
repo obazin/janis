@@ -1,0 +1,60 @@
+import { Tokens, Motion } from "../tokens.slint";
+import { Glyph, GlyphMode } from "glyph.slint";
+
+export enum IconButtonSize { small, medium }
+export enum IconButtonTone { standard, secondary, muted }
+
+// App-wide registry of icon-only buttons. Every `IconButton` names itself
+// here — the registry is the searchable inventory of clickable icons, and the
+// name is what assistive technology and tests find the button by.
+export global IconButtonIdentifier {
+    out property <string> transport-shuffle: "transport-shuffle";
+    out property <string> transport-previous: "transport-previous";
+    out property <string> transport-play-pause: "transport-play-pause";
+    out property <string> transport-next: "transport-next";
+    out property <string> transport-repeat: "transport-repeat";
+    out property <string> mini-previous: "mini-previous";
+    out property <string> mini-play-pause: "mini-play-pause";
+    out property <string> mini-next: "mini-next";
+    out property <string> equalizer-close: "eq-close";
+    out property <string> library-collapse-selection: "library-collapse-selection";
+    out property <string> local-remove-folder: "local-remove-folder";
+    out property <string> local-rescan: "local-rescan";
+}
+
+// An icon-only button. `active` shows it in the accent color.
+export component IconButton inherits Rectangle {
+    in property <string> identifier;
+    in property <string> icon;
+    in property <string> label;
+    in property <GlyphMode> mode: GlyphMode.stroke;
+    in property <IconButtonSize> size: IconButtonSize.small;
+    in property <IconButtonTone> tone: IconButtonTone.standard;
+    in property <bool> active;
+    callback clicked();
+
+    property <length> side: root.size == IconButtonSize.medium ? 26px : 20px;
+    property <color> resting: root.tone == IconButtonTone.secondary ? Tokens.text-secondary : root.tone == IconButtonTone.muted ? Tokens.text-muted : Tokens.text;
+
+    width: root.side;
+    height: root.side;
+    accessible-role: button;
+    accessible-label: root.label;
+    accessible-id: root.identifier;
+    accessible-checkable: true;
+    accessible-checked: root.active;
+    accessible-action-default => { root.clicked(); }
+
+    glyph := Glyph {
+        width: root.side;
+        height: root.side;
+        icon: root.icon;
+        mode: root.mode;
+        tint: touch.has-hover ? Tokens.text : root.active ? Tokens.accent : root.resting;
+    }
+
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}

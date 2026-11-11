@@ -1,0 +1,54 @@
+import { Tokens, Typography, Metrics, Motion } from "../tokens.slint";
+import { Glyph } from "glyph.slint";
+
+export enum PrimaryButtonVariant { gradient, spotify }
+
+// The call-to-action button.
+export component PrimaryButton inherits Rectangle {
+    in property <string> label;
+    in property <string> icon;
+    in property <PrimaryButtonVariant> variant: PrimaryButtonVariant.gradient;
+    callback clicked();
+
+    property <bool> spotify: root.variant == PrimaryButtonVariant.spotify;
+
+    width: self.preferred-width;
+    height: self.preferred-height;
+    border-radius: root.spotify ? self.height / 2 : Metrics.radius-button;
+    background: root.spotify ? Tokens.spotify : Tokens.call-to-action;
+    transform-scale: touch.has-hover ? 1.02 : 1;
+    animate transform-scale { duration: Motion.fast; }
+    accessible-role: button;
+    accessible-label: root.label;
+    accessible-action-default => { root.clicked(); }
+
+    HorizontalLayout {
+        padding-left: root.spotify ? 28px : 18px;
+        padding-right: self.padding-left;
+        padding-top: root.spotify ? 14px : 11px;
+        padding-bottom: self.padding-top;
+        spacing: 8px;
+        if root.icon != "": VerticalLayout {
+            alignment: center;
+            Glyph {
+                width: 17px;
+                height: 17px;
+                icon: root.icon;
+                weight: 2.4;
+                tint: Tokens.on-accent;
+            }
+        }
+        Text {
+            text: root.label;
+            font-size: Typography.body-em;
+            font-weight: root.spotify ? Typography.extrabold : Typography.bold;
+            color: Tokens.on-accent;
+            vertical-alignment: center;
+        }
+    }
+
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}

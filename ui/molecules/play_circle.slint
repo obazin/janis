@@ -1,0 +1,59 @@
+import { Tokens, Motion } from "../tokens.slint";
+import { Icons } from "../icons.slint";
+import { Glyph, GlyphMode } from "../atoms/glyph.slint";
+
+export enum PlayCircleVariant { hero, mini }
+
+// The round play / pause button. The hero variant breathes: a ring swells
+// out of it and fades, over a steady glow.
+export component PlayCircle inherits Rectangle {
+    in property <string> identifier;
+    in property <string> label;
+    in property <bool> playing;
+    in property <PlayCircleVariant> variant: PlayCircleVariant.hero;
+    callback clicked();
+
+    property <bool> hero: root.variant == PlayCircleVariant.hero;
+    property <length> side: root.hero ? 60px : 42px;
+    // 0 → 1 → 0 over one beat.
+    property <float> swell: root.hero ? (1 - cos(Math.mod(animation-tick(), Motion.pulse) / Motion.pulse * 360deg)) / 2 : 0;
+    property <length> ring: 14px * root.swell;
+
+    width: root.side;
+    height: root.side;
+    accessible-role: button;
+    accessible-label: root.label;
+    accessible-id: root.identifier;
+    accessible-action-default => { root.clicked(); }
+
+    if root.hero: Rectangle {
+        x: -root.ring;
+        y: -root.ring;
+        width: root.side + 2 * root.ring;
+        height: self.width;
+        border-radius: self.width / 2;
+        background: Tokens.play-pulse.with-alpha(0.45 * (1 - root.swell));
+    }
+
+    Rectangle {
+        border-radius: root.side / 2;
+        background: root.hero ? Tokens.play : Tokens.text;
+        drop-shadow-offset-y: root.hero ? Tokens.shadow-play.offset-y : 0px;
+        drop-shadow-blur: root.hero ? Tokens.shadow-play.blur : 0px;
+        drop-shadow-spread: root.hero ? Tokens.shadow-play.spread : 0px;
+        drop-shadow-color: root.hero ? Tokens.shadow-play.color : transparent;
+    }
+
+    Glyph {
+        width: root.hero ? 26px : 20px;
+        height: self.width;
+        icon: root.playing ? Icons.pause : Icons.play;
+        mode: GlyphMode.fill;
+        tint: Tokens.on-accent;
+    }
+
+    TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}

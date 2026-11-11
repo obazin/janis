@@ -1,0 +1,88 @@
+import { Tokens, Typography, Metrics, Motion } from "../tokens.slint";
+import { Icons } from "../icons.slint";
+import { Glyph } from "../atoms/glyph.slint";
+
+export struct Toast {
+    id: int,
+    message: string,
+}
+
+component ToastCard inherits Rectangle {
+    in property <string> message;
+    in property <string> dismiss-label;
+    callback dismissed();
+
+    height: self.preferred-height;
+    border-radius: Metrics.radius-card;
+    border-width: 1px;
+    border-color: Tokens.error-border;
+    background: Tokens.toast;
+    drop-shadow-offset-y: Tokens.shadow-tile.offset-y;
+    drop-shadow-blur: Tokens.shadow-tile.blur;
+    drop-shadow-spread: Tokens.shadow-tile.spread;
+    drop-shadow-color: Tokens.shadow-tile.color;
+    accessible-role: button;
+    accessible-label: root.message;
+    accessible-description: root.dismiss-label;
+    accessible-action-default => { root.dismissed(); }
+
+    HorizontalLayout {
+        padding-left: 16px;
+        padding-right: 16px;
+        padding-top: 12px;
+        padding-bottom: 12px;
+        spacing: 10px;
+        VerticalLayout {
+            alignment: start;
+            padding-top: 2px;
+            Glyph {
+                width: 18px;
+                height: 18px;
+                icon: Icons.alert;
+                weight: 1.6;
+                tint: Tokens.error;
+            }
+        }
+        Text {
+            horizontal-stretch: 1;
+            text: root.message;
+            font-size: Typography.body;
+            color: Tokens.text;
+            horizontal-alignment: left;
+            wrap: word-wrap;
+        }
+        VerticalLayout {
+            alignment: start;
+            padding-top: 2px;
+            Glyph {
+                width: 14px;
+                height: 14px;
+                icon: Icons.close;
+                weight: 1.6;
+                tint: Tokens.text-muted;
+            }
+        }
+    }
+
+    TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.dismissed(); }
+    }
+}
+
+// The stack of error notifications; a click dismisses one.
+export component Toaster inherits VerticalLayout {
+    in property <[Toast]> items;
+    in property <string> dismiss-label;
+    callback dismissed(id: int);
+
+    width: 384px;
+    alignment: end;
+    spacing: 8px;
+
+    for item in root.items: ToastCard {
+        message: item.message;
+        dismiss-label: root.dismiss-label;
+        dismissed => { root.dismissed(item.id); }
+    }
+}

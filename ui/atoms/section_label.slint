@@ -1,0 +1,13 @@
+import { Tokens, Typography } from "../tokens.slint";
+
+// A small uppercase header above a group.
+export component SectionLabel inherits Text {
+    in property <string> label;
+
+    text: root.label.to-uppercase();
+    font-size: Typography.label;
+    font-weight: Typography.bold;
+    letter-spacing: Typography.tracking-section * Typography.label;
+    color: Tokens.text-faint;
+    horizontal-alignment: left;
+}
