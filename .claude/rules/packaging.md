@@ -12,7 +12,7 @@ paths:
 # Build, Nix and releases
 
 - The Rust toolchain pin belongs to the `chess-flake` workspace; never add a `rust-toolchain.toml` or pin a compiler here. The Nix package is built with that toolchain (`makeRustPlatform`), because nixpkgs' own trails behind what Slint needs.
-- After any change to `Cargo.lock`, regenerate `cargoHash` in `flake.nix`: set it to `pkgs.lib.fakeHash`, run `nix build .#janis`, and copy the hash it reports.
+- After any change to `Cargo.lock` — a version bump is one — regenerate `cargoHash` in `flake.nix`: set it to `pkgs.lib.fakeHash`, run `nix build .#janis`, and copy the hash it reports.
 - The version is declared in `Cargo.toml` and `flake.nix`; bump both together. The release workflow refuses a tag that differs from either.
 - A new native dependency is added in three places: the flake (the dev shell and the package), the Linux package list of `.github/workflows/release.yml`, and the README's Install section if it changes what a machine needs.
 - Installers come from `cargo packager`, configured in `Cargo.toml`. It has no rpm format: `cargo generate-rpm` builds that one. Release recipes are gated with `[macos]`, `[linux]`, `[windows]` and write to `dist/`.
