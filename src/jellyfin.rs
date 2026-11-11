@@ -22,6 +22,8 @@ const CLIENT_NAME: &str = "Janis";
 const PAGE_SIZE: usize = 500;
 /// How long one request may take before the server counts as unreachable.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+/// The port Jellyfin listens on out of the box.
+const DEFAULT_PORT: u16 = 8096;
 /// How a server song's library key starts; the rest is `<server>/<item>`.
 const SONG_ADDRESS_SCHEME: &str = "jellyfin://";
 
@@ -92,15 +94,18 @@ impl Session {
 
 // ── Pure helpers ────────────────────────────────────────────────────────────
 
-/// Turns what the listener typed into the server's base address: a scheme
-/// when none was typed (`http`, Jellyfin's default), no trailing slash, no
-/// query. A path is kept, for a server behind a reverse proxy at `/jellyfin`.
+/// Turns what the listener typed into the server's base address: no
+/// trailing slash, no query. A bare host (`192.168.1.20`, `jellyfin.local`)
+/// gets Jellyfin's own defaults, `http` on port 8096; an address typed with
+/// its scheme keeps that scheme's port, as a reverse proxy expects. A path is
+/// kept, for a server behind a reverse proxy at `/jellyfin`.
 pub fn normalise_server_address(text: &str) -> Result<String, Failure> {
     let trimmed = text.trim();
     if trimmed.is_empty() || trimmed.contains(char::is_whitespace) {
         return Err(Failure::InvalidAddress);
     }
-    let with_scheme = if trimmed.contains("://") {
+    let typed_scheme = trimmed.contains("://");
+    let with_scheme = if typed_scheme {
         trimmed.to_owned()
     } else {
         format!("http://{trimmed}")
@@ -108,6 +113,10 @@ pub fn normalise_server_address(text: &str) -> Result<String, Failure> {
     let mut url = reqwest::Url::parse(&with_scheme).map_err(|_| Failure::InvalidAddress)?;
     if !matches!(url.scheme(), "http" | "https") || url.host_str().is_none() {
         return Err(Failure::InvalidAddress);
+    }
+    if !typed_scheme && url.port().is_none() {
+        url.set_port(Some(DEFAULT_PORT))
+            .map_err(|()| Failure::InvalidAddress)?;
     }
     url.set_query(None);
     url.set_fragment(None);
@@ -652,6 +661,26 @@ mod tests {
         assert_eq!(
             normalise_server_address("https://example.org/jellyfin/?x=1#top"),
             Ok("https://example.org/jellyfin".to_owned())
+        );
+    }
+
+    #[test]
+    fn a_bare_host_gets_jellyfins_port_and_a_typed_scheme_keeps_its_own() {
+        assert_eq!(
+            normalise_server_address("100.78.170.73"),
+            Ok("http://100.78.170.73:8096".to_owned())
+        );
+        assert_eq!(
+            normalise_server_address("jellyfin.local/jellyfin"),
+            Ok("http://jellyfin.local:8096/jellyfin".to_owned())
+        );
+        assert_eq!(
+            normalise_server_address("https://media.example.org"),
+            Ok("https://media.example.org".to_owned())
+        );
+        assert_eq!(
+            normalise_server_address("http://192.168.1.20"),
+            Ok("http://192.168.1.20".to_owned())
         );
     }
 
