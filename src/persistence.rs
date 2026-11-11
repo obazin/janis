@@ -64,7 +64,7 @@ CREATE INDEX IF NOT EXISTS idx_tracks_added ON tracks(added_at DESC);
 /// `SCHEMA` above is frozen at version 1 — it only ever creates a fresh file.
 /// Every change since is a migration, so a new database and an existing one
 /// converge on the same shape.
-const SCHEMA_VERSION: i64 = 4;
+const SCHEMA_VERSION: i64 = 5;
 
 /// Index `i` upgrades to version `i + 2`. Append only: editing a shipped entry
 /// would skip the change for anyone who already ran it.
@@ -93,6 +93,13 @@ const MIGRATIONS: &[&str] = &[
     //      default: the zero-latency realtime EQ is what a player should do
     //      out of the box, and the FIR mode trades ~43 ms of latency for it.
     "ALTER TABLE user_preferences ADD COLUMN eq_linear_phase INTEGER NOT NULL DEFAULT 0;",
+    // → 5: the stations the listener starred, by their catalog id. A row is a
+    //      favourite; no row is the default. The id is not checked against the
+    //      catalog, so a station that leaves it and comes back keeps its star.
+    "CREATE TABLE IF NOT EXISTS favourite_stations (
+         station_id TEXT PRIMARY KEY,
+         added_at INTEGER NOT NULL DEFAULT (unixepoch())
+     );",
 ];
 
 /// Opens (creating if needed) `janis.db` under the app-data directory and
@@ -299,6 +306,38 @@ pub fn set_language(db: &DbState, language: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// The ids of the stations the listener starred.
+pub fn favourite_station_ids(database: &DbState) -> Result<Vec<String>, String> {
+    let connection = database.lock();
+    let mut statement = connection
+        .prepare("SELECT station_id FROM favourite_stations")
+        .map_err(|error| format!("read favourite stations: {error}"))?;
+    let station_ids = statement
+        .query_map([], |row| row.get(0))
+        .and_then(|rows| rows.collect())
+        .map_err(|error| format!("read favourite stations: {error}"))?;
+    Ok(station_ids)
+}
+
+/// Stars a station or takes its star away. Saving the state it already has
+/// changes nothing.
+pub fn set_favourite_station(
+    database: &DbState,
+    station_id: &str,
+    favourite: bool,
+) -> Result<(), String> {
+    let connection = database.lock();
+    let statement = if favourite {
+        "INSERT OR IGNORE INTO favourite_stations (station_id) VALUES (?1)"
+    } else {
+        "DELETE FROM favourite_stations WHERE station_id = ?1"
+    };
+    connection
+        .execute(statement, [station_id])
+        .map_err(|error| format!("persist favourite station: {error}"))?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -430,6 +469,49 @@ mod tests {
         );
         drop(conn);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_favourite_station_is_remembered_until_its_star_is_taken_away() {
+        let directory = temp_dir("favourites");
+        let database = init(directory.clone()).expect("init a new database");
+        assert_eq!(favourite_station_ids(&database), Ok(Vec::new()));
+
+        set_favourite_station(&database, "fip", true).expect("star a station");
+        // Starring twice keeps one row.
+        set_favourite_station(&database, "fip", true).expect("star it again");
+        assert_eq!(favourite_station_ids(&database), Ok(vec!["fip".to_owned()]));
+
+        set_favourite_station(&database, "fip", false).expect("take the star away");
+        assert_eq!(favourite_station_ids(&database), Ok(Vec::new()));
+        let _ = std::fs::remove_dir_all(&directory);
+    }
+
+    #[test]
+    fn an_existing_v4_database_gains_the_favourite_stations() {
+        let directory = temp_dir("upgrade-favourites");
+        std::fs::create_dir_all(&directory).expect("temp dir");
+        {
+            let connection = Connection::open(directory.join("janis.database")).expect("open");
+            connection.execute_batch(SCHEMA).expect("v1 schema");
+            for migration in &MIGRATIONS[..3] {
+                connection
+                    .execute_batch(migration)
+                    .expect("migrations to v4");
+            }
+            connection
+                .pragma_update(None, "user_version", 4)
+                .expect("stamp");
+        }
+
+        let database = init(directory.clone()).expect("init over a v4 database");
+        assert_eq!(favourite_station_ids(&database), Ok(Vec::new()));
+        let version: i64 = database
+            .lock()
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .expect("read version");
+        assert_eq!(version, SCHEMA_VERSION);
+        let _ = std::fs::remove_dir_all(&directory);
     }
 
     #[test]

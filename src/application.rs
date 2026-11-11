@@ -29,6 +29,7 @@ use crate::background::Worker;
 use crate::covers;
 use crate::effects::Effect;
 use crate::equalizer::Equalizer;
+use crate::favourites::FavouriteStations;
 use crate::library::{self, LoudnessStore, ScanReport, Track, WatchedFolder};
 use crate::library_view::{self, AlbumGroup, ArtistGroup, QueueView};
 use crate::notifications::Notifications;
@@ -110,6 +111,7 @@ pub struct Application {
     discover_rediscover: Rc<VecModel<user_interface::LibraryCard>>,
     discover_artists: Rc<VecModel<user_interface::LibraryCard>>,
     library_worker: Worker,
+    favourite_stations: RefCell<FavouriteStations>,
     radio_screen: RefCell<radio_screen::RadioScreen>,
     radio_countries: Rc<VecModel<user_interface::RadioChip>>,
     radio_genres: Rc<VecModel<user_interface::RadioChip>>,
@@ -139,6 +141,8 @@ impl Application {
         let preferences = persistence::get_preferences(&database)?;
         let tracks = library::list_tracks(&database)?;
         let folders = library::list_watched_folders(&database)?;
+        let mut favourite_stations = FavouriteStations::default();
+        favourite_stations.restore(persistence::favourite_station_ids(&database)?);
 
         let bridge = Arc::new(EngineBridge::new(|event| {
             post(move |application| application.on_engine_event(event));
@@ -196,6 +200,7 @@ impl Application {
             discover_rediscover: Rc::new(VecModel::default()),
             discover_artists: Rc::new(VecModel::default()),
             library_worker: Worker::new("janis library")?,
+            favourite_stations: RefCell::new(favourite_stations),
             radio_screen: RefCell::new(radio_screen::RadioScreen::default()),
             radio_countries: Rc::new(VecModel::default()),
             radio_genres: Rc::new(VecModel::default()),
@@ -468,6 +473,13 @@ impl Application {
                 Effect::PersistPlaybackOption { option, enabled } => self.saved(
                     "playback-option",
                     persistence::set_playback_option(&self.database, option, enabled),
+                ),
+                Effect::PersistFavouriteStation {
+                    station_id,
+                    favourite,
+                } => self.saved(
+                    "favourite-station",
+                    persistence::set_favourite_station(&self.database, &station_id, favourite),
                 ),
                 Effect::LoadCover(track_id) => self.load_current_cover(track_id),
                 Effect::ShowStreamCover(url) => self.show_stream_cover(url),

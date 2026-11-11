@@ -75,4 +75,4 @@ Dependencies run one way. The design system (atoms, molecules, organisms) import
 
 ## Looking at the result
 
-Compiling is not seeing. Debug builds save what the window shows: `JANIS_SNAPSHOT=<file.png>`, with `JANIS_SCREEN`, `JANIS_LIBRARY`, `JANIS_SEARCH`, `JANIS_EQUALIZER`, `JANIS_AUTOPLAY` and `JANIS_STATION` to reach a state. Say so when something could not be checked this way (anything that needs a pointer: drags, hover, scrolling).
+Compiling is not seeing. Debug builds save what the window shows: `JANIS_SNAPSHOT=<file.png>`, with `JANIS_SCREEN`, `JANIS_LIBRARY`, `JANIS_SEARCH`, `JANIS_EQUALIZER`, `JANIS_AUTOPLAY`, `JANIS_STATION` and `JANIS_FAVOURITES` to reach a state. Say so when something could not be checked this way (anything that needs a pointer: drags, hover, scrolling).

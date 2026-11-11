@@ -1,4 +1,4 @@
-import { Accent } from "../tokens.slint";
+import { Tokens, Typography, Accent } from "../tokens.slint";
 import { Strings } from "strings.slint";
 import { Chip } from "../atoms/chip.slint";
 import { ScreenHeader } from "../molecules/screen_header.slint";
@@ -6,8 +6,8 @@ import { ScrollArea } from "../molecules/scroll_area.slint";
 import { Radio } from "../features/radio/radio.slint";
 import { StationCard } from "../features/radio/station_card.slint";
 
-// Web radio: the country and genre filters over a grid of stations, of which
-// only the rows in view are drawn.
+// Web radio: the favourites, country and genre filters over a grid of
+// stations, of which only the rows in view are drawn.
 export component RadioScreen inherits Rectangle {
     property <length> side: 44px;
     property <length> content-width: page.content-width - root.side - 32px;
@@ -37,9 +37,22 @@ export component RadioScreen inherits Rectangle {
             }
         }
 
-        countries := FlexboxLayout {
+        favourites := FlexboxLayout {
             x: root.side;
             y: header.height + 20px;
+            width: root.content-width;
+            height: self.preferred-height;
+            spacing: 8px;
+            Chip {
+                label: Strings.radio-favourites;
+                active: Radio.favourites-only;
+                clicked => { Radio.favourites-toggled(); }
+            }
+        }
+
+        countries := FlexboxLayout {
+            x: root.side;
+            y: favourites.y + favourites.height + 12px;
             width: root.content-width;
             height: self.preferred-height;
             spacing: 8px;
@@ -67,7 +80,19 @@ export component RadioScreen inherits Rectangle {
             x: root.side;
             y: genres.y + genres.height + 26px;
             width: root.content-width;
-            height: root.line-count * root.line-height;
+            height: max(root.line-count * root.line-height, nothing-starred.preferred-height);
+
+            nothing-starred := Text {
+                x: 0;
+                y: 0;
+                width: parent.width;
+                visible: Radio.favourites-only && Radio.stations.length == 0;
+                text: Strings.radio-favourites-empty;
+                font-size: Typography.body;
+                color: Tokens.text-muted;
+                horizontal-alignment: left;
+                wrap: word-wrap;
+            }
 
             for offset in root.shown-lines * root.columns: StationCard {
                 property <int> index: root.first-line * root.columns + offset;

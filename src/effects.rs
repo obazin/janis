@@ -59,6 +59,11 @@ pub enum Effect {
         option: PlaybackOption,
         enabled: bool,
     },
+    /// Remember that a station is, or stopped being, a favourite.
+    PersistFavouriteStation {
+        station_id: String,
+        favourite: bool,
+    },
 
     // ── Presentation ─────────────────────────────────────────────────────────
     /// Show this track's cover art as the current art; `None` clears it.

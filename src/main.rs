@@ -13,6 +13,7 @@ mod background;
 mod covers;
 mod effects;
 mod equalizer;
+mod favourites;
 mod halo;
 mod instance;
 mod library;
@@ -135,6 +136,12 @@ mod development {
                     _ => library.invoke_album_clicked(card),
                 }
             }
+        }
+        // `JANIS_FAVOURITES` turns the Radio screen's favourites filter on.
+        if std::env::var_os("JANIS_FAVOURITES").is_some() {
+            window
+                .global::<crate::user_interface::Radio>()
+                .invoke_favourites_toggled();
         }
         // `JANIS_STATION=<place>` starts the station at that place in the
         // Radio grid; pair it with `JANIS_AUTOPLAY` to keep it silent.
