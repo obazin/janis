@@ -1,33 +1,20 @@
-// The application window. For now it lays the design system out for review;
-// the shell and the screens replace this gallery.
+// The application window: the title bar, the sidebar beside the open screen,
+// the mini player, and what floats above them.
 
-import { Tokens, Fonts, Typography, Metrics, Accent } from "tokens.slint";
+import { Tokens, Fonts, Typography } from "tokens.slint";
 import { Icons } from "icons.slint";
 import { Strings } from "strings.slint";
-import { ArtTile } from "atoms/art_tile.slint";
-import { Badge, BadgeVariant } from "atoms/badge.slint";
-import { Chip } from "atoms/chip.slint";
 import { EmptyState } from "atoms/empty_state.slint";
-import { Eyebrow } from "atoms/eyebrow.slint";
-import { GhostButton } from "atoms/ghost_button.slint";
-import { Glyph, GlyphMode } from "atoms/glyph.slint";
-import { IconButton, IconButtonIdentifier, IconButtonSize, IconButtonTone } from "atoms/icon_button.slint";
-import { PrimaryButton, PrimaryButtonVariant } from "atoms/primary_button.slint";
-import { SectionLabel } from "atoms/section_label.slint";
-import { Toggle } from "atoms/toggle.slint";
-import { NavItem } from "molecules/nav_item.slint";
-import { PlayCircle, PlayCircleVariant } from "molecules/play_circle.slint";
-import { ToggleRow } from "molecules/toggle_row.slint";
 import { SidebarNav } from "organisms/sidebar_nav.slint";
 import { Toaster } from "organisms/toaster.slint";
+import { Shell } from "shell.slint";
+import { Player } from "features/player/player.slint";
+import { MiniPlayer } from "features/player/mini_player.slint";
+import { AppTitlebar } from "screens/app_titlebar.slint";
 
-export { Strings }
+export { Strings, Shell, Player }
 
 export component AppWindow inherits Window {
-    in-out property <string> active-screen: "now-playing";
-    in-out property <bool> gapless: true;
-    in-out property <string> chip: "rock";
-
     title: "Janis";
     preferred-width: 1280px;
     preferred-height: 800px;
@@ -37,204 +24,59 @@ export component AppWindow inherits Window {
     default-font-family: Fonts.sans;
     default-font-size: Typography.body;
 
-    HorizontalLayout {
-        SidebarNav {
-            sections: [
-                {
-                    label: Strings.nav-section-playing,
-                    items: [{ id: "now-playing", label: Strings.nav-now-playing, icon: Icons.now-playing }]
-                },
-                {
-                    label: Strings.nav-section-library,
-                    items: [
-                        { id: "library", label: Strings.nav-library, icon: Icons.library },
-                        { id: "discover", label: Strings.nav-discover, icon: Icons.discover }
-                    ]
-                },
-                {
-                    label: Strings.nav-section-sources,
-                    items: [
-                        { id: "radio", label: Strings.nav-radio, icon: Icons.radio },
-                        { id: "local", label: Strings.nav-local, icon: Icons.local-files },
-                        { id: "spotify", label: Strings.nav-spotify, icon: Icons.spotify }
-                    ]
-                }
-            ];
-            footer-item: { id: "settings", label: Strings.nav-settings, icon: Icons.equalizer };
-            active-id: root.active-screen;
-            item-clicked(id) => { root.active-screen = id; }
-        }
+    VerticalLayout {
+        AppTitlebar { }
 
-        VerticalLayout {
-            padding: 28px;
-            spacing: 22px;
-            alignment: start;
-
-            Eyebrow {
-                label: Strings.nav-section-library;
-                tone: Accent.violet;
-            }
-
-            HorizontalLayout {
-                alignment: start;
-                spacing: 10px;
-                Chip {
-                    label: Strings.radio-genre-all;
-                    active: root.chip == "all";
-                    clicked => { root.chip = "all"; }
-                }
-                Chip {
-                    label: Strings.eq-preset-rock;
-                    active: root.chip == "rock";
-                    clicked => { root.chip = "rock"; }
-                }
-                Badge {
-                    text: "FLAC 24/96";
-                    variant: BadgeVariant.outline;
-                }
-                Badge {
-                    text: "Lossless";
-                }
-                Badge {
-                    text: "Jazz";
-                    variant: BadgeVariant.tint;
-                    tone: Accent.teal;
-                }
-                Badge {
-                    text: "LIVE";
-                    variant: BadgeVariant.tint;
-                    tone: Accent.ember;
-                }
-            }
-
-            HorizontalLayout {
-                alignment: start;
-                spacing: 14px;
-                PrimaryButton {
-                    label: Strings.library-add-music;
-                    icon: Icons.plus;
-                }
-                PrimaryButton {
-                    label: Strings.nav-spotify;
-                    icon: Icons.spotify-full;
-                    variant: PrimaryButtonVariant.spotify;
-                }
-                GhostButton {
-                    label: Strings.nav-local;
-                    icon: Icons.folder;
-                }
-                VerticalLayout {
-                    alignment: center;
-                    Toggle {
-                        checked: root.gapless;
-                        label: Strings.settings-gapless;
-                        toggled => { root.gapless = !root.gapless; }
+        HorizontalLayout {
+            vertical-stretch: 1;
+            SidebarNav {
+                sections: [
+                    {
+                        label: Strings.nav-section-playing,
+                        items: [{ id: "now-playing", label: Strings.nav-now-playing, icon: Icons.now-playing }]
+                    },
+                    {
+                        label: Strings.nav-section-library,
+                        items: [
+                            { id: "library", label: Strings.nav-library, icon: Icons.library },
+                            { id: "discover", label: Strings.nav-discover, icon: Icons.discover }
+                        ]
+                    },
+                    {
+                        label: Strings.nav-section-sources,
+                        items: [
+                            { id: "radio", label: Strings.nav-radio, icon: Icons.radio },
+                            { id: "local", label: Strings.nav-local, icon: Icons.local-files },
+                            { id: "spotify", label: Strings.nav-spotify, icon: Icons.spotify }
+                        ]
                     }
-                }
+                ];
+                footer-item: { id: "settings", label: Strings.nav-settings, icon: Icons.equalizer };
+                active-id: Shell.screen;
+                item-clicked(id) => { Shell.screen = id; }
             }
 
-            HorizontalLayout {
-                alignment: start;
-                spacing: 18px;
-                for icon in [Icons.shuffle, Icons.repeat, Icons.search, Icons.volume, Icons.upload, Icons.close, Icons.refresh, Icons.alert, Icons.image-off, Icons.discover, Icons.radio]: IconButton {
-                    identifier: IconButtonIdentifier.transport-shuffle;
-                    icon: icon;
-                    label: "icon";
-                    tone: IconButtonTone.secondary;
-                    size: IconButtonSize.medium;
-                }
-                IconButton {
-                    identifier: IconButtonIdentifier.transport-previous;
-                    icon: Icons.previous;
-                    label: "previous";
-                    mode: GlyphMode.fill;
-                    size: IconButtonSize.medium;
-                }
-                IconButton {
-                    identifier: IconButtonIdentifier.transport-next;
-                    icon: Icons.next;
-                    label: "next";
-                    mode: GlyphMode.fill;
-                    size: IconButtonSize.medium;
-                    active: true;
-                }
-                PlayCircle {
-                    identifier: IconButtonIdentifier.mini-play-pause;
-                    label: "play";
-                    variant: PlayCircleVariant.mini;
-                }
-                Rectangle {
-                    width: 90px;
-                    height: 90px;
-                    PlayCircle {
-                        identifier: IconButtonIdentifier.transport-play-pause;
-                        label: "pause";
-                        playing: true;
-                    }
-                }
-            }
-
-            HorizontalLayout {
-                alignment: start;
-                spacing: 16px;
-                for index in 6: ArtTile {
-                    width: 96px;
-                    height: 96px;
-                    radius: Metrics.radius-panel;
-                    gradient-index: index;
-                    initials: index == 2 ? "" : "JA";
-                    unavailable: index == 2;
-                    drop-shadow-offset-y: Tokens.shadow-card.offset-y;
-                    drop-shadow-blur: Tokens.shadow-card.blur;
-                    drop-shadow-spread: Tokens.shadow-card.spread;
-                    drop-shadow-color: Tokens.shadow-card.color;
-                }
-            }
-
-            HorizontalLayout {
-                spacing: 24px;
-                Rectangle {
-                    width: 420px;
-                    border-radius: Metrics.radius-card;
-                    border-width: 1px;
-                    border-color: Tokens.border;
-                    background: Tokens.panel;
-                    VerticalLayout {
-                        ToggleRow {
-                            label: Strings.settings-gapless;
-                            description: Strings.settings-gapless-desc;
-                            checked: root.gapless;
-                            toggled => { root.gapless = !root.gapless; }
-                        }
-                        ToggleRow {
-                            label: Strings.settings-gapless;
-                            description: Strings.settings-gapless-desc;
-                            checked: !root.gapless;
-                            last: true;
-                            toggled => { root.gapless = !root.gapless; }
-                        }
-                    }
-                }
-
-                EmptyState {
-                    icon: Icons.library;
-                    title: Strings.library-empty-title;
-                    description: Strings.library-empty-desc;
-                    action-label: Strings.library-add-music;
+            Rectangle {
+                horizontal-stretch: 1;
+                if Shell.screen == "now-playing": EmptyState {
+                    icon: Icons.now-playing;
+                    title: Strings.now-empty-title;
+                    description: Strings.now-empty-desc;
+                    action-label: Strings.now-empty-cta;
                     action-icon: Icons.plus;
                 }
             }
         }
+
+        MiniPlayer { }
     }
 
     Toaster {
         x: root.width - self.width - 24px;
-        y: root.height - self.preferred-height - 96px;
+        y: root.height - self.height - 96px;
         height: self.preferred-height;
-        items: [
-            { id: 1, message: "Couldn't play this track — the output device is unavailable" },
-            { id: 2, message: "Cover art couldn't load — the source may be unreachable" }
-        ];
+        items: Shell.toasts;
         dismiss-label: Strings.notification-dismiss;
+        dismissed(id) => { Shell.toast-dismissed(id); }
     }
 }

@@ -32,6 +32,12 @@ slint = { version = "1.18", default-features = false, features = [
 # Decodes cover art (embedded in files, or announced by a station) into pixels
 # the interface can draw.
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "gif", "bmp"] }
+# Cover art reaches Janis base64-encoded, from the audio facade and from
+# stations alike.
+base64 = "0.22"
+# Drives the one asynchronous facade call — connecting to a station — from a
+# thread of its own.
+tokio = { version = "1", features = ["rt"] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
 log = "0.4.29"

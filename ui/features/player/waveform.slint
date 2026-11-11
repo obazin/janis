@@ -1,0 +1,86 @@
+import { Tokens } from "../../tokens.slint";
+import { Player } from "player.slint";
+
+export enum WaveformVariant { big, mini }
+
+// The oscilloscope trace. The big variant also shows how far the track has
+// played — a wash behind the trace and a playhead riding it — and seeks on a
+// click.
+export component Waveform inherits Rectangle {
+    in property <WaveformVariant> variant: WaveformVariant.mini;
+    in property <string> seek-label;
+
+    property <bool> big: root.variant == WaveformVariant.big;
+    property <length> line: root.big ? 2.5px : 2px;
+    property <length> glow: root.big ? 14px : 6px;
+    property <bool> shows-progress: root.big && Player.progress > 0;
+    property <string> commands: root.big ? Player.big-wave-commands : Player.mini-wave-commands;
+
+    clip: true;
+
+    function report-size() {
+        if root.big {
+            Player.big-wave-width = root.width;
+            Player.big-wave-height = root.height;
+        } else {
+            Player.mini-wave-width = root.width;
+            Player.mini-wave-height = root.height;
+        }
+    }
+
+    init => { root.report-size(); }
+    changed width => { root.report-size(); }
+    changed height => { root.report-size(); }
+
+    if root.shows-progress: Rectangle {
+        x: 0;
+        width: root.width * Player.progress;
+        background: Tokens.waveform-wash;
+    }
+
+    // A stroked path is laid out inside its stroke, so each is grown by its
+    // own stroke to keep the two traces on top of each other.
+    Path {
+        x: -self.stroke-width / 2;
+        y: -self.stroke-width / 2;
+        width: root.width + self.stroke-width;
+        height: root.height + self.stroke-width;
+        viewbox-width: root.width / 1px;
+        viewbox-height: root.height / 1px;
+        commands: root.commands;
+        stroke: Tokens.waveform-glow;
+        stroke-width: root.line + root.glow;
+        stroke-line-join: LineJoin.round;
+    }
+
+    Path {
+        x: -self.stroke-width / 2;
+        y: -self.stroke-width / 2;
+        width: root.width + self.stroke-width;
+        height: root.height + self.stroke-width;
+        viewbox-width: root.width / 1px;
+        viewbox-height: root.height / 1px;
+        commands: root.commands;
+        stroke: Tokens.waveform;
+        stroke-width: root.line;
+        stroke-line-join: LineJoin.round;
+    }
+
+    if root.shows-progress: Rectangle {
+        x: root.width * Player.progress - self.width / 2;
+        y: root.height * Player.playhead-level - self.height / 2;
+        width: 8px;
+        height: 8px;
+        border-radius: 4px;
+        background: Tokens.text;
+        drop-shadow-blur: 12px;
+        drop-shadow-color: Tokens.text;
+    }
+
+    if root.big: TouchArea {
+        mouse-cursor: pointer;
+        accessible-role: button;
+        accessible-label: root.seek-label;
+        clicked => { Player.seek(self.mouse-x / self.width); }
+    }
+}

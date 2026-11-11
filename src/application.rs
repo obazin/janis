@@ -1,0 +1,634 @@
+//! The application controller: the one place where the state modules, the
+//! audio engine, the database and the window meet.
+//!
+//! It lives on the user-interface thread. The state modules decide and return
+//! [`Effect`]s; the controller carries them out and pushes what changed to the
+//! window. Anything slow — file reads, picture decoding, network connects —
+//! runs on another thread and comes back through [`post`].
+
+use std::cell::{Cell, RefCell};
+use std::rc::Rc;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+use slint::{ComponentHandle, Image, ModelRc, Timer, TimerMode, VecModel};
+
+use crate::audio::{self, AudioEngine, EngineBridge, EngineEvent, Mode};
+use crate::background::Worker;
+use crate::covers::{self, Pixels};
+use crate::effects::Effect;
+use crate::equalizer::Equalizer;
+use crate::library::{self, LoudnessStore, Track};
+use crate::library_view;
+use crate::notifications::{self, Notifications};
+use crate::persistence::{self, DbState, Preferences};
+use crate::platform;
+use crate::playback_options::PlaybackOptions;
+use crate::player::Player;
+use crate::radio::{Catalog, Station};
+use crate::text;
+use crate::translations::{Language, Translations};
+use crate::user_interface::{self, AppWindow, Shell, Strings, Toast};
+use crate::visualizer::Visualizer;
+
+/// How often the waveform is redrawn while it moves.
+const FRAME_INTERVAL: Duration = Duration::from_millis(16);
+/// How long the volume must rest before it is saved.
+const VOLUME_SETTLE: Duration = Duration::from_millis(300);
+/// How long the equalizer sliders must rest before they are saved.
+const EQUALIZER_SETTLE: Duration = Duration::from_millis(400);
+/// The seed of the art shown when nothing is loaded.
+const IDLE_ART_SEED: &str = "janis";
+
+thread_local! {
+    /// The controller, reachable from closures posted to this thread — so
+    /// other threads never hold anything that belongs to the interface.
+    static APPLICATION: RefCell<Option<Rc<Application>>> = const { RefCell::new(None) };
+}
+
+/// Runs `action` on the user-interface thread, with the controller. Callable
+/// from any thread; dropped if the application is already gone.
+pub fn post(action: impl FnOnce(&Application) + Send + 'static) {
+    let posted = slint::invoke_from_event_loop(move || {
+        let application = APPLICATION.with(|cell| cell.borrow().clone());
+        if let Some(application) = application {
+            action(&application);
+        }
+    });
+    if posted.is_err() {
+        log::debug!("the event loop is gone; a posted action was dropped");
+    }
+}
+
+/// The art of whatever is playing.
+#[derive(Default)]
+struct CurrentArt {
+    /// Bumped on every change of track, so a slow load that finishes after
+    /// the listener moved on is recognised and dropped.
+    epoch: u64,
+    track_cover: Option<Image>,
+    track_cover_failed: bool,
+    stream_cover: Option<Image>,
+}
+
+pub struct Application {
+    window: AppWindow,
+    database: Arc<DbState>,
+    engine: Arc<AudioEngine>,
+    bridge: Arc<EngineBridge>,
+    catalog: Catalog,
+    translations: RefCell<Translations>,
+    player: RefCell<Player>,
+    equalizer: RefCell<Equalizer>,
+    playback_options: RefCell<PlaybackOptions>,
+    notifications: RefCell<Notifications>,
+    visualizer: RefCell<Visualizer>,
+    tracks: RefCell<Vec<Track>>,
+    current_art: RefCell<CurrentArt>,
+    toasts: Rc<VecModel<Toast>>,
+    picture_worker: Worker,
+    frame_timer: Timer,
+    last_frame: Cell<Instant>,
+    volume_timer: Timer,
+    equalizer_timer: Timer,
+}
+
+impl Application {
+    /// Boots everything behind the window and wires the window to it.
+    pub fn start(window: AppWindow) -> Result<Rc<Self>, String> {
+        let database = Arc::new(persistence::init(platform::data_directory()?)?);
+        let preferences = persistence::get_preferences(&database)?;
+        let tracks = library::list_tracks(&database)?;
+
+        let bridge = Arc::new(EngineBridge::new(|event| {
+            post(move |application| application.on_engine_event(event));
+        }));
+        let engine = Arc::new(audio::init(
+            Arc::new(LoudnessStore(Arc::clone(&database))),
+            Arc::clone(&bridge),
+        ));
+
+        let toasts = Rc::new(VecModel::default());
+        window
+            .global::<Shell>()
+            .set_toasts(ModelRc::from(toasts.clone()));
+
+        let now = Instant::now();
+        let application = Rc::new(Self {
+            window,
+            database,
+            engine,
+            bridge,
+            catalog: Catalog::bundled(),
+            translations: RefCell::new(Translations::new(Language::from_code(
+                &preferences.language,
+            ))),
+            player: RefCell::new(Player::new(now)),
+            equalizer: RefCell::new(Equalizer::default()),
+            playback_options: RefCell::new(PlaybackOptions::default()),
+            notifications: RefCell::new(Notifications::default()),
+            visualizer: RefCell::new(Visualizer::default()),
+            tracks: RefCell::new(tracks),
+            current_art: RefCell::new(CurrentArt::default()),
+            toasts,
+            picture_worker: Worker::new("janis pictures")?,
+            frame_timer: Timer::default(),
+            last_frame: Cell::new(now),
+            volume_timer: Timer::default(),
+            equalizer_timer: Timer::default(),
+        });
+        APPLICATION.with(|cell| *cell.borrow_mut() = Some(Rc::clone(&application)));
+
+        application.apply_strings();
+        application.connect_window();
+        application.restore(&preferences);
+        // The engine answers with its current state, as events.
+        application.engine.describe();
+        application.refresh_player();
+        Ok(application)
+    }
+
+    /// Stops the engine and lets go of the controller. Called once the event
+    /// loop has ended, while the process is still alive.
+    pub fn shut_down(&self) {
+        self.frame_timer.stop();
+        audio::shutdown(&self.engine);
+        APPLICATION.with(|cell| cell.borrow_mut().take());
+    }
+
+    /// Turns the output down to nothing without touching the saved volume,
+    /// so playback can be exercised in development without a sound.
+    #[cfg(debug_assertions)]
+    pub fn silence(&self) {
+        self.engine.set_volume(0.0);
+    }
+
+    pub fn tracks(&self) -> Vec<Track> {
+        self.tracks.borrow().clone()
+    }
+
+    // ── Boot ────────────────────────────────────────────────────────────────
+
+    fn apply_strings(&self) {
+        let translations = self.translations.borrow();
+        user_interface::apply_strings(&self.window.global::<Strings>(), &|key| {
+            translations.text(key)
+        });
+    }
+
+    /// Hydrates the state modules from the preferences row, pushing each
+    /// setting to the engine without writing it back.
+    fn restore(&self, preferences: &Preferences) {
+        let effects = self.equalizer.borrow_mut().restore(
+            &preferences.eq_gains,
+            &preferences.eq_preset,
+            preferences.eq_linear_phase,
+        );
+        self.run(effects);
+        let effects = self.player.borrow_mut().restore_volume(preferences.volume);
+        self.run(effects);
+        let effects = self.playback_options.borrow_mut().restore(preferences);
+        self.run(effects);
+    }
+
+    fn connect_window(self: &Rc<Self>) {
+        let shell = self.window.global::<Shell>();
+        shell.set_overlay_title_bar(platform::OVERLAY_TITLE_BAR);
+        shell.on_window_drag_started({
+            let weak = self.window.as_weak();
+            move || {
+                if let Some(window) = weak.upgrade() {
+                    platform::drag_window(window.window());
+                }
+            }
+        });
+        shell.on_toast_dismissed(self.handler(|application, id: i32| {
+            application.dismiss_notification(u64::try_from(id).unwrap_or_default());
+        }));
+
+        let player = self.window.global::<user_interface::Player>();
+        player.on_toggled(self.action(|application| {
+            let effects = application.player.borrow_mut().toggle(Instant::now());
+            application.run(effects);
+        }));
+        player.on_next(self.action(|application| {
+            let effects = application.player.borrow().next();
+            application.run(effects);
+        }));
+        player.on_previous(self.action(|application| {
+            let effects = application.player.borrow().previous();
+            application.run(effects);
+        }));
+        player.on_shuffle_toggled(self.action(|application| {
+            let effects = application.player.borrow_mut().toggle_shuffle();
+            application.run(effects);
+        }));
+        player.on_repeat_toggled(self.action(|application| {
+            let effects = application.player.borrow_mut().toggle_repeat();
+            application.run(effects);
+        }));
+        player.on_volume_changed(self.handler(|application, volume: f32| {
+            let effects = application
+                .player
+                .borrow_mut()
+                .set_volume(f64::from(volume));
+            application.run(effects);
+        }));
+        player.on_seek(self.handler(|application, fraction: f32| {
+            let effects = application
+                .player
+                .borrow_mut()
+                .seek_to(f64::from(fraction), Instant::now());
+            application.run(effects);
+        }));
+
+        let weak = Rc::downgrade(self);
+        self.frame_timer
+            .start(TimerMode::Repeated, FRAME_INTERVAL, move || {
+                if let Some(application) = weak.upgrade() {
+                    application.draw_frame();
+                }
+            });
+    }
+
+    /// A window callback without arguments, bound to the controller for as
+    /// long as it lives.
+    fn action(self: &Rc<Self>, run: impl Fn(&Application) + 'static) -> impl FnMut() + 'static {
+        let weak = Rc::downgrade(self);
+        move || {
+            if let Some(application) = weak.upgrade() {
+                run(&application);
+                application.refresh_player();
+            }
+        }
+    }
+
+    /// A window callback with one argument, bound to the controller for as
+    /// long as it lives.
+    fn handler<Argument: 'static>(
+        self: &Rc<Self>,
+        run: impl Fn(&Application, Argument) + 'static,
+    ) -> impl FnMut(Argument) + 'static {
+        let weak = Rc::downgrade(self);
+        move |argument| {
+            if let Some(application) = weak.upgrade() {
+                run(&application, argument);
+                application.refresh_player();
+            }
+        }
+    }
+
+    // ── Playback ────────────────────────────────────────────────────────────
+
+    /// Replaces the queue and starts at `index`.
+    pub fn play_queue(&self, tracks: Vec<Track>, index: usize) {
+        let effects = self
+            .player
+            .borrow_mut()
+            .play_queue(tracks, index, Instant::now());
+        self.run(effects);
+        self.refresh_player();
+    }
+
+    fn on_engine_event(&self, event: EngineEvent) {
+        let effects = self
+            .player
+            .borrow_mut()
+            .apply(event, Instant::now(), &|id| {
+                self.catalog.station_by_id(id).cloned()
+            });
+        self.run(effects);
+        self.refresh_player();
+    }
+
+    /// Carries out what a state module decided.
+    fn run(&self, effects: Vec<Effect>) {
+        for effect in effects {
+            match effect {
+                Effect::LoadQueue { tracks, index } => self
+                    .engine
+                    .load_queue(tracks.iter().map(audio::queue_entry).collect(), index),
+                Effect::ConnectStation(station) => self.connect_station(station),
+                Effect::Toggle => self.engine.toggle(),
+                Effect::Next => self.engine.next(),
+                Effect::Previous => self.engine.previous(),
+                Effect::JumpTo(index) => self.engine.jump_to(index),
+                Effect::Seek(position_seconds) => self.engine.seek(position_seconds),
+                Effect::SetShuffle(enabled) => self.engine.set_shuffle(enabled),
+                Effect::SetRepeat(enabled) => self.engine.set_repeat(enabled),
+                Effect::SetVolume(volume) => self.engine.set_volume(volume),
+                Effect::SetEqualizerGains(gains) => self.engine.set_eq(gains),
+                Effect::SetLinearPhase(enabled) => self.engine.set_fir_eq(enabled),
+                Effect::SetGapless(enabled) => self.engine.set_gapless(enabled),
+                Effect::SetCrossfade(enabled) => self.engine.set_crossfade(enabled),
+                Effect::SetNormalize(enabled) => self.engine.set_normalize(enabled),
+                Effect::PersistVolumeDebounced(volume) => {
+                    let database = Arc::clone(&self.database);
+                    self.volume_timer
+                        .start(TimerMode::SingleShot, VOLUME_SETTLE, move || {
+                            report_unsaved("volume", persistence::set_volume(&database, volume));
+                        });
+                }
+                Effect::PersistEqualizer { gains, preset } => {
+                    self.equalizer_timer.stop();
+                    self.saved(
+                        "equalizer",
+                        persistence::set_eq(&self.database, &gains, &preset),
+                    );
+                }
+                Effect::PersistEqualizerDebounced { gains, preset } => {
+                    let database = Arc::clone(&self.database);
+                    self.equalizer_timer.start(
+                        TimerMode::SingleShot,
+                        EQUALIZER_SETTLE,
+                        move || {
+                            report_unsaved(
+                                "equalizer",
+                                persistence::set_eq(&database, &gains, &preset),
+                            );
+                        },
+                    );
+                }
+                Effect::PersistLinearPhase(enabled) => self.saved(
+                    "eq-linear-phase",
+                    persistence::set_eq_linear_phase(&self.database, enabled),
+                ),
+                Effect::PersistPlaybackOption { option, enabled } => self.saved(
+                    "playback-option",
+                    persistence::set_playback_option(&self.database, option, enabled),
+                ),
+                Effect::LoadCover(track_id) => self.load_current_cover(track_id),
+                Effect::ShowStreamCover(url) => self.show_stream_cover(url),
+                Effect::LinearPhaseReported {
+                    enabled,
+                    latency_seconds,
+                } => self
+                    .equalizer
+                    .borrow_mut()
+                    .apply_engine_report(enabled, latency_seconds),
+                Effect::NotifyError {
+                    key,
+                    parameters,
+                    dedupe_key,
+                } => self.notify_error(key, parameters, dedupe_key),
+            }
+        }
+    }
+
+    /// Connects to a station on a thread of its own — the connect waits on
+    /// the network — then tells the player how it went.
+    fn connect_station(&self, station: Station) {
+        let engine = Arc::clone(&self.engine);
+        let spawned = std::thread::Builder::new()
+            .name("janis station connect".to_owned())
+            .spawn(move || {
+                let outcome = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .map_err(|error| format!("start the connect runtime: {error}"))
+                    .and_then(|runtime| {
+                        runtime.block_on(engine.play_stream(
+                            station.id.clone(),
+                            station.url.clone(),
+                            station.now_playing.clone(),
+                        ))
+                    });
+                post(move |application| {
+                    let effects = application
+                        .player
+                        .borrow_mut()
+                        .station_connection_finished(&station, outcome);
+                    application.run(effects);
+                    application.refresh_player();
+                });
+            });
+        if let Err(error) = spawned {
+            log::error!("start the station connect thread: {error}");
+        }
+    }
+
+    // ── Cover art ───────────────────────────────────────────────────────────
+
+    fn load_current_cover(&self, track_id: Option<i64>) {
+        let epoch = {
+            let mut art = self.current_art.borrow_mut();
+            art.epoch += 1;
+            art.track_cover = None;
+            art.track_cover_failed = false;
+            art.epoch
+        };
+        let Some(track_id) = track_id else {
+            return;
+        };
+        let database = Arc::clone(&self.database);
+        self.picture_worker.run(move || {
+            let loaded = covers::track_cover(&database, track_id, covers::HERO_SIDE);
+            post(move |application| application.current_cover_loaded(epoch, loaded));
+        });
+    }
+
+    fn current_cover_loaded(&self, epoch: u64, loaded: Result<Option<Pixels>, String>) {
+        {
+            let mut art = self.current_art.borrow_mut();
+            if art.epoch != epoch {
+                return;
+            }
+            match loaded {
+                Ok(pixels) => art.track_cover = pixels.map(Image::from_rgba8),
+                Err(error) => {
+                    log::error!("current cover: {error}");
+                    art.track_cover_failed = true;
+                }
+            }
+        }
+        if self.current_art.borrow().track_cover_failed {
+            self.notify_cover_unavailable();
+        }
+        self.refresh_player();
+    }
+
+    fn show_stream_cover(&self, url: Option<String>) {
+        let Some(url) = url else {
+            self.current_art.borrow_mut().stream_cover = None;
+            return;
+        };
+        self.picture_worker.run(move || {
+            let decoded = covers::data_url_cover(&url, covers::HERO_SIDE);
+            post(move |application| {
+                match decoded {
+                    Ok(pixels) => {
+                        application.current_art.borrow_mut().stream_cover =
+                            Some(Image::from_rgba8(pixels));
+                    }
+                    Err(error) => {
+                        log::error!("station cover: {error}");
+                        application.notify_cover_unavailable();
+                    }
+                }
+                application.refresh_player();
+            });
+        });
+    }
+
+    fn notify_cover_unavailable(&self) {
+        self.notify_error("error.cover", Vec::new(), Some("cover-unavailable"));
+    }
+
+    // ── Notifications ───────────────────────────────────────────────────────
+
+    fn notify_error(
+        &self,
+        key: &'static str,
+        parameters: Vec<(&'static str, String)>,
+        dedupe_key: Option<&'static str>,
+    ) {
+        let raised = self
+            .notifications
+            .borrow_mut()
+            .error(key, parameters, dedupe_key);
+        let Some(id) = raised else {
+            return;
+        };
+        self.refresh_toasts();
+        Timer::single_shot(notifications::DEFAULT_TIMEOUT, move || {
+            APPLICATION.with(|cell| {
+                if let Some(application) = cell.borrow().clone() {
+                    application.dismiss_notification(id);
+                }
+            });
+        });
+    }
+
+    fn dismiss_notification(&self, id: u64) {
+        self.notifications.borrow_mut().dismiss(id);
+        self.refresh_toasts();
+    }
+
+    fn refresh_toasts(&self) {
+        let translations = self.translations.borrow();
+        let toasts: Vec<Toast> = self
+            .notifications
+            .borrow()
+            .items()
+            .iter()
+            .map(|notification| Toast {
+                id: i32::try_from(notification.id).unwrap_or(i32::MAX),
+                message: translations
+                    .translate(notification.message_key, &notification.parameters)
+                    .into(),
+            })
+            .collect();
+        self.toasts.set_vec(toasts);
+    }
+
+    /// Tells the user when a choice could not be saved, instead of letting
+    /// the next launch silently forget it.
+    fn saved(&self, what: &'static str, outcome: Result<(), String>) {
+        if let Err(error) = outcome {
+            log::error!("save {what}: {error}");
+            self.notify_error("error.preferences", Vec::new(), Some(what));
+        }
+    }
+
+    // ── Window ──────────────────────────────────────────────────────────────
+
+    /// Pushes the playback state to the window. Cheap enough to call after
+    /// every action and engine event: setting an unchanged property is free.
+    fn refresh_player(&self) {
+        let player = self.player.borrow();
+        let translations = self.translations.borrow();
+        let art = self.current_art.borrow();
+        let view = self.window.global::<user_interface::Player>();
+        let current = player.current();
+        let station = player.station();
+
+        view.set_active(player.mode() != Mode::Idle);
+        view.set_playing(player.playing());
+        view.set_shuffle(player.shuffle());
+        view.set_repeat(player.repeat());
+        view.set_volume(player.volume() as f32);
+
+        view.set_title(
+            current
+                .map(|track| track.title.as_str())
+                .or(station.map(|station| station.name.as_str()))
+                .unwrap_or("—")
+                .into(),
+        );
+        view.set_subtitle(
+            match (current, station) {
+                (Some(track), _) => track
+                    .artist
+                    .clone()
+                    .unwrap_or_else(|| translations.text("common.unknownArtist")),
+                (None, Some(station)) => translations.text(&station.genre_key),
+                (None, None) => String::new(),
+            }
+            .into(),
+        );
+        view.set_gradient_index(match (current, station) {
+            (_, Some(station)) => station.gradient_index % text::ART_GRADIENT_COUNT,
+            (Some(track), None) => text::art_gradient_index(&library_view::art_seed(track)),
+            (None, None) => text::art_gradient_index(IDLE_ART_SEED),
+        } as i32);
+        let cover = if player.mode() == Mode::Radio {
+            art.stream_cover.clone()
+        } else {
+            art.track_cover.clone()
+        };
+        view.set_cover(cover.unwrap_or_default());
+        view.set_cover_unavailable(player.mode() == Mode::Local && art.track_cover_failed);
+
+        // The waveform stops ticking once it has come to rest; anything that
+        // sets it moving again starts it back up.
+        if !self.frame_timer.running() && !self.visualizer.borrow().at_rest(player.playing()) {
+            self.last_frame.set(Instant::now());
+            self.frame_timer.restart();
+        }
+    }
+
+    /// Advances the waveform by one frame and hands each view its trace.
+    fn draw_frame(&self) {
+        let now = Instant::now();
+        let elapsed = now.duration_since(self.last_frame.replace(now));
+        let player = self.player.borrow();
+        let playing = player.playing();
+        let frame = if player.mode() == Mode::Idle {
+            None
+        } else {
+            self.bridge.latest_frame()
+        };
+        let mut visualizer = self.visualizer.borrow_mut();
+        visualizer.tick(
+            elapsed.as_secs_f32(),
+            frame.as_ref().map(|bytes| bytes.as_slice()),
+            playing,
+        );
+
+        let view = self.window.global::<user_interface::Player>();
+        let (width, height) = (view.get_mini_wave_width(), view.get_mini_wave_height());
+        if width > 0.0 && height > 0.0 {
+            view.set_mini_wave_commands(visualizer.path_commands(width, height).into());
+        }
+        let (width, height) = (view.get_big_wave_width(), view.get_big_wave_height());
+        if width > 0.0 && height > 0.0 {
+            view.set_big_wave_commands(visualizer.path_commands(width, height).into());
+        }
+        let progress = player.live_progress(now) as f32;
+        view.set_progress(progress);
+        view.set_playhead_level(visualizer.height_at(progress, 1.0));
+
+        if visualizer.at_rest(playing) {
+            self.frame_timer.stop();
+        }
+    }
+}
+
+/// For saves that happen after the action that asked for them has returned.
+fn report_unsaved(what: &'static str, outcome: Result<(), String>) {
+    APPLICATION.with(|cell| {
+        if let Some(application) = cell.borrow().clone() {
+            application.saved(what, outcome);
+        }
+    });
+}

@@ -1,0 +1,131 @@
+import { Tokens, Fonts, Typography, Metrics } from "../tokens.slint";
+import { Icons } from "../icons.slint";
+import { Strings } from "strings.slint";
+import { Badge, BadgeVariant } from "../atoms/badge.slint";
+import { Glyph } from "../atoms/glyph.slint";
+import { Shell } from "../shell.slint";
+
+// The strip across the top of the window: the brand, and the search field
+// that filters the list screens. Its empty parts move the window.
+export component AppTitlebar inherits Rectangle {
+    height: Metrics.titlebar-height;
+    background: Tokens.titlebar;
+
+    TouchArea {
+        pointer-event(event) => {
+            if event.kind == PointerEventKind.down && event.button == PointerEventButton.left {
+                Shell.window-drag-started();
+            }
+        }
+    }
+
+    Rectangle {
+        y: root.height - 1px;
+        height: 1px;
+        background: Tokens.divider;
+    }
+
+    HorizontalLayout {
+        padding-left: 16px;
+        padding-right: 16px;
+        spacing: 16px;
+
+        // Room for the system's window buttons where they overlay this strip.
+        if Shell.overlay-title-bar: Rectangle {
+            width: 64px;
+        }
+
+        HorizontalLayout {
+            horizontal-stretch: 0;
+            alignment: start;
+            spacing: 10px;
+            VerticalLayout {
+                alignment: center;
+                Rectangle {
+                    width: 24px;
+                    height: 24px;
+                    border-radius: 8px;
+                    background: Tokens.prism-conic;
+                }
+            }
+            Text {
+                text: "JANIS";
+                font-family: Fonts.display;
+                font-weight: Typography.black;
+                font-size: Typography.heading-sm;
+                letter-spacing: Typography.tracking-brand * Typography.heading-sm;
+                color: Tokens.text;
+                vertical-alignment: center;
+            }
+            VerticalLayout {
+                alignment: center;
+                Badge {
+                    text: Strings.titlebar-open-source;
+                    variant: BadgeVariant.outline;
+                }
+            }
+        }
+
+        HorizontalLayout {
+            horizontal-stretch: 1;
+            alignment: center;
+            VerticalLayout {
+                alignment: center;
+                Rectangle {
+                    min-width: 200px;
+                    preferred-width: 420px;
+                    max-width: 420px;
+                    height: self.preferred-height;
+                    border-radius: Metrics.radius-button;
+                    border-width: 1px;
+                    border-color: Tokens.border-strong;
+                    background: Tokens.input-background;
+                    HorizontalLayout {
+                        padding-left: 13px;
+                        padding-right: 13px;
+                        padding-top: 8px;
+                        padding-bottom: 8px;
+                        spacing: 9px;
+                        VerticalLayout {
+                            alignment: center;
+                            Glyph {
+                                width: 15px;
+                                height: 15px;
+                                icon: Icons.search;
+                                tint: Tokens.text-muted;
+                            }
+                        }
+                        Rectangle {
+                            horizontal-stretch: 1;
+                            height: input.preferred-height;
+                            if input.text == "": Text {
+                                width: 100%;
+                                text: Strings.titlebar-search;
+                                font-size: Typography.body;
+                                color: Tokens.text-muted;
+                                horizontal-alignment: left;
+                                vertical-alignment: center;
+                                overflow: elide;
+                            }
+                            input := TextInput {
+                                width: 100%;
+                                text <=> Shell.search;
+                                font-size: Typography.body;
+                                color: Tokens.text;
+                                selection-background-color: Tokens.accent;
+                                selection-foreground-color: Tokens.text;
+                                single-line: true;
+                                accessible-label: Strings.titlebar-search;
+                                edited => { Shell.search-edited(self.text); }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Rectangle {
+            width: 64px;
+        }
+    }
+}

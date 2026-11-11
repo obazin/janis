@@ -1,0 +1,49 @@
+import { Tokens, Typography, Motion } from "../../tokens.slint";
+import { Icons } from "../../icons.slint";
+import { Glyph } from "../../atoms/glyph.slint";
+import { Shell } from "../../shell.slint";
+
+// The accent pill that opens the equalizer sheet.
+export component OpenEqualizerButton inherits Rectangle {
+    in property <string> label;
+
+    width: self.preferred-width;
+    height: self.preferred-height;
+    border-radius: self.height / 2;
+    border-width: 1px;
+    border-color: Tokens.accent-ring;
+    background: touch.has-hover ? Tokens.accent-wash : transparent;
+    animate background { duration: Motion.fast; }
+    accessible-role: button;
+    accessible-label: root.label;
+    accessible-action-default => { Shell.equalizer-open = true; }
+
+    HorizontalLayout {
+        padding-left: 14px;
+        padding-right: 14px;
+        padding-top: 8px;
+        padding-bottom: 8px;
+        spacing: 7px;
+        VerticalLayout {
+            alignment: center;
+            Glyph {
+                width: 14px;
+                height: 14px;
+                icon: Icons.equalizer;
+                tint: Tokens.accent;
+            }
+        }
+        Text {
+            text: root.label;
+            font-size: Typography.caption;
+            font-weight: Typography.bold;
+            color: Tokens.accent;
+            vertical-alignment: center;
+        }
+    }
+
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { Shell.equalizer-open = true; }
+    }
+}
