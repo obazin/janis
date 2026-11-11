@@ -1,0 +1,22 @@
+// The Jellyfin server as the Settings card shows it. Filled by the
+// application; the callbacks are the listener's choices.
+
+export global Jellyfin {
+    // The form. The application clears the password as soon as it has sent it.
+    in-out property <string> address;
+    in-out property <string> user-name;
+    in-out property <string> password;
+    // Signed in: the card shows the server instead of the form.
+    in property <bool> signed-in;
+    // A request is in flight: the buttons wait for it.
+    in property <bool> busy;
+    // "Home · listener · 1,204 songs", while signed in.
+    in property <string> summary;
+    // Progress, or what went wrong last; empty when there is nothing to say.
+    in property <string> status;
+    in property <bool> status-failed;
+
+    callback sign-in-clicked();
+    callback sync-clicked();
+    callback sign-out-clicked();
+}

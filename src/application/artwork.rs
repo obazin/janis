@@ -1,6 +1,7 @@
 //! Cover art on its way to the window: the art of whatever plays, and the
-//! thumbnails of lists and grids. Reading and decoding run on the picture
-//! worker; a result that arrives after the listener moved on is dropped.
+//! thumbnails of lists and grids. Reading — from a file, or from a media
+//! server — and decoding run on the picture worker; a result that arrives
+//! after the listener moved on is dropped.
 
 use std::rc::Rc;
 use std::sync::Arc;
@@ -9,6 +10,9 @@ use slint::{ComponentHandle, Image};
 
 use super::{post, Application};
 use crate::covers::{self, Pixels};
+use crate::jellyfin::{self, Session};
+use crate::library::{self, CoverSource};
+use crate::persistence::DbState;
 use crate::user_interface::Covers;
 
 /// The art of whatever is playing.
@@ -76,8 +80,9 @@ impl Application {
             return;
         };
         let database = Arc::clone(&self.database);
+        let session = self.media_session();
         self.picture_worker.run(move || {
-            let loaded = covers::track_cover(&database, track_id, covers::HERO_SIDE);
+            let loaded = library_cover(&database, session.as_ref(), track_id, covers::HERO_SIDE);
             post(move |application| application.current_cover_loaded(epoch, loaded));
         });
     }
@@ -152,9 +157,15 @@ impl Application {
             .borrow_mut()
             .insert(track_id, Thumbnail::Loading);
         let database = Arc::clone(&self.database);
+        let session = self.media_session();
         let epoch = self.thumbnail_epoch.get();
         self.picture_worker.run(move || {
-            let loaded = covers::track_cover(&database, track_id, covers::THUMBNAIL_SIDE);
+            let loaded = library_cover(
+                &database,
+                session.as_ref(),
+                track_id,
+                covers::THUMBNAIL_SIDE,
+            );
             post(move |application| application.thumbnail_loaded(epoch, track_id, loaded));
         });
         Image::default()
@@ -190,5 +201,30 @@ impl Application {
 
     pub(super) fn notify_cover_unavailable(&self) {
         self.notify_error("error.cover", Vec::new(), Some("cover-unavailable"));
+    }
+}
+
+/// A library track's cover: read from its file (or its album's), or asked of
+/// its server. `Ok(None)` when neither has art; `Err` when art exists but
+/// could not be had — a server that stopped answering, among others.
+fn library_cover(
+    database: &DbState,
+    session: Option<&Session>,
+    track_id: i64,
+    longest_side: u32,
+) -> Result<Option<Pixels>, String> {
+    match library::cover_source(database, track_id) {
+        CoverSource::File => covers::track_cover(database, track_id, longest_side),
+        CoverSource::Server { artwork_item: None } => Ok(None),
+        CoverSource::Server {
+            artwork_item: Some(item),
+        } => {
+            let Some(session) = session else {
+                return Ok(None);
+            };
+            let bytes = jellyfin::artwork(session, &item, longest_side)
+                .map_err(|failure| format!("server picture {item}: {failure:?}"))?;
+            covers::picture_cover(bytes, longest_side).map(Some)
+        }
     }
 }

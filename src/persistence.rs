@@ -64,7 +64,7 @@ CREATE INDEX IF NOT EXISTS idx_tracks_added ON tracks(added_at DESC);
 /// `SCHEMA` above is frozen at version 1 — it only ever creates a fresh file.
 /// Every change since is a migration, so a new database and an existing one
 /// converge on the same shape.
-const SCHEMA_VERSION: i64 = 5;
+const SCHEMA_VERSION: i64 = 6;
 
 /// Index `i` upgrades to version `i + 2`. Append only: editing a shipped entry
 /// would skip the change for anyone who already ran it.
@@ -100,6 +100,27 @@ const MIGRATIONS: &[&str] = &[
          station_id TEXT PRIMARY KEY,
          added_at INTEGER NOT NULL DEFAULT (unixepoch())
      );",
+    // → 6: a Jellyfin server whose songs join the library. The server row
+    //      keeps the access token, never the password. A server track points at
+    //      its server, so signing out removes its songs with it, and names the
+    //      item whose picture is its cover. The device identifier is what
+    //      Jellyfin's authorization header asks a client to send.
+    "CREATE TABLE IF NOT EXISTS media_servers (
+         id INTEGER PRIMARY KEY,
+         kind TEXT NOT NULL DEFAULT 'jellyfin',
+         address TEXT NOT NULL,
+         server_identifier TEXT NOT NULL,
+         server_name TEXT NOT NULL DEFAULT '',
+         user_identifier TEXT NOT NULL,
+         user_name TEXT NOT NULL,
+         access_token TEXT NOT NULL,
+         last_sync_at INTEGER,
+         added_at INTEGER NOT NULL DEFAULT (unixepoch())
+     );
+     ALTER TABLE tracks ADD COLUMN server_id INTEGER REFERENCES media_servers(id) ON DELETE CASCADE;
+     ALTER TABLE tracks ADD COLUMN artwork_item TEXT;
+     ALTER TABLE user_preferences ADD COLUMN device_identifier TEXT;
+     CREATE INDEX IF NOT EXISTS idx_tracks_server ON tracks(server_id);",
 ];
 
 /// Opens (creating if needed) `janis.db` under the app-data directory and
@@ -338,6 +359,184 @@ pub fn set_favourite_station(
     Ok(())
 }
 
+/// A Jellyfin server the listener signed in to, as `janis.db` keeps it.
+#[derive(Clone, PartialEq)]
+pub struct MediaServer {
+    pub id: i64,
+    /// The address the listener typed, normalised (`http://host:8096`).
+    pub address: String,
+    /// The server's own identifier, stable across address changes.
+    pub server_identifier: String,
+    pub server_name: String,
+    pub user_identifier: String,
+    pub user_name: String,
+    pub access_token: String,
+    /// When the songs were last read from the server, in Unix seconds.
+    pub last_sync_at: Option<i64>,
+}
+
+impl std::fmt::Debug for MediaServer {
+    /// The access token stays out of any log.
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("MediaServer")
+            .field("id", &self.id)
+            .field("address", &self.address)
+            .field("server_name", &self.server_name)
+            .field("user_name", &self.user_name)
+            .field("last_sync_at", &self.last_sync_at)
+            .finish_non_exhaustive()
+    }
+}
+
+/// What a sign-in brings back, before it has a row.
+#[derive(Clone, PartialEq)]
+pub struct NewMediaServer {
+    pub address: String,
+    pub server_identifier: String,
+    pub server_name: String,
+    pub user_identifier: String,
+    pub user_name: String,
+    pub access_token: String,
+}
+
+impl std::fmt::Debug for NewMediaServer {
+    /// The access token stays out of any log.
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("NewMediaServer")
+            .field("address", &self.address)
+            .field("server_name", &self.server_name)
+            .field("user_name", &self.user_name)
+            .finish_non_exhaustive()
+    }
+}
+
+/// The server the listener is signed in to, if any.
+pub fn media_server(database: &DbState) -> Result<Option<MediaServer>, String> {
+    let connection = database.lock();
+    connection
+        .query_row(
+            "SELECT id, address, server_identifier, server_name, user_identifier, user_name,
+                    access_token, last_sync_at
+             FROM media_servers ORDER BY id LIMIT 1",
+            [],
+            |row| {
+                Ok(MediaServer {
+                    id: row.get(0)?,
+                    address: row.get(1)?,
+                    server_identifier: row.get(2)?,
+                    server_name: row.get(3)?,
+                    user_identifier: row.get(4)?,
+                    user_name: row.get(5)?,
+                    access_token: row.get(6)?,
+                    last_sync_at: row.get(7)?,
+                })
+            },
+        )
+        .map(Some)
+        .or_else(|error| match error {
+            rusqlite::Error::QueryReturnedNoRows => Ok(None),
+            other => Err(format!("read media server: {other}")),
+        })
+}
+
+/// Keeps a sign-in. Signing in again to the same server as the same user only
+/// renews the token, so its songs and their loudness measurements stay; any
+/// other server or user replaces the one before, songs included — Janis keeps
+/// one server at a time.
+pub fn save_media_server(
+    database: &DbState,
+    server: &NewMediaServer,
+) -> Result<MediaServer, String> {
+    {
+        let connection = database.lock();
+        let transaction = connection
+            .unchecked_transaction()
+            .map_err(|error| format!("save media server: {error}"))?;
+        let updated = transaction
+            .execute(
+                "UPDATE media_servers
+                 SET address = ?1, server_name = ?2, user_name = ?3, access_token = ?4
+                 WHERE server_identifier = ?5 AND user_identifier = ?6",
+                rusqlite::params![
+                    server.address,
+                    server.server_name,
+                    server.user_name,
+                    server.access_token,
+                    server.server_identifier,
+                    server.user_identifier,
+                ],
+            )
+            .map_err(|error| format!("save media server: {error}"))?;
+        if updated == 0 {
+            transaction
+                .execute("DELETE FROM media_servers", [])
+                .map_err(|error| format!("replace media server: {error}"))?;
+            transaction
+                .execute(
+                    "INSERT INTO media_servers (address, server_identifier, server_name,
+                                                user_identifier, user_name, access_token)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                    rusqlite::params![
+                        server.address,
+                        server.server_identifier,
+                        server.server_name,
+                        server.user_identifier,
+                        server.user_name,
+                        server.access_token,
+                    ],
+                )
+                .map_err(|error| format!("save media server: {error}"))?;
+        }
+        transaction
+            .commit()
+            .map_err(|error| format!("save media server: {error}"))?;
+    }
+    media_server(database)?.ok_or_else(|| "the saved media server is missing".to_owned())
+}
+
+/// Forgets the server, and with it every song it brought.
+pub fn remove_media_server(database: &DbState, server_id: i64) -> Result<(), String> {
+    let connection = database.lock();
+    connection
+        .execute("DELETE FROM media_servers WHERE id = ?1", [server_id])
+        .map_err(|error| format!("remove media server: {error}"))?;
+    Ok(())
+}
+
+/// Records that the server's songs were just read.
+pub fn set_last_sync(database: &DbState, server_id: i64) -> Result<(), String> {
+    let connection = database.lock();
+    connection
+        .execute(
+            "UPDATE media_servers SET last_sync_at = unixepoch() WHERE id = ?1",
+            [server_id],
+        )
+        .map_err(|error| format!("record the sync: {error}"))?;
+    Ok(())
+}
+
+/// The identifier this installation gives itself when it talks to a server:
+/// random, made once, and the same on every launch after.
+pub fn device_identifier(database: &DbState) -> Result<String, String> {
+    let connection = database.lock();
+    connection
+        .execute(
+            "UPDATE user_preferences SET device_identifier = lower(hex(randomblob(16)))
+             WHERE id = 1 AND device_identifier IS NULL",
+            [],
+        )
+        .map_err(|error| format!("make the device identifier: {error}"))?;
+    connection
+        .query_row(
+            "SELECT device_identifier FROM user_preferences WHERE id = 1",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|error| format!("read the device identifier: {error}"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -511,6 +710,128 @@ mod tests {
             .query_row("PRAGMA user_version", [], |row| row.get(0))
             .expect("read version");
         assert_eq!(version, SCHEMA_VERSION);
+        let _ = std::fs::remove_dir_all(&directory);
+    }
+
+    fn new_server(server_identifier: &str, user_identifier: &str, token: &str) -> NewMediaServer {
+        NewMediaServer {
+            address: "http://jellyfin.local:8096".to_owned(),
+            server_identifier: server_identifier.to_owned(),
+            server_name: "Home".to_owned(),
+            user_identifier: user_identifier.to_owned(),
+            user_name: "listener".to_owned(),
+            access_token: token.to_owned(),
+        }
+    }
+
+    fn server_track(database: &DbState, server_id: i64, item: &str) {
+        database
+            .lock()
+            .execute(
+                "INSERT INTO tracks (server_id, path, title, format) VALUES (?1, ?2, 'T', 'FLAC')",
+                rusqlite::params![server_id, format!("jellyfin://server/{item}")],
+            )
+            .expect("insert a server track");
+    }
+
+    fn track_count(database: &DbState) -> i64 {
+        database
+            .lock()
+            .query_row("SELECT COUNT(*) FROM tracks", [], |row| row.get(0))
+            .expect("count tracks")
+    }
+
+    #[test]
+    fn signing_in_again_to_the_same_server_keeps_its_songs_and_renews_the_token() {
+        let directory = temp_dir("media-server-renew");
+        let database = init(directory.clone()).expect("init a new database");
+        assert_eq!(media_server(&database), Ok(None));
+
+        let first = save_media_server(&database, &new_server("server", "user", "one"))
+            .expect("save a sign-in");
+        server_track(&database, first.id, "a");
+        let second = save_media_server(&database, &new_server("server", "user", "two"))
+            .expect("sign in again");
+
+        assert_eq!(second.id, first.id);
+        assert_eq!(second.access_token, "two");
+        assert_eq!(track_count(&database), 1, "the songs stay");
+        let _ = std::fs::remove_dir_all(&directory);
+    }
+
+    #[test]
+    fn another_server_or_signing_out_takes_the_songs_away() {
+        let directory = temp_dir("media-server-replace");
+        let database = init(directory.clone()).expect("init a new database");
+        let first = save_media_server(&database, &new_server("server", "user", "one"))
+            .expect("save a sign-in");
+        server_track(&database, first.id, "a");
+
+        let other = save_media_server(&database, &new_server("other", "user", "token"))
+            .expect("sign in elsewhere");
+        assert_eq!(other.server_identifier, "other");
+        assert_eq!(
+            track_count(&database),
+            0,
+            "the first server's songs go with it"
+        );
+
+        server_track(&database, other.id, "b");
+        remove_media_server(&database, other.id).expect("sign out");
+        assert_eq!(media_server(&database), Ok(None));
+        assert_eq!(track_count(&database), 0);
+        let _ = std::fs::remove_dir_all(&directory);
+    }
+
+    #[test]
+    fn the_device_identifier_is_made_once() {
+        let directory = temp_dir("device-identifier");
+        let database = init(directory.clone()).expect("init a new database");
+        let first = device_identifier(&database).expect("made");
+        let second = device_identifier(&database).expect("read back");
+        assert_eq!(first.len(), 32);
+        assert_eq!(first, second);
+        let _ = std::fs::remove_dir_all(&directory);
+    }
+
+    #[test]
+    fn an_existing_v5_database_gains_the_media_server() {
+        let directory = temp_dir("upgrade-media-server");
+        std::fs::create_dir_all(&directory).expect("temp dir");
+        {
+            let connection = Connection::open(directory.join("janis.db")).expect("open");
+            connection.execute_batch(SCHEMA).expect("v1 schema");
+            for migration in &MIGRATIONS[..4] {
+                connection
+                    .execute_batch(migration)
+                    .expect("migrations to v5");
+            }
+            connection
+                .execute(
+                    "INSERT INTO tracks (path, title, format) VALUES ('/a.flac', 'A', 'FLAC')",
+                    [],
+                )
+                .expect("seed a track");
+            connection
+                .pragma_update(None, "user_version", 5)
+                .expect("stamp");
+        }
+
+        let database = init(directory.clone()).expect("init over a v5 database");
+        assert_eq!(media_server(&database), Ok(None));
+        let connection = database.lock();
+        let columns = columns(&connection, "tracks");
+        assert!(columns.contains(&"server_id".to_string()));
+        assert!(columns.contains(&"artwork_item".to_string()));
+        let server_id: Option<i64> = connection
+            .query_row(
+                "SELECT server_id FROM tracks WHERE path = '/a.flac'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("the existing track is still there");
+        assert_eq!(server_id, None, "an existing track is a local one");
+        drop(connection);
         let _ = std::fs::remove_dir_all(&directory);
     }
 

@@ -1,0 +1,113 @@
+import { Tokens, Typography, Metrics } from "../../tokens.slint";
+import { Strings } from "strings.slint";
+import { GhostButton } from "../../atoms/ghost_button.slint";
+import { PrimaryButton } from "../../atoms/primary_button.slint";
+import { TextField, TextFieldKind } from "../../atoms/text_field.slint";
+import { Jellyfin } from "jellyfin.slint";
+
+// The Jellyfin server: the sign-in form, or the server signed in to with
+// its Sync and Sign out buttons, and a status line under either.
+export component JellyfinCard inherits Rectangle {
+    border-radius: Metrics.radius-card;
+    border-width: 1px;
+    border-color: Tokens.border;
+    height: self.preferred-height;
+
+    VerticalLayout {
+        padding: 18px;
+        spacing: 14px;
+
+        if !Jellyfin.signed-in: VerticalLayout {
+            spacing: 14px;
+            Text {
+                text: Strings.jellyfin-description;
+                font-size: Typography.caption;
+                color: Tokens.text-muted;
+                horizontal-alignment: left;
+                wrap: word-wrap;
+            }
+            TextField {
+                label: Strings.jellyfin-address;
+                placeholder: Strings.jellyfin-address-placeholder;
+                text <=> Jellyfin.address;
+                enabled: !Jellyfin.busy;
+            }
+            HorizontalLayout {
+                spacing: 14px;
+                TextField {
+                    horizontal-stretch: 1;
+                    label: Strings.jellyfin-user;
+                    text <=> Jellyfin.user-name;
+                    enabled: !Jellyfin.busy;
+                }
+                TextField {
+                    horizontal-stretch: 1;
+                    label: Strings.jellyfin-password;
+                    kind: TextFieldKind.password;
+                    text <=> Jellyfin.password;
+                    enabled: !Jellyfin.busy;
+                    accepted => { Jellyfin.sign-in-clicked(); }
+                }
+            }
+            HorizontalLayout {
+                alignment: start;
+                PrimaryButton {
+                    label: Strings.jellyfin-sign-in;
+                    clicked => {
+                        if !Jellyfin.busy {
+                            Jellyfin.sign-in-clicked();
+                        }
+                    }
+                }
+            }
+        }
+
+        if Jellyfin.signed-in: HorizontalLayout {
+            spacing: 12px;
+            VerticalLayout {
+                horizontal-stretch: 1;
+                alignment: center;
+                Text {
+                    text: Strings.jellyfin-signed-in;
+                    font-size: Typography.heading-sm;
+                    font-weight: Typography.semibold;
+                    color: Tokens.text;
+                    horizontal-alignment: left;
+                }
+                Text {
+                    text: Jellyfin.summary;
+                    font-size: Typography.caption;
+                    color: Tokens.text-muted;
+                    horizontal-alignment: left;
+                    overflow: elide;
+                }
+            }
+            VerticalLayout {
+                alignment: center;
+                GhostButton {
+                    label: Strings.jellyfin-sync;
+                    clicked => {
+                        if !Jellyfin.busy {
+                            Jellyfin.sync-clicked();
+                        }
+                    }
+                }
+            }
+            VerticalLayout {
+                alignment: center;
+                GhostButton {
+                    label: Strings.jellyfin-sign-out;
+                    clicked => { Jellyfin.sign-out-clicked(); }
+                }
+            }
+        }
+
+        if Jellyfin.status != "": Text {
+            text: Jellyfin.status;
+            font-size: Typography.caption;
+            color: Jellyfin.status-failed ? Tokens.error : Tokens.text-soft;
+            horizontal-alignment: left;
+            wrap: word-wrap;
+        }
+    }
+}

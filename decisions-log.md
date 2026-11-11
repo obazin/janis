@@ -26,6 +26,9 @@ macOS, Windows and Linux. `src/platform.rs` holds what differs behind neutral na
 The flake composes the workspace's `rustShell` bundle (the name is historical; the bundle is domain-agnostic) and adds cmake for libopus and, on Linux, the libraries the window and the audio output need. The package is built with the workspace's Rust toolchain through `makeRustPlatform`, because nixpkgs' own compiler (1.91) trails what Slint 1.18 requires (1.92).
 Superseded: the `tauriShell` bundle with Node, pnpm and the webkit stack (D6a, first version).
 
+**D47 · `reqwest` for the Jellyfin calls** — *current*
+The Jellyfin client uses `reqwest`'s blocking client with rustls: the same version and TLS stack `audio-stack-rs` already links for web radio, so nothing new is built. It is a JSON client, not an audio crate, so it stays outside the facade. The calls run on the server worker, never on the interface thread.
+
 ## Architecture
 
 **D7 · State modules decide; the controller acts** — *current*
@@ -78,6 +81,15 @@ A keystroke in the search field rebuilds the Library, Local Files and Radio list
 The file and folder pickers are `rfd`'s asynchronous dialogs, awaited on the interface thread's loop (`slint::spawn_local`), so the window keeps drawing behind them. An error that stops the application from starting is shown in a system message box as well as on standard error, which a launch from the desktop has nowhere to show.
 Superseded: blocking pickers called from the click handler; a start error on standard error only (D37a).
 
+**D44 · A Jellyfin server's songs are synced into the library** — *current*
+The listener signs in to one Jellyfin server in Settings, and its audio items become rows of `tracks`, keyed by a `jellyfin://<server>/<item>` address and pointing at a `media_servers` row. They then appear wherever a local file does — Library, Discover, search, Now Playing, the queue — with no screen of their own; only Local Files keeps to the files on disk. A sync reads the whole listing (`/Items`, 500 at a time) at launch, after signing in and on demand, upserts it and removes the server's rows it no longer lists; a listing that fails part-way changes nothing, so a server that goes away mid-sync cannot empty the library. Loudness measurements stay outside the upsert, as for files. One server at a time: signing in elsewhere, or signing out, removes the songs with the row. `jellyfin.rs` makes the calls and maps the answers, `media_server.rs` holds the state and decides, and the calls run one after another on the server worker, so a sign-out queued behind a sync lands after it.
+
+**D45 · A server song is the original file, played as a local one** — *current*
+The engine fetches `/Audio/{item}/stream?static=true`, the file as it is on the server: no transcoding, so a lossless file stays lossless and the format badge tells the truth. `audio-stack-rs` gained remote queue entries for this (`Location::Remote`): the file downloads into a temporary file as it plays and a seek past what arrived becomes a range request, so seek, gapless, crossfade, normalization and loudness measurement apply unchanged. The next remote track opens on a thread of its own, so preloading never stalls the audio already playing. The token rides in the query, because the engine sends no headers; the engine shows the address without its query in its errors. Covers come from the server's pictures (`/Items/{item}/Images/Primary`, sized to the tile), the song's own or else its album's. Playing a server song through the radio path was set aside: it has no length, no seek and no preload.
+
+**D46 · Only the access token is kept** — *current*
+The password goes to `/Users/AuthenticateByName` once and is cleared from the form as soon as it is read; `janis.db` keeps the address, the server and user identifiers and the token. The system keychain was set aside: one more platform-dependent dependency, and a failure mode on Linux desktops without a secret service, to protect a token the listener can revoke from the server. A token the server stops accepting asks for the password again and keeps the songs. Janis names itself `Janis` and sends a random device identifier made once (`user_preferences.device_identifier`), nothing personal. Debug forms of the token-carrying types hide it.
+
 ## Interface
 
 **D15 · Atomic design in three layers** — *current* (first version)
@@ -116,6 +128,9 @@ A station is a favourite or not, by its catalog id, in the `favourite_stations` 
 
 **D43 · No Spotify source** — *current*
 Janis does not connect to Spotify, and has no screen announcing that it will. Spotify's Web API streams no audio: the most an application can do is remote-control a Spotify Connect device, which needs Premium, with the sound bypassing the engine's equalizer and visualiser. Since 2026 an app in Development Mode serves at most five allow-listed users and its client ID may not be disclosed, so every listener would need a Spotify app of their own. The Rust crates either broke under Spotify's February 2026 changes (`spotify-rs`) or would bring a second HTTP stack. That cost outweighs a source that would only remote-control another application. The placeholder screen, its sidebar entry, its strings, its colour token, its icons and the green variant of `PrimaryButton` went with it.
+
+**D48 · The Jellyfin card and a text field atom** — *current*
+The server is set up in a card of the Settings screen, between the audio output and the language: the address, the user name and the password, then a Sign in button; signed in, the server's name, the user and the song count, with Sync now and Sign out. A status line under it says what is happening or what went wrong. Its fields are the `TextField` atom, made for it (a label above an inset input, plain or password). The titlebar search keeps its own inline input. The fields live in the `Jellyfin` global, so a half-typed address survives leaving Settings.
 
 ## Distribution
 

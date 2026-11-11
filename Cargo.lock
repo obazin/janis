@@ -505,7 +505,6 @@ checksum = "1254ebf6529f3763c491acfb5ab6e960809e3c75a38584cc664f8c5667fb7107"
 [[package]]
 name = "audio-stack-rs"
 version = "0.1.0"
-source = "git+https://github.com/obazin/audio-stack-rs?tag=spectral-dsp#46da5c267002bbacf2068a5c2e8beee5394d7114"
 dependencies = [
  "base64 0.22.1",
  "biquad",
@@ -2778,6 +2777,7 @@ dependencies = [
  "dirs",
  "image",
  "log",
+ "reqwest",
  "rfd",
  "rusqlite",
  "serde",
@@ -4479,6 +4479,7 @@ checksum = "219c5811de6525e5416c7d5d53bb656d3afdbc6c5af816e0802bcfa42dbdc1c3"
 dependencies = [
  "base64 0.22.1",
  "bytes",
+ "futures-channel",
  "futures-core",
  "futures-util",
  "http",
@@ -4495,6 +4496,8 @@ dependencies = [
  "rustls",
  "rustls-pki-types",
  "rustls-platform-verifier",
+ "serde",
+ "serde_json",
  "sync_wrapper",
  "tokio",
  "tokio-rustls",

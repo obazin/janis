@@ -242,16 +242,20 @@ impl Player {
             }],
             EngineEvent::Error { message } => {
                 log::error!("audio engine: {message}");
+                // When a source goes away — a server, a drive — the engine
+                // fails each queued track in turn; the first toast says it.
                 vec![Effect::NotifyError {
                     key: "error.playback",
                     parameters: vec![("message", message)],
-                    dedupe_key: None,
+                    dedupe_key: Some("playback"),
                 }]
             }
             // The queue replay serves a host whose mirror can restart while
             // the engine keeps playing. This mirror lives exactly as long as
             // the engine, and `play_queue` already holds the complete queue.
             EngineEvent::Queue { .. } | EngineEvent::Format { .. } => Vec::new(),
+            // Janis sets no A–B loop, so the engine only ever reports none.
+            EngineEvent::Loop { .. } => Vec::new(),
         }
     }
 
@@ -686,7 +690,7 @@ mod tests {
             [Effect::NotifyError {
                 key: "error.playback",
                 parameters: vec![("message", "no device".to_owned())],
-                dedupe_key: None,
+                dedupe_key: Some("playback"),
             }]
         );
     }

@@ -5,6 +5,9 @@
 //! (`crate::audio::{read_metadata, read_cover, audio_extension}`); this module
 //! walks folders, upserts the results into `tracks` keyed by absolute path (so
 //! a rescan updates in place and never duplicates), and resolves playback gain.
+//! A media server's songs are rows too, keyed by a `jellyfin://` address
+//! instead of a path, written by [`sync_server_tracks`] and never touched by the
+//! file scanner or the pruner.
 //! Every scan here blocks for as long as the walk takes, so callers run them
 //! off the user-interface thread.
 
@@ -21,6 +24,8 @@ use crate::persistence::DbState;
 pub struct Track {
     pub id: i64,
     pub folder_id: Option<i64>,
+    /// The media server the song lives on; `None` for a file on disk.
+    pub server_id: Option<i64>,
     pub path: String,
     pub title: String,
     pub artist: Option<String>,
@@ -64,13 +69,34 @@ pub struct ScanReport {
     pub removed: usize,
 }
 
-/// Upserts one scanned file. Returns `true` when the row was newly inserted.
+/// Where an upserted row comes from: a scanned file (in a watched folder, or
+/// imported on its own), or a song on a media server.
+#[derive(Clone, Copy, Debug)]
+enum Origin<'a> {
+    File {
+        folder_id: Option<i64>,
+    },
+    Server {
+        server_id: i64,
+        artwork_item: Option<&'a str>,
+    },
+}
+
+/// Upserts one scanned file or server song. Returns `true` when the row was
+/// newly inserted.
 fn upsert_track(
     conn: &rusqlite::Connection,
-    folder_id: Option<i64>,
+    origin: Origin<'_>,
     path: &str,
     meta: &Metadata,
 ) -> Result<bool, String> {
+    let (folder_id, server_id, artwork_item) = match origin {
+        Origin::File { folder_id } => (folder_id, None, None),
+        Origin::Server {
+            server_id,
+            artwork_item,
+        } => (None, Some(server_id), artwork_item),
+    };
     let existed: bool = conn
         .query_row("SELECT 1 FROM tracks WHERE path = ?1", [path], |_| Ok(()))
         .map(|_| true)
@@ -86,9 +112,10 @@ fn upsert_track(
                              track_number, track_total, disc_number, disc_total,
                              year, genre, album_artist,
                              rg_track_gain_db, rg_track_peak,
-                             rg_album_gain_db, rg_album_peak)
+                             rg_album_gain_db, rg_album_peak,
+                             server_id, artwork_item)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12,
-                 ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23)
+                 ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25)
          ON CONFLICT(path) DO UPDATE SET
              -- An ad-hoc import of a file a watched folder already holds
              -- leaves it in that folder.
@@ -113,7 +140,9 @@ fn upsert_track(
              rg_track_gain_db = excluded.rg_track_gain_db,
              rg_track_peak = excluded.rg_track_peak,
              rg_album_gain_db = excluded.rg_album_gain_db,
-             rg_album_peak = excluded.rg_album_peak",
+             rg_album_peak = excluded.rg_album_peak,
+             server_id = excluded.server_id,
+             artwork_item = excluded.artwork_item",
         rusqlite::params![
             folder_id,
             path,
@@ -138,6 +167,8 @@ fn upsert_track(
             meta.rg_track_peak,
             meta.rg_album_gain_db,
             meta.rg_album_peak,
+            server_id,
+            artwork_item,
         ],
     )
     .map_err(|e| format!("upsert track {}: {}", path, e))?;
@@ -215,7 +246,7 @@ fn flush_batch(
     };
     let mut written = ScanReport::default();
     for (path, meta) in batch.drain(..) {
-        match upsert_track(&tx, folder_id, &path, &meta) {
+        match upsert_track(&tx, Origin::File { folder_id }, &path, &meta) {
             Ok(true) => written.added += 1,
             Ok(false) => written.updated += 1,
             Err(e) => {
@@ -250,7 +281,8 @@ fn prune_missing(db: &DbState) -> Result<usize, String> {
     let (tracks, folders) = {
         let conn = db.lock();
         let tracks: Vec<(i64, Option<i64>, String)> = conn
-            .prepare("SELECT id, folder_id, path FROM tracks")
+            // A server's songs are not files: they are never stat-ed here.
+            .prepare("SELECT id, folder_id, path FROM tracks WHERE server_id IS NULL")
             .and_then(|mut stmt| {
                 stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?
                     .collect()
@@ -305,7 +337,8 @@ pub fn list_tracks(db: &DbState) -> Result<Vec<Track>, String> {
                     format, sample_rate, bit_depth, channels, lossless, added_at,
                     track_number, track_total, disc_number, disc_total,
                     year, genre, album_artist,
-                    rg_track_gain_db, rg_track_peak, loudness_lufs, loudness_peak
+                    rg_track_gain_db, rg_track_peak, loudness_lufs, loudness_peak,
+                    server_id
              FROM tracks ORDER BY added_at DESC, id DESC",
         )
         .map_err(|e| format!("prepare list_tracks: {}", e))?;
@@ -314,6 +347,7 @@ pub fn list_tracks(db: &DbState) -> Result<Vec<Track>, String> {
             Ok(Track {
                 id: row.get(0)?,
                 folder_id: row.get(1)?,
+                server_id: row.get(25)?,
                 path: row.get(2)?,
                 title: row.get(3)?,
                 artist: row.get(4)?,
@@ -429,6 +463,115 @@ pub fn import_files(db: &DbState, paths: Vec<String>) -> ScanReport {
     report
 }
 
+/// One song as a media server lists it.
+#[derive(Clone, Debug)]
+pub struct ServerSong {
+    /// Its `jellyfin://<server>/<item>` address, the row's unique key.
+    pub address: String,
+    pub metadata: Metadata,
+    /// The item whose picture is the song's cover, when the server has one.
+    pub artwork_item: Option<String>,
+}
+
+/// Brings the server's songs in the library in line with a complete listing
+/// of them: every listed song is upserted, and every song of this server
+/// missing from the listing is removed — the listing is complete, so missing
+/// means gone from the server. A listing that could not be read whole must
+/// not reach here: it would read as songs deleted.
+///
+/// Same lock discipline as a folder scan: bursts of `SCAN_BATCH` upserts, one
+/// transaction each, so the engine's loudness reads are never starved.
+pub fn sync_server_tracks(
+    database: &DbState,
+    server_id: i64,
+    songs: Vec<ServerSong>,
+) -> Result<ScanReport, String> {
+    let mut report = ScanReport::default();
+    let listed: std::collections::HashSet<String> =
+        songs.iter().map(|song| song.address.clone()).collect();
+    for burst in songs.chunks(SCAN_BATCH) {
+        let connection = database.lock();
+        let transaction = connection
+            .unchecked_transaction()
+            .map_err(|error| format!("server sync transaction: {error}"))?;
+        let mut written = ScanReport::default();
+        for song in burst {
+            let origin = Origin::Server {
+                server_id,
+                artwork_item: song.artwork_item.as_deref(),
+            };
+            match upsert_track(&transaction, origin, &song.address, &song.metadata) {
+                Ok(true) => written.added += 1,
+                Ok(false) => written.updated += 1,
+                Err(error) => {
+                    log::warn!("{error}");
+                    written.skipped += 1;
+                }
+            }
+        }
+        transaction
+            .commit()
+            .map_err(|error| format!("server sync commit: {error}"))?;
+        report.added += written.added;
+        report.updated += written.updated;
+        report.skipped += written.skipped;
+    }
+
+    let connection = database.lock();
+    let stored: Vec<(i64, String)> = connection
+        .prepare("SELECT id, path FROM tracks WHERE server_id = ?1")
+        .and_then(|mut statement| {
+            statement
+                .query_map([server_id], |row| Ok((row.get(0)?, row.get(1)?)))?
+                .collect()
+        })
+        .map_err(|error| format!("list the server's songs: {error}"))?;
+    let transaction = connection
+        .unchecked_transaction()
+        .map_err(|error| format!("server prune transaction: {error}"))?;
+    for (track_id, address) in stored {
+        if !listed.contains(&address) {
+            transaction
+                .execute("DELETE FROM tracks WHERE id = ?1", [track_id])
+                .map_err(|error| format!("remove song {track_id}: {error}"))?;
+            report.removed += 1;
+        }
+    }
+    transaction
+        .commit()
+        .map_err(|error| format!("server prune commit: {error}"))?;
+    Ok(report)
+}
+
+/// Where a track's cover comes from.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum CoverSource {
+    /// The file, or its album's files (`track_cover`).
+    File,
+    /// The server's picture of this item; `None` when the server has none.
+    Server { artwork_item: Option<String> },
+}
+
+/// Where a track's cover comes from. An unknown track reads as a file, whose
+/// lookup then finds nothing.
+pub fn cover_source(database: &DbState, track_id: i64) -> CoverSource {
+    let connection = database.lock();
+    connection
+        .query_row(
+            "SELECT server_id IS NOT NULL, artwork_item FROM tracks WHERE id = ?1",
+            [track_id],
+            |row| Ok((row.get::<_, bool>(0)?, row.get::<_, Option<String>>(1)?)),
+        )
+        .map(|(on_server, artwork_item)| {
+            if on_server {
+                CoverSource::Server { artwork_item }
+            } else {
+                CoverSource::File
+            }
+        })
+        .unwrap_or(CoverSource::File)
+}
+
 /// Re-walks every watched folder (picking up new + changed files) and prunes
 /// rows whose file is gone.
 pub fn rescan_library(db: &DbState) -> Result<ScanReport, String> {
@@ -525,9 +668,13 @@ const COVER_SIBLING_LIMIT: usize = 12;
 fn cover_candidates(db: &DbState, track_id: i64) -> Vec<String> {
     let conn = db.lock();
 
-    let Ok(own) = conn.query_row("SELECT path FROM tracks WHERE id = ?1", [track_id], |r| {
-        r.get::<_, String>(0)
-    }) else {
+    // A server song's cover comes from its server (`server_artwork`), never
+    // from a file.
+    let Ok(own) = conn.query_row(
+        "SELECT path FROM tracks WHERE id = ?1 AND server_id IS NULL",
+        [track_id],
+        |r| r.get::<_, String>(0),
+    ) else {
         return Vec::new();
     };
 
@@ -537,6 +684,7 @@ fn cover_candidates(db: &DbState, track_id: i64) -> Vec<String> {
             "SELECT t.path FROM tracks t, tracks cur
              WHERE cur.id = ?1
                AND t.id != cur.id
+               AND t.server_id IS NULL
                AND cur.album IS NOT NULL
                AND t.album = cur.album
                AND COALESCE(t.album_artist, t.artist) IS COALESCE(cur.album_artist, cur.artist)
@@ -567,6 +715,7 @@ pub mod test_support {
         Track {
             id,
             folder_id: None,
+            server_id: None,
             path: format!("/music/{id}.flac"),
             title: title.to_owned(),
             artist: None,
@@ -642,6 +791,109 @@ mod tests {
         let tracks = list_tracks(&db).expect("tracks");
         assert_eq!(tracks[0].folder_id, Some(folders[0].id));
 
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn server_song(item: &str, title: &str) -> ServerSong {
+        ServerSong {
+            address: format!("jellyfin://server/{item}"),
+            metadata: Metadata {
+                title: title.to_owned(),
+                artist: Some("Artist".to_owned()),
+                album: Some("Album".to_owned()),
+                composer: None,
+                duration_secs: 200.0,
+                format: "FLAC".to_owned(),
+                sample_rate: Some(44_100),
+                bit_depth: Some(16),
+                channels: Some(2),
+                lossless: true,
+                track_number: Some(1),
+                track_total: None,
+                disc_number: None,
+                disc_total: None,
+                year: None,
+                genre: None,
+                album_artist: None,
+                rg_track_gain_db: None,
+                rg_track_peak: None,
+                rg_album_gain_db: None,
+                rg_album_peak: None,
+            },
+            artwork_item: Some(format!("album-of-{item}")),
+        }
+    }
+
+    fn signed_in(database: &DbState) -> i64 {
+        crate::persistence::save_media_server(
+            database,
+            &crate::persistence::NewMediaServer {
+                address: "http://server".to_owned(),
+                server_identifier: "server".to_owned(),
+                server_name: "Home".to_owned(),
+                user_identifier: "user".to_owned(),
+                user_name: "listener".to_owned(),
+                access_token: "token".to_owned(),
+            },
+        )
+        .expect("sign in")
+        .id
+    }
+
+    #[test]
+    fn a_sync_adds_updates_and_removes_what_the_server_lists() {
+        let dir = std::env::temp_dir().join("janis-server-sync-test");
+        let _ = std::fs::remove_dir_all(&dir);
+        let db = crate::persistence::init(dir.clone()).expect("db");
+        let server_id = signed_in(&db);
+
+        let first = sync_server_tracks(
+            &db,
+            server_id,
+            vec![server_song("a", "One"), server_song("b", "Two")],
+        )
+        .expect("first sync");
+        assert_eq!((first.added, first.updated, first.removed), (2, 0, 0));
+        let a_id = list_tracks(&db)
+            .expect("tracks")
+            .iter()
+            .find(|track| track.title == "One")
+            .expect("a")
+            .id;
+        store_loudness(&db, a_id, -14.0, 0.9);
+
+        let second = sync_server_tracks(&db, server_id, vec![server_song("a", "One again")])
+            .expect("second sync");
+        assert_eq!((second.added, second.updated, second.removed), (0, 1, 1));
+
+        let tracks = list_tracks(&db).expect("tracks");
+        assert_eq!(tracks.len(), 1);
+        assert_eq!(tracks[0].title, "One again");
+        assert_eq!(tracks[0].server_id, Some(server_id));
+        assert_eq!(tracks[0].id, a_id, "a re-listed song keeps its row");
+        assert!(!needs_loudness(&db, a_id), "and its loudness measurement");
+        assert_eq!(
+            cover_source(&db, a_id),
+            CoverSource::Server {
+                artwork_item: Some("album-of-a".to_owned())
+            }
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_rescan_never_touches_a_servers_songs() {
+        let dir = std::env::temp_dir().join("janis-server-rescan-test");
+        let _ = std::fs::remove_dir_all(&dir);
+        let db = crate::persistence::init(dir.clone()).expect("db");
+        let server_id = signed_in(&db);
+        sync_server_tracks(&db, server_id, vec![server_song("a", "One")]).expect("sync");
+
+        let report = rescan_library(&db).expect("rescan");
+
+        assert_eq!(report.removed, 0);
+        assert_eq!(list_tracks(&db).expect("tracks").len(), 1);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

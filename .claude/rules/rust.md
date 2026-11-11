@@ -8,7 +8,7 @@ paths:
 
 ## Responsibilities and dependency direction
 
-- `player.rs`, `equalizer.rs`, `playback_options.rs`, `favourites.rs` and `notifications.rs` hold state and decide. They never import Slint, the engine, the database or a timer: a method updates the state and returns the `Effect`s (`effects.rs`) its decision implies. New behaviour goes there first, with a unit test, before it is wired to the window.
+- `player.rs`, `equalizer.rs`, `playback_options.rs`, `favourites.rs`, `media_server.rs` and `notifications.rs` hold state and decide. They never import Slint, the engine, the database or a timer: a method updates the state and returns the `Effect`s (`effects.rs`) its decision implies. New behaviour goes there first, with a unit test, before it is wired to the window.
 - `library_view.rs`, `radio.rs`, `text.rs`, `visualizer.rs`, `halo.rs` and `covers.rs` are pure: data in, data out. They take a `&Translations` when they format text.
 - `application.rs` and `application/*.rs` are the only place that combines state, engine, database and window. A method there runs a state module's method, carries out the effects (`Application::run`), and refreshes what changed. It makes no decision a state module could make.
 - `audio.rs` is the only file that names `audio_stack_rs` (see `.claude/rules/audio.md`). `library.rs` and `persistence.rs` are the only ones with SQL (see `.claude/rules/library.md`).
@@ -18,7 +18,7 @@ paths:
 ## Threads
 
 - The controller lives on the interface thread and is reached from other threads only through `application::post`. Nothing that belongs to the window crosses a thread.
-- File reads, picture decoding and scans run on a `background::Worker` (`picture_worker`, `library_worker`); the station connect runs on `station_runtime`, which stays alive because the stream goes on downloading on it. A job ends by posting its result.
+- File reads, picture decoding and scans run on a `background::Worker` (`picture_worker`, `library_worker`), and the Jellyfin calls on `server_worker`; the station connect runs on `station_runtime`, which stays alive because the stream goes on downloading on it. A job ends by posting its result.
 - A result that may arrive after the state moved on is recognised and dropped: it carries the epoch it was asked under (the current cover, a station's art, thumbnails, a station connection).
 - Short SQLite writes of one preference are the one thing allowed on the interface thread.
 

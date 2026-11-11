@@ -6,15 +6,14 @@
 //! [`EventSink`](audio_stack_rs::EventSink) that hands engine output to the
 //! user interface, and the boot wiring.
 
-use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 // Re-export the facade items the rest of Janis uses, so nothing outside this
 // module names `audio_stack_rs` directly.
 pub use audio_stack_rs::{
     audio_extension, gain_db, read_cover, read_metadata, AudioEngine, CoverArt, EngineEvent,
-    Measured, Metadata, Mode, QueueEntry, Source, Store, AUDIO_EXTENSIONS, CENTER_FREQS,
-    EQ_BAND_COUNT, FRAME_BYTES,
+    Location, Measured, Metadata, Mode, QueueEntry, RemoteFile, Source, Store, AUDIO_EXTENSIONS,
+    CENTER_FREQS, EQ_BAND_COUNT, FRAME_BYTES, LOSSLESS_EXTENSIONS,
 };
 
 use crate::library::Track;
@@ -63,11 +62,12 @@ impl audio_stack_rs::EventSink for EngineBridge {
     }
 }
 
-/// What the engine needs to know about a library track to play it.
-pub fn queue_entry(track: &Track) -> QueueEntry {
+/// What the engine needs to know about a library track to play it, given
+/// where its audio is: the file at its path, or the address its server gives.
+pub fn queue_entry(track: &Track, location: Location) -> QueueEntry {
     QueueEntry {
         track_id: track.id,
-        path: PathBuf::from(&track.path),
+        location,
         duration_secs: track.duration_secs,
         gain_db: track.gain_db,
     }

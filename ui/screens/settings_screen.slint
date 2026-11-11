@@ -8,6 +8,7 @@ import { ToggleRow } from "../molecules/toggle_row.slint";
 import { Equalizer } from "../features/equalizer/equalizer.slint";
 import { OpenEqualizerButton } from "../features/equalizer/open_equalizer_button.slint";
 import { Settings } from "../features/settings/settings.slint";
+import { JellyfinCard } from "../features/jellyfin/jellyfin_card.slint";
 
 // A read-only fact about the audio output.
 component OutputCard inherits Rectangle {
@@ -43,7 +44,7 @@ component OutputCard inherits Rectangle {
 }
 
 // The preferences: equalizer presets, the playback switches, the output in
-// use, and the interface language.
+// use, the Jellyfin server, and the interface language.
 export component SettingsScreen inherits Rectangle {
     property <length> side: 44px;
 
@@ -150,6 +151,20 @@ export component SettingsScreen inherits Rectangle {
                     label: Strings.settings-sample-rate;
                     value: Settings.sample-rate;
                 }
+            }
+
+            SectionLabel {
+                label: Strings.jellyfin-title;
+            }
+
+            Rectangle {
+                height: 12px;
+            }
+
+            JellyfinCard { }
+
+            Rectangle {
+                height: 32px;
             }
 
             SectionLabel {

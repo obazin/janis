@@ -1,0 +1,59 @@
+import { Tokens, Typography, Metrics } from "../tokens.slint";
+
+// What a text field holds: plain text, or a secret drawn as dots.
+export enum TextFieldKind { plain, password }
+
+// A labelled single-line text field: a caption above an inset input, with a
+// placeholder while it is empty.
+export component TextField inherits VerticalLayout {
+    in property <string> label;
+    in property <string> placeholder;
+    in property <TextFieldKind> kind: TextFieldKind.plain;
+    in property <bool> enabled: true;
+    in-out property <string> text;
+    // The listener pressed Return in the field.
+    callback accepted();
+
+    spacing: 6px;
+
+    Text {
+        text: root.label;
+        font-size: Typography.caption;
+        color: Tokens.text-muted;
+        horizontal-alignment: left;
+    }
+
+    Rectangle {
+        height: input.preferred-height + 18px;
+        border-radius: Metrics.radius-button;
+        border-width: 1px;
+        border-color: input.has-focus ? Tokens.accent-ring : Tokens.border-strong;
+        background: Tokens.input-background;
+
+        if input.text == "": Text {
+            x: 13px;
+            width: parent.width - 26px;
+            text: root.placeholder;
+            font-size: Typography.body;
+            color: Tokens.text-faint;
+            horizontal-alignment: left;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+        input := TextInput {
+            x: 13px;
+            width: parent.width - 26px;
+            text <=> root.text;
+            enabled: root.enabled;
+            input-type: root.kind == TextFieldKind.password ? InputType.password : InputType.text;
+            font-size: Typography.body;
+            color: root.enabled ? Tokens.text : Tokens.text-muted;
+            selection-background-color: Tokens.accent;
+            selection-foreground-color: Tokens.text;
+            single-line: true;
+            vertical-alignment: center;
+            accessible-label: root.label;
+            accepted => { root.accepted(); }
+        }
+    }
+}

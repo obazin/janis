@@ -8,11 +8,12 @@ A native application written in **Rust**, with a **[Slint](https://slint.dev)** 
 
 - **Now Playing** — hero album art (embedded cover art, or a generated prism gradient), track/artist/composer/album metadata, live waveform with click-to-seek, transport with shuffle/repeat, volume, a queue card (up next / playlist / current album), and an artist spotlight drawn from your library.
 - **Library** — scan folders or import files; albums, artists and songs views grouped from real tags (`lofty`); search from the titlebar.
+- **Jellyfin** — sign in to your Jellyfin server in Settings and its songs join the library, playing the original files from the server through the same engine (EQ, gapless, normalization, waveform), with the server's cover art.
 - **Discover** — shelves derived from your own library (recently added albums, artists, rediscoveries).
 - **Web Radio** — curated station list (SomaFM, FIP, Radio Paradise, KEXP, …) with country and genre filters, and favourites you star.
 - **Local Files** — drop zone (real OS drag-and-drop), scanned-library table with format badges, watched-folder management, rescan.
 - **10-band EQ** — bottom-sheet graphic equalizer with presets (Rock, Jazz, Bass Boost, …), applied live to playback, persisted across launches.
-- **Settings** — playback switches (gapless, crossfade and normalization are live in the engine and on by default; exclusive output is persisted only), output info, language (English / Français).
+- **Settings** — playback switches (gapless, crossfade and normalization are live in the engine and on by default; exclusive output is persisted only), output info, the Jellyfin server, language (English / Français).
 
 Playlists and user-added stations are on the roadmap.
 
@@ -64,7 +65,7 @@ just test-rust        # cargo test
 
 ## Architecture in one paragraph
 
-One process, all Rust. The scanner walks watched folders, reads tags with `lofty`, and upserts into a bundled-SQLite `janis.db`. Sound is the `audio-stack-rs` crate's: an engine thread decodes with symphonia, resamples only when the file and the device disagree, and feeds a lock-free ring that a cpal callback drains through ten peaking filters into the output device. The queue and the transport live there too, so playback is independent of the UI. Web radio takes the same path — buffered over HTTP into the same decoder — so stations get the equalizer and a real visualiser, and their ICY track titles show up in Now Playing. What the screens show lives in plain state modules that decide and return effects; one controller on the interface thread carries the effects out and pushes what changed to the Slint globals the screens read. The interface (`ui/`) is a three-layer atomic design system (design system → features → screens, one-way dependencies) drawing every color, size and duration from one token file. Details in [`CLAUDE.md`](CLAUDE.md) and [`docs/specs.md`](docs/specs.md); the reasons behind them in [`decisions-log.md`](decisions-log.md).
+One process, all Rust. The scanner walks watched folders, reads tags with `lofty`, and upserts into a bundled-SQLite `janis.db`. Sound is the `audio-stack-rs` crate's: an engine thread decodes with symphonia, resamples only when the file and the device disagree, and feeds a lock-free ring that a cpal callback drains through ten peaking filters into the output device. The queue and the transport live there too, so playback is independent of the UI. Web radio takes the same path — buffered over HTTP into the same decoder — so stations get the equalizer and a real visualiser, and their ICY track titles show up in Now Playing. A Jellyfin server's songs are synced into the same `tracks` table and play their original files, downloaded as they play and seeked with range requests, so they behave exactly like local files. What the screens show lives in plain state modules that decide and return effects; one controller on the interface thread carries the effects out and pushes what changed to the Slint globals the screens read. The interface (`ui/`) is a three-layer atomic design system (design system → features → screens, one-way dependencies) drawing every color, size and duration from one token file. Details in [`CLAUDE.md`](CLAUDE.md) and [`docs/specs.md`](docs/specs.md); the reasons behind them in [`decisions-log.md`](decisions-log.md).
 
 ## License
 
