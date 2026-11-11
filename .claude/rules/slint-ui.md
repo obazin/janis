@@ -51,7 +51,7 @@ Dependencies run one way. The design system (atoms, molecules, organisms) import
 
 ## Lists
 
-- A list that can grow with the library draws only the rows in view. Rows have a fixed height; the screen's `ScrollArea` gives `scroll-offset`, and the list computes `first` and `count` and places each row at `index × row-height` (see `TrackList`, `LocalTable`, the Radio grid).
+- A list that can grow with the library draws only the rows in view. Rows have a fixed height; the screen's `ScrollArea` gives `scroll-offset`, and the list computes `first` and `count` and places each row at `index × row-height` (see `TrackList`, `LocalTable`, the Radio grid, `CardGrid`). Guard the size a window is computed from: before the first layout a component may have no width, and a line height derived from it can put hundreds of lines in view for one frame — enough to ask for hundreds of covers.
 - A screen with several sections lays them out by position inside one `ScrollArea`, each section's `y` following the height of the one above, so a windowed list can know where its visible part starts.
 - `FlexboxLayout` wraps (chips, presets); the other layouts do not.
 
