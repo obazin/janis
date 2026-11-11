@@ -1,0 +1,143 @@
+import { Tokens, Fonts, Typography, Metrics } from "../../tokens.slint";
+import { Icons } from "../../icons.slint";
+import { Strings } from "strings.slint";
+import { Chip } from "../../atoms/chip.slint";
+import { GhostButton } from "../../atoms/ghost_button.slint";
+import { IconButton, IconButtonIdentifier } from "../../atoms/icon_button.slint";
+import { ToggleRow } from "../../molecules/toggle_row.slint";
+import { Shell } from "../../shell.slint";
+import { Equalizer } from "equalizer.slint";
+import { EqualizerBandSlider } from "equalizer_band_slider.slint";
+
+// The equalizer, as a sheet rising from the bottom of the window over a
+// scrim. A click on the scrim, the close button or Escape puts it away.
+export component EqualizerOverlay inherits Rectangle {
+    background: Tokens.scrim;
+
+    public function take-focus() {
+        keys.focus();
+    }
+
+    TouchArea {
+        clicked => { Shell.equalizer-open = false; }
+    }
+
+    keys := FocusScope {
+        key-pressed(event) => {
+            if event.text == Key.Escape {
+                Shell.equalizer-open = false;
+                return accept;
+            }
+            return reject;
+        }
+    }
+
+    sheet := Rectangle {
+        y: root.height - self.height;
+        width: min(860px, root.width);
+        height: content.preferred-height;
+        border-top-left-radius: Metrics.radius-art;
+        border-top-right-radius: Metrics.radius-art;
+        border-width: 1px;
+        border-color: Tokens.border-emphasis;
+        background: Tokens.equalizer-sheet;
+        drop-shadow-offset-y: Tokens.shadow-sheet.offset-y;
+        drop-shadow-blur: Tokens.shadow-sheet.blur;
+        drop-shadow-spread: Tokens.shadow-sheet.spread;
+        drop-shadow-color: Tokens.shadow-sheet.color;
+        accessible-role: groupbox;
+        accessible-label: Strings.eq-title;
+
+        // Clicks on the sheet stay on the sheet.
+        TouchArea { }
+
+        content := VerticalLayout {
+            padding-left: 32px;
+            padding-right: 32px;
+            padding-top: 26px;
+            padding-bottom: 34px;
+
+            HorizontalLayout {
+                spacing: 14px;
+                VerticalLayout {
+                    horizontal-stretch: 1;
+                    Text {
+                        text: Strings.eq-title;
+                        font-family: Fonts.display;
+                        font-weight: Typography.black;
+                        font-size: Typography.heading-lg;
+                        color: Tokens.text;
+                        horizontal-alignment: left;
+                    }
+                    Text {
+                        text: Strings.eq-subtitle;
+                        font-size: Typography.body;
+                        color: Tokens.text-muted;
+                        horizontal-alignment: left;
+                    }
+                }
+                VerticalLayout {
+                    alignment: center;
+                    GhostButton {
+                        label: Strings.eq-reset;
+                        clicked => { Equalizer.reset(); }
+                    }
+                }
+                VerticalLayout {
+                    alignment: center;
+                    Rectangle {
+                        width: 34px;
+                        height: 34px;
+                        border-radius: 17px;
+                        background: Tokens.chip-hover;
+                        IconButton {
+                            identifier: IconButtonIdentifier.equalizer-close;
+                            icon: Icons.close;
+                            label: Strings.eq-close;
+                            clicked => { Shell.equalizer-open = false; }
+                        }
+                    }
+                }
+            }
+
+            HorizontalLayout {
+                padding-top: 18px;
+                padding-bottom: 16px;
+                alignment: start;
+                spacing: 8px;
+                for preset in Equalizer.presets: Chip {
+                    label: preset.label;
+                    active: Equalizer.preset == preset.name;
+                    clicked => { Equalizer.preset-selected(preset.name); }
+                }
+            }
+
+            Rectangle {
+                border-radius: Metrics.radius-card;
+                border-width: 1px;
+                border-color: Tokens.border;
+                VerticalLayout {
+                    ToggleRow {
+                        label: Strings.eq-linear-phase;
+                        description: Equalizer.linear-phase-description;
+                        checked: Equalizer.linear-phase;
+                        last: true;
+                        toggled => { Equalizer.linear-phase-toggled(); }
+                    }
+                }
+            }
+
+            HorizontalLayout {
+                padding-top: 24px;
+                spacing: 6px;
+                for gain[index] in Equalizer.gains: EqualizerBandSlider {
+                    horizontal-stretch: 1;
+                    gain: gain;
+                    range: Equalizer.gain-range;
+                    frequency-label: Equalizer.frequency-labels[index];
+                    changed(value) => { Equalizer.band-changed(index, value); }
+                }
+            }
+        }
+    }
+}

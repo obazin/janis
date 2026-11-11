@@ -17,7 +17,7 @@ use crate::audio::{self, AudioEngine, EngineBridge, EngineEvent, Mode};
 use crate::background::Worker;
 use crate::covers::{self, Pixels};
 use crate::effects::Effect;
-use crate::equalizer::Equalizer;
+use crate::equalizer::{self, Equalizer};
 use crate::halo;
 use crate::library::{self, LoudnessStore, Track};
 use crate::library_view::{self, AlbumGroup, ArtistGroup, QueueView};
@@ -114,6 +114,7 @@ pub struct Application {
     queue_rows: Rc<VecModel<user_interface::QueueRow>>,
     spotlight_tracks: Rc<VecModel<user_interface::SpotlightTrack>>,
     spotlight_albums: Rc<VecModel<user_interface::SpotlightAlbum>>,
+    equalizer_gains: Rc<VecModel<f32>>,
     toasts: Rc<VecModel<Toast>>,
     picture_worker: Worker,
     frame_timer: Timer,
@@ -167,6 +168,7 @@ impl Application {
             queue_rows: Rc::new(VecModel::default()),
             spotlight_tracks: Rc::new(VecModel::default()),
             spotlight_albums: Rc::new(VecModel::default()),
+            equalizer_gains: Rc::new(VecModel::default()),
             toasts,
             picture_worker: Worker::new("janis pictures")?,
             frame_timer: Timer::default(),
@@ -183,6 +185,7 @@ impl Application {
         application.engine.describe();
         application.refresh_player();
         application.refresh_now_playing_lists();
+        application.refresh_equalizer();
         Ok(application)
     }
 
@@ -303,6 +306,41 @@ impl Application {
             application.play_spotlight_album(usize::try_from(index).unwrap_or_default());
         }));
 
+        let equalizer = self.window.global::<user_interface::Equalizer>();
+        equalizer.set_gains(ModelRc::from(self.equalizer_gains.clone()));
+        equalizer.set_gain_range(equalizer::GAIN_RANGE as f32);
+        equalizer.set_frequency_labels(ModelRc::from(Rc::new(VecModel::from(
+            equalizer::frequency_labels()
+                .map(slint::SharedString::from)
+                .to_vec(),
+        ))));
+        equalizer.on_band_changed({
+            let weak = Rc::downgrade(self);
+            move |index, gain| {
+                if let Some(application) = weak.upgrade() {
+                    let effects = application.equalizer.borrow_mut().set_band(
+                        usize::try_from(index).unwrap_or(usize::MAX),
+                        f64::from(gain),
+                    );
+                    application.run(effects);
+                    application.refresh_equalizer();
+                }
+            }
+        });
+        equalizer.on_preset_selected(self.handler(|application, name: slint::SharedString| {
+            let effects = application.equalizer.borrow_mut().set_preset(&name);
+            application.run(effects);
+        }));
+        equalizer.on_reset(self.action(|application| {
+            let effects = application.equalizer.borrow_mut().reset();
+            application.run(effects);
+        }));
+        equalizer.on_linear_phase_toggled(self.action(|application| {
+            let enabled = !application.equalizer.borrow().linear_phase();
+            let effects = application.equalizer.borrow_mut().set_linear_phase(enabled);
+            application.run(effects);
+        }));
+
         let covers = self.window.global::<Covers>();
         let weak = Rc::downgrade(self);
         covers.on_thumbnail(move |track_id, _revision| {
@@ -336,8 +374,7 @@ impl Application {
         move || {
             if let Some(application) = weak.upgrade() {
                 run(&application);
-                application.refresh_player();
-                application.refresh_now_playing_lists();
+                application.refresh_after_action();
             }
         }
     }
@@ -352,10 +389,15 @@ impl Application {
         move |argument| {
             if let Some(application) = weak.upgrade() {
                 run(&application, argument);
-                application.refresh_player();
-                application.refresh_now_playing_lists();
+                application.refresh_after_action();
             }
         }
+    }
+
+    fn refresh_after_action(&self) {
+        self.refresh_player();
+        self.refresh_now_playing_lists();
+        self.refresh_equalizer();
     }
 
     // ── Playback ────────────────────────────────────────────────────────────
@@ -448,10 +490,15 @@ impl Application {
                 Effect::LinearPhaseReported {
                     enabled,
                     latency_seconds,
-                } => self
-                    .equalizer
-                    .borrow_mut()
-                    .apply_engine_report(enabled, latency_seconds),
+                } => {
+                    log::debug!(
+                        "linear-phase equalizer: enabled {enabled}, latency {latency_seconds} s"
+                    );
+                    self.equalizer
+                        .borrow_mut()
+                        .apply_engine_report(enabled, latency_seconds);
+                    self.refresh_equalizer();
+                }
                 Effect::NotifyError {
                     key,
                     parameters,
@@ -975,6 +1022,43 @@ impl Application {
             spotlight_tracks,
             spotlight_albums,
         };
+    }
+
+    /// Pushes the equalizer's state to its sheet.
+    fn refresh_equalizer(&self) {
+        let equalizer = self.equalizer.borrow();
+        let translations = self.translations.borrow();
+        let view = self.window.global::<user_interface::Equalizer>();
+        self.equalizer_gains.set_vec(
+            equalizer
+                .gains()
+                .iter()
+                .map(|gain| *gain as f32)
+                .collect::<Vec<_>>(),
+        );
+        view.set_preset(equalizer.preset().into());
+        view.set_presets(ModelRc::from(Rc::new(VecModel::from(
+            equalizer::PRESETS
+                .iter()
+                .map(|(name, _)| user_interface::EqualizerPreset {
+                    name: (*name).into(),
+                    label: translations.text(&equalizer::preset_label_key(name)).into(),
+                })
+                .collect::<Vec<_>>(),
+        ))));
+        view.set_linear_phase(equalizer.linear_phase());
+        view.set_linear_phase_description(
+            if equalizer.linear_phase() && equalizer.latency_seconds() > 0.0 {
+                let milliseconds = (equalizer.latency_seconds() * 1000.0).round();
+                translations.translate(
+                    "eq.linearPhase.latency",
+                    &[("ms", format!("{milliseconds:.0}"))],
+                )
+            } else {
+                translations.text("eq.linearPhase.desc")
+            }
+            .into(),
+        );
     }
 
     /// The prism colors, read from the design tokens, as red, green and blue.
