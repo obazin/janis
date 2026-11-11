@@ -74,6 +74,7 @@ impl Visualizer {
     }
 
     /// The trace, each point in −1..1.
+    #[cfg(test)]
     pub fn wave(&self) -> &[f32; WAVE_POINTS] {
         &self.wave
     }

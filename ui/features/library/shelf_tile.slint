@@ -1,0 +1,57 @@
+import { Tokens, Typography, Metrics } from "../../tokens.slint";
+import { CoverArt } from "cover_art.slint";
+import { LibraryCard } from "library.slint";
+
+// A tile of a Discover shelf: a cover over two lines of text.
+export component ShelfTile inherits Rectangle {
+    in property <LibraryCard> card;
+    callback clicked();
+
+    width: 176px;
+    height: self.width + 48px;
+    accessible-role: button;
+    accessible-label: root.card.title;
+    accessible-action-default => { root.clicked(); }
+
+    CoverArt {
+        x: 0;
+        y: 0;
+        width: root.width;
+        height: root.width;
+        radius: Metrics.radius-card;
+        track-id: root.card.track-id;
+        gradient-index: root.card.gradient-index;
+        drop-shadow-offset-y: Tokens.shadow-tile.offset-y;
+        drop-shadow-blur: Tokens.shadow-tile.blur;
+        drop-shadow-spread: Tokens.shadow-tile.spread;
+        drop-shadow-color: Tokens.shadow-tile.color;
+    }
+
+    Text {
+        x: 0;
+        y: root.width + 10px;
+        width: root.width;
+        text: root.card.title;
+        font-size: Typography.body-em;
+        font-weight: Typography.bold;
+        color: Tokens.text;
+        horizontal-alignment: left;
+        overflow: elide;
+    }
+
+    Text {
+        x: 0;
+        y: root.width + 30px;
+        width: root.width;
+        text: root.card.subtitle;
+        font-size: Typography.caption;
+        color: Tokens.text-muted;
+        horizontal-alignment: left;
+        overflow: elide;
+    }
+
+    TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}

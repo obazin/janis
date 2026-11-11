@@ -17,6 +17,7 @@ pub enum Language {
 }
 
 impl Language {
+    #[cfg(test)]
     pub const ALL: [Language; 2] = [Language::English, Language::French];
 
     /// The code the preferences row stores.
@@ -79,6 +80,7 @@ impl Translations {
     }
 
     /// Every key of the reference catalog.
+    #[cfg(test)]
     pub fn keys(&self) -> impl Iterator<Item = &str> {
         self.english.keys().map(String::as_str)
     }

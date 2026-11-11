@@ -1,8 +1,5 @@
 // Prevents an additional console window on Windows in release.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
-// The state modules are complete ahead of the user interface that drives
-// them; this allowance goes away when the interface is wired in.
-#![allow(dead_code)]
 
 //! Entry point. Feature logic lives in the modules: preferences and the SQLite
 //! store in `persistence`, the track library (scanner, watched folders, cover

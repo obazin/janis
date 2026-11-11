@@ -64,6 +64,14 @@ export global Library {
     callback rescan();
     callback folder-removed(id: int);
 
+    // ── Discover ──────────────────────────────────────────────────────────
+    in property <[LibraryCard]> discover-recent;
+    in property <[LibraryCard]> discover-rediscover;
+    in property <[LibraryCard]> discover-artists;
+
+    // A tile of the recent, rediscover or artists shelf: play what it holds.
+    callback shelf-tile-clicked(shelf: string, index: int);
+
     callback tab-selected(tab: string);
     callback album-clicked(index: int);
     callback artist-clicked(index: int);

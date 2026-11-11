@@ -12,6 +12,7 @@ use crate::audio;
 use crate::library::{self, ScanReport, Track, WatchedFolder};
 use crate::library_view::{
     self, AlbumGroup, ArtistGroup, LibraryTab, Selection, SelectionKind, RECENT_TRACK_COUNT,
+    SHELF_TILE_COUNT,
 };
 use crate::persistence::DbState;
 use crate::text;
@@ -146,8 +147,42 @@ impl Application {
         view.on_folder_removed(self.handler(|application, id: i32| {
             application.remove_folder(i64::from(id));
         }));
+        view.set_discover_recent(self.discover_recent.clone().into());
+        view.set_discover_rediscover(self.discover_rediscover.clone().into());
+        view.set_discover_artists(self.discover_artists.clone().into());
+        view.on_shelf_tile_clicked({
+            let weak = std::rc::Rc::downgrade(self);
+            move |shelf, index| {
+                if let Some(application) = weak.upgrade() {
+                    application.play_shelf_tile(&shelf, row(index));
+                }
+            }
+        });
         view.on_add_music(self.action(Application::add_files));
         view.on_add_folder(self.action(Application::add_folder));
+    }
+
+    /// A click on a Discover tile plays the album or the artist it shows.
+    fn play_shelf_tile(&self, shelf: &str, index: usize) {
+        let tracks = match shelf {
+            "recent" => self
+                .albums
+                .borrow()
+                .get(index)
+                .map(|album| album.tracks.clone()),
+            "rediscover" => library_view::rediscover(&self.albums.borrow())
+                .get(index)
+                .map(|album| album.tracks.clone()),
+            "artists" => self
+                .artists
+                .borrow()
+                .get(index)
+                .map(|artist| artist.tracks.clone()),
+            _ => None,
+        };
+        if let Some(tracks) = tracks {
+            self.play_queue(tracks, 0);
+        }
     }
 
     fn toggle_selection(&self, selection: Selection) {
@@ -199,6 +234,29 @@ impl Application {
             false,
             &translations,
         ));
+
+        // The Discover shelves are built from the whole library, not from
+        // what the search kept.
+        self.discover_recent.set_vec(
+            albums
+                .iter()
+                .take(SHELF_TILE_COUNT)
+                .map(|album| album_card(album, &translations))
+                .collect::<Vec<_>>(),
+        );
+        self.discover_rediscover.set_vec(
+            library_view::rediscover(&albums)
+                .into_iter()
+                .map(|album| album_card(album, &translations))
+                .collect::<Vec<_>>(),
+        );
+        self.discover_artists.set_vec(
+            artists
+                .iter()
+                .take(SHELF_TILE_COUNT)
+                .map(|artist| artist_card(artist, &translations))
+                .collect::<Vec<_>>(),
+        );
 
         let selection_index =
             screen
@@ -336,8 +394,6 @@ impl Application {
     /// Runs a change to the library off the interface thread, then takes the
     /// library as the database now has it.
     fn scan(&self, change: impl FnOnce(&DbState) -> Result<ScanReport, String> + Send + 'static) {
-        self.scanning.set(true);
-        self.refresh_local_files();
         let database = Arc::clone(&self.database);
         self.library_worker.run(move || {
             let outcome = change(&database)
@@ -347,7 +403,6 @@ impl Application {
     }
 
     fn scan_finished(&self, outcome: Result<(ScanReport, LibrarySnapshot), String>) {
-        self.scanning.set(false);
         match outcome {
             Ok((report, snapshot)) => {
                 self.last_report.set(Some(report));
