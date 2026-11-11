@@ -27,6 +27,7 @@ pub(super) struct LibraryScreen {
     shown_tracks: Vec<Track>,
     shown_albums: Vec<AlbumGroup>,
     shown_artists: Vec<ArtistGroup>,
+    local_tracks: Vec<Track>,
 }
 
 /// A fresh read of the library, taken off the interface thread.
@@ -127,6 +128,16 @@ impl Application {
         view.on_selection_closed(self.action(|application| {
             application.library_screen.borrow_mut().selection = None;
         }));
+        view.set_local_tracks(self.library_local.clone().into());
+        view.set_folders(self.library_folders.clone().into());
+        view.on_local_track_clicked(self.handler(|application, index: i32| {
+            let tracks = application.library_screen.borrow().local_tracks.clone();
+            application.play_queue(tracks, row(index));
+        }));
+        view.on_rescan(self.action(Application::rescan));
+        view.on_folder_removed(self.handler(|application, id: i32| {
+            application.remove_folder(i64::from(id));
+        }));
         view.on_add_music(self.action(Application::add_files));
         view.on_add_folder(self.action(Application::add_folder));
     }
@@ -207,6 +218,59 @@ impl Application {
                 self.library_selection_tracks.set_vec(Vec::new());
             }
         }
+    }
+
+    /// Pushes the Local Files screen's state to the window.
+    pub(super) fn refresh_local_files(&self) {
+        let translations = self.translations.borrow();
+        let tracks = self.tracks.borrow();
+        let search = self.search.borrow();
+        let mut screen = self.library_screen.borrow_mut();
+        let view = self.window.global::<user_interface::Library>();
+
+        screen.local_tracks = library_view::search_local_files(&tracks, &search);
+        self.library_local
+            .set_vec(track_rows(&screen.local_tracks, false, &translations));
+        view.set_scanned_heading(
+            translations
+                .translate(
+                    "local.scanned",
+                    &[("count", screen.local_tracks.len().to_string())],
+                )
+                .into(),
+        );
+        view.set_scan_report(
+            self.last_report
+                .get()
+                .map(|report| {
+                    translations.translate(
+                        "local.scanReport",
+                        &[
+                            ("added", report.added.to_string()),
+                            ("updated", report.updated.to_string()),
+                            ("skipped", report.skipped.to_string()),
+                        ],
+                    )
+                })
+                .unwrap_or_default()
+                .into(),
+        );
+        self.library_folders.set_vec(
+            self.folders
+                .borrow()
+                .iter()
+                .map(|folder| user_interface::WatchedFolderRow {
+                    id: interface_id(folder.id),
+                    path: folder.path.as_str().into(),
+                    track_count: translations
+                        .translate(
+                            "library.tracks",
+                            &[("count", folder.track_count.to_string())],
+                        )
+                        .into(),
+                })
+                .collect::<Vec<_>>(),
+        );
     }
 
     // ── Changing the library ────────────────────────────────────────────────

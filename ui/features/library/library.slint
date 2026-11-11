@@ -25,6 +25,13 @@ export struct LibraryTrack {
     gradient-index: int,
 }
 
+// A watched folder, as the Local Files screen lists it.
+export struct WatchedFolderRow {
+    id: int,
+    path: string,
+    track-count: string,
+}
+
 export global Library {
     // True when the library holds no track at all.
     in property <bool> empty: true;
@@ -44,6 +51,18 @@ export global Library {
     in property <bool> selection-present;
     in property <string> selection-heading;
     in property <[LibraryTrack]> selection-tracks;
+
+    // ── Local Files ───────────────────────────────────────────────────────
+    // The files the search kept there: it reads titles and artists only.
+    in property <[LibraryTrack]> local-tracks;
+    in property <string> scanned-heading;
+    // What the last scan did; empty before the first one.
+    in property <string> scan-report;
+    in property <[WatchedFolderRow]> folders;
+
+    callback local-track-clicked(index: int);
+    callback rescan();
+    callback folder-removed(id: int);
 
     callback tab-selected(tab: string);
     callback album-clicked(index: int);

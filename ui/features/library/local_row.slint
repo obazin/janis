@@ -1,0 +1,86 @@
+import { Tokens, Fonts, Typography, Motion } from "../../tokens.slint";
+import { LibraryTrack } from "library.slint";
+
+// A row of the Local Files table: title, artist, format, duration.
+export component LocalRow inherits Rectangle {
+    in property <LibraryTrack> track;
+    // Every row but the first is ruled off from the one above.
+    in property <bool> ruled;
+    callback clicked();
+
+    background: touch.has-hover ? Tokens.local-row-hover : transparent;
+    animate background { duration: Motion.fast; }
+    accessible-role: button;
+    accessible-label: root.track.title;
+    accessible-action-default => { root.clicked(); }
+
+    if root.ruled: Rectangle {
+        y: 0;
+        height: 1px;
+        background: Tokens.divider;
+    }
+
+    HorizontalLayout {
+        padding-left: 16px;
+        padding-right: 16px;
+        spacing: 16px;
+        Text {
+            horizontal-stretch: 1;
+            text: root.track.title;
+            font-size: Typography.body-em;
+            font-weight: Typography.semibold;
+            color: Tokens.text;
+            horizontal-alignment: left;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+        Text {
+            width: 150px;
+            text: root.track.artist;
+            font-size: Typography.body-em;
+            color: Tokens.text-muted;
+            horizontal-alignment: left;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+        HorizontalLayout {
+            width: 80px;
+            alignment: start;
+            VerticalLayout {
+                alignment: center;
+                Rectangle {
+                    width: self.preferred-width;
+                    border-radius: 2px;
+                    border-width: 1px;
+                    border-color: Tokens.format-outline;
+                    HorizontalLayout {
+                        padding-left: 6px;
+                        padding-right: 6px;
+                        padding-top: 2px;
+                        padding-bottom: 2px;
+                        Text {
+                            text: root.track.format;
+                            font-family: Fonts.mono;
+                            font-size: Typography.label;
+                            color: Tokens.lime;
+                        }
+                    }
+                }
+            }
+        }
+        Text {
+            width: 70px;
+            text: root.track.duration;
+            font-family: Fonts.mono;
+            font-size: Typography.caption;
+            color: Tokens.text-muted;
+            horizontal-alignment: right;
+            vertical-alignment: center;
+        }
+    }
+
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}

@@ -1,0 +1,71 @@
+import { Tokens, Typography, Metrics } from "../../tokens.slint";
+import { Strings } from "strings.slint";
+import { LibraryTrack } from "library.slint";
+import { LocalRow } from "local_row.slint";
+
+component ColumnTitle inherits Text {
+    font-size: Typography.label;
+    font-weight: Typography.bold;
+    letter-spacing: Typography.tracking-section * Typography.label;
+    color: Tokens.text-faint;
+    vertical-alignment: center;
+    horizontal-alignment: left;
+}
+
+// The Local Files table: column titles over rows drawn only while in view.
+// `view-top` is where the visible window starts, measured from the table's top.
+export component LocalTable inherits Rectangle {
+    in property <[LibraryTrack]> tracks;
+    in property <length> view-top;
+    in property <length> view-height;
+    callback clicked(index: int);
+
+    property <length> titles-height: 36px;
+    property <length> row-height: 44px;
+    property <int> first: max(0, floor((root.view-top - root.titles-height) / root.row-height));
+    property <int> count: ceil(root.view-height / root.row-height) + 1;
+
+    height: root.titles-height + root.tracks.length * root.row-height;
+    border-radius: Metrics.radius-card;
+    border-width: 1px;
+    border-color: Tokens.border;
+    clip: true;
+
+    Rectangle {
+        y: 0;
+        height: root.titles-height;
+        background: Tokens.panel;
+        HorizontalLayout {
+            padding-left: 16px;
+            padding-right: 16px;
+            spacing: 16px;
+            ColumnTitle {
+                horizontal-stretch: 1;
+                text: Strings.local-col-title.to-uppercase();
+            }
+            ColumnTitle {
+                width: 150px;
+                text: Strings.local-col-artist.to-uppercase();
+            }
+            ColumnTitle {
+                width: 80px;
+                text: Strings.local-col-format.to-uppercase();
+            }
+            ColumnTitle {
+                width: 70px;
+                text: Strings.local-col-time.to-uppercase();
+                horizontal-alignment: right;
+            }
+        }
+    }
+
+    for offset in root.count: LocalRow {
+        property <int> index: root.first + offset;
+        y: root.titles-height + self.index * root.row-height;
+        height: root.row-height;
+        visible: self.index < root.tracks.length;
+        track: root.tracks[self.index];
+        ruled: self.index > 0;
+        clicked => { root.clicked(self.index); }
+    }
+}

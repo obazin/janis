@@ -40,6 +40,8 @@ const FRAME_INTERVAL: Duration = Duration::from_millis(16);
 const VOLUME_SETTLE: Duration = Duration::from_millis(300);
 /// How long the equalizer sliders must rest before they are saved.
 const EQUALIZER_SETTLE: Duration = Duration::from_millis(400);
+/// How long after the last file of a drop the dropped files are imported.
+const DROP_SETTLE: Duration = Duration::from_millis(80);
 /// The seed of the art shown when nothing is loaded.
 const IDLE_ART_SEED: &str = "janis";
 
@@ -127,7 +129,11 @@ pub struct Application {
     library_songs: Rc<VecModel<user_interface::LibraryTrack>>,
     library_recent: Rc<VecModel<user_interface::LibraryTrack>>,
     library_selection_tracks: Rc<VecModel<user_interface::LibraryTrack>>,
+    library_local: Rc<VecModel<user_interface::LibraryTrack>>,
+    library_folders: Rc<VecModel<user_interface::WatchedFolderRow>>,
     library_worker: Worker,
+    dropped_files: RefCell<Vec<String>>,
+    drop_timer: Timer,
     toasts: Rc<VecModel<Toast>>,
     picture_worker: Worker,
     frame_timer: Timer,
@@ -193,7 +199,11 @@ impl Application {
             library_songs: Rc::new(VecModel::default()),
             library_recent: Rc::new(VecModel::default()),
             library_selection_tracks: Rc::new(VecModel::default()),
+            library_local: Rc::new(VecModel::default()),
+            library_folders: Rc::new(VecModel::default()),
             library_worker: Worker::new("janis library")?,
+            dropped_files: RefCell::new(Vec::new()),
+            drop_timer: Timer::default(),
             toasts,
             picture_worker: Worker::new("janis pictures")?,
             frame_timer: Timer::default(),
@@ -212,6 +222,7 @@ impl Application {
         application.refresh_now_playing_lists();
         application.refresh_equalizer();
         application.refresh_library();
+        application.refresh_local_files();
         Ok(application)
     }
 
@@ -277,6 +288,14 @@ impl Application {
             *application.search.borrow_mut() = search.into();
         }));
         self.connect_library();
+        platform::on_file_dropped(self.window.window(), {
+            let weak = Rc::downgrade(self);
+            move |path| {
+                if let Some(application) = weak.upgrade() {
+                    application.file_dropped(path.to_string_lossy().into_owned());
+                }
+            }
+        });
 
         let player = self.window.global::<user_interface::Player>();
         player.on_toggled(self.action(|application| {
@@ -431,6 +450,21 @@ impl Application {
         self.refresh_equalizer();
         self.refresh_library();
         self.refresh_local_files();
+    }
+
+    /// One file of a drop on the window. The system reports a drop file by
+    /// file, so they are gathered for a moment and imported together.
+    fn file_dropped(&self, path: String) {
+        self.dropped_files.borrow_mut().push(path);
+        self.drop_timer
+            .start(TimerMode::SingleShot, DROP_SETTLE, move || {
+                APPLICATION.with(|cell| {
+                    if let Some(application) = cell.borrow().clone() {
+                        let paths = std::mem::take(&mut *application.dropped_files.borrow_mut());
+                        application.import_paths(paths);
+                    }
+                });
+            });
     }
 
     // ── Playback ────────────────────────────────────────────────────────────
@@ -733,9 +767,6 @@ impl Application {
         let covers = self.window.global::<Covers>();
         covers.set_revision(covers.get_revision().wrapping_add(1));
     }
-
-    /// Pushes the Local Files screen's state to the window.
-    fn refresh_local_files(&self) {}
 
     fn notify_cover_unavailable(&self) {
         self.notify_error("error.cover", Vec::new(), Some("cover-unavailable"));
