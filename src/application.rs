@@ -7,6 +7,7 @@
 //! runs on another thread and comes back through [`post`].
 
 mod library_screens;
+mod radio_screen;
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -132,10 +133,16 @@ pub struct Application {
     library_local: Rc<VecModel<user_interface::LibraryTrack>>,
     library_folders: Rc<VecModel<user_interface::WatchedFolderRow>>,
     library_worker: Worker,
+    radio_screen: RefCell<radio_screen::RadioScreen>,
+    radio_countries: Rc<VecModel<user_interface::RadioChip>>,
+    radio_genres: Rc<VecModel<user_interface::RadioChip>>,
+    radio_stations: Rc<VecModel<user_interface::StationRow>>,
     dropped_files: RefCell<Vec<String>>,
     drop_timer: Timer,
     toasts: Rc<VecModel<Toast>>,
     picture_worker: Worker,
+    /// Where stations connect and their streams download.
+    station_runtime: tokio::runtime::Runtime,
     frame_timer: Timer,
     last_frame: Cell<Instant>,
     volume_timer: Timer,
@@ -202,10 +209,20 @@ impl Application {
             library_local: Rc::new(VecModel::default()),
             library_folders: Rc::new(VecModel::default()),
             library_worker: Worker::new("janis library")?,
+            radio_screen: RefCell::new(radio_screen::RadioScreen::default()),
+            radio_countries: Rc::new(VecModel::default()),
+            radio_genres: Rc::new(VecModel::default()),
+            radio_stations: Rc::new(VecModel::default()),
             dropped_files: RefCell::new(Vec::new()),
             drop_timer: Timer::default(),
             toasts,
             picture_worker: Worker::new("janis pictures")?,
+            station_runtime: tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(1)
+                .thread_name("janis stations")
+                .enable_all()
+                .build()
+                .map_err(|error| format!("start the station runtime: {error}"))?,
             frame_timer: Timer::default(),
             last_frame: Cell::new(now),
             volume_timer: Timer::default(),
@@ -223,6 +240,7 @@ impl Application {
         application.refresh_equalizer();
         application.refresh_library();
         application.refresh_local_files();
+        application.refresh_radio();
         Ok(application)
     }
 
@@ -286,8 +304,12 @@ impl Application {
 
         shell.on_search_edited(self.handler(|application, search: slint::SharedString| {
             *application.search.borrow_mut() = search.into();
+            application.refresh_library();
+            application.refresh_local_files();
+            application.refresh_radio();
         }));
         self.connect_library();
+        self.connect_radio();
         platform::on_file_dropped(self.window.window(), {
             let weak = Rc::downgrade(self);
             move |path| {
@@ -345,6 +367,7 @@ impl Application {
                 user_interface::QueueView::Playlist => QueueView::Playlist,
                 user_interface::QueueView::Album => QueueView::Album,
             });
+            application.refresh_now_playing_lists();
         }));
         player.on_queue_row_clicked(self.handler(|application, index: i32| {
             application.play_queue_row(usize::try_from(index).unwrap_or_default());
@@ -380,15 +403,18 @@ impl Application {
         equalizer.on_preset_selected(self.handler(|application, name: slint::SharedString| {
             let effects = application.equalizer.borrow_mut().set_preset(&name);
             application.run(effects);
+            application.refresh_equalizer();
         }));
         equalizer.on_reset(self.action(|application| {
             let effects = application.equalizer.borrow_mut().reset();
             application.run(effects);
+            application.refresh_equalizer();
         }));
         equalizer.on_linear_phase_toggled(self.action(|application| {
             let enabled = !application.equalizer.borrow().linear_phase();
             let effects = application.equalizer.borrow_mut().set_linear_phase(enabled);
             application.run(effects);
+            application.refresh_equalizer();
         }));
 
         let covers = self.window.global::<Covers>();
@@ -424,7 +450,7 @@ impl Application {
         move || {
             if let Some(application) = weak.upgrade() {
                 run(&application);
-                application.refresh_after_action();
+                application.refresh_player();
             }
         }
     }
@@ -439,17 +465,21 @@ impl Application {
         move |argument| {
             if let Some(application) = weak.upgrade() {
                 run(&application, argument);
-                application.refresh_after_action();
+                application.refresh_player();
             }
         }
     }
 
-    fn refresh_after_action(&self) {
+    /// Pushes everything to the window: for the rare changes that touch it
+    /// all, like a new library or another language. Actions otherwise refresh
+    /// only what they changed — a volume drag must not rebuild the lists.
+    fn refresh_everything(&self) {
         self.refresh_player();
         self.refresh_now_playing_lists();
         self.refresh_equalizer();
         self.refresh_library();
         self.refresh_local_files();
+        self.refresh_radio();
     }
 
     /// One file of a drop on the window. The system reports a drop file by
@@ -575,37 +605,29 @@ impl Application {
         }
     }
 
-    /// Connects to a station on a thread of its own — the connect waits on
-    /// the network — then tells the player how it went.
+    /// Connects to a station off the interface thread — the connect waits on
+    /// the network — then tells the player how it went. The stream keeps
+    /// downloading on the same runtime for as long as the station plays.
     fn connect_station(&self, station: Station) {
         let engine = Arc::clone(&self.engine);
-        let spawned = std::thread::Builder::new()
-            .name("janis station connect".to_owned())
-            .spawn(move || {
-                let outcome = tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build()
-                    .map_err(|error| format!("start the connect runtime: {error}"))
-                    .and_then(|runtime| {
-                        runtime.block_on(engine.play_stream(
-                            station.id.clone(),
-                            station.url.clone(),
-                            station.now_playing.clone(),
-                        ))
-                    });
-                post(move |application| {
-                    let effects = application
-                        .player
-                        .borrow_mut()
-                        .station_connection_finished(&station, outcome);
-                    application.run(effects);
-                    application.refresh_player();
-                    application.refresh_now_playing_lists();
-                });
+        self.station_runtime.spawn(async move {
+            let outcome = engine
+                .play_stream(
+                    station.id.clone(),
+                    station.url.clone(),
+                    station.now_playing.clone(),
+                )
+                .await;
+            post(move |application| {
+                let effects = application
+                    .player
+                    .borrow_mut()
+                    .station_connection_finished(&station, outcome);
+                application.run(effects);
+                application.refresh_player();
+                application.refresh_now_playing_lists();
             });
-        if let Err(error) = spawned {
-            log::error!("start the station connect thread: {error}");
-        }
+        });
     }
 
     /// A click on a row of the Now Playing queue card.
@@ -883,6 +905,14 @@ impl Application {
             .or(stream.title.as_deref())
             .or(station.map(|station| station.name.as_str()))
             .unwrap_or_default();
+        let radio = self.window.global::<user_interface::Radio>();
+        radio.set_active_station_id(
+            station
+                .map(|station| station.id.as_str())
+                .unwrap_or_default()
+                .into(),
+        );
+        radio.set_connecting(player.connecting());
         view.set_local(current.is_some());
         view.set_radio(station.is_some());
         view.set_hero_title(hero_title.into());
