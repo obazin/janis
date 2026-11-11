@@ -7,6 +7,7 @@
 //! where the tests are. The password is sent once, to sign in; what is kept is
 //! the access token the server gives back.
 
+use std::sync::OnceLock;
 use std::time::Duration;
 
 use serde::Deserialize;
@@ -304,11 +305,20 @@ pub fn item_song(item: &Item, server_identifier: &str) -> ServerSong {
 
 // ── Calls ───────────────────────────────────────────────────────────────────
 
-fn client() -> Result<reqwest::blocking::Client, Failure> {
-    reqwest::blocking::Client::builder()
+/// The one HTTP client every call to the server goes through. It keeps its
+/// connections open between calls, so a grid filling with covers — one
+/// picture request after another — does not connect afresh for each.
+fn client() -> Result<&'static reqwest::blocking::Client, Failure> {
+    static CLIENT: OnceLock<reqwest::blocking::Client> = OnceLock::new();
+    if let Some(client) = CLIENT.get() {
+        return Ok(client);
+    }
+    // A failed build is not kept: the next call tries again.
+    let client = reqwest::blocking::Client::builder()
         .timeout(REQUEST_TIMEOUT)
         .build()
-        .map_err(|error| Failure::Other(format!("build the http client: {error}")))
+        .map_err(|error| Failure::Other(format!("build the http client: {error}")))?;
+    Ok(CLIENT.get_or_init(|| client))
 }
 
 /// Sorts a transport error into what the listener is told.

@@ -87,7 +87,9 @@ pub struct Application {
     albums: RefCell<Vec<AlbumGroup>>,
     artists: RefCell<Vec<ArtistGroup>>,
     current_art: RefCell<CurrentArt>,
-    thumbnails: RefCell<covers::BoundedCache<Thumbnail>>,
+    thumbnails: RefCell<covers::BoundedCache<covers::CoverKey, Thumbnail>>,
+    /// Which cover each library track shows, renewed with the library.
+    cover_keys: RefCell<covers::CoverKeys>,
     /// Bumped when the library is replaced, so a thumbnail read from the
     /// library as it was is recognised and dropped.
     thumbnail_epoch: Cell<u64>,
@@ -184,6 +186,7 @@ impl Application {
             visualizer: RefCell::new(Visualizer::default()),
             albums: RefCell::new(library_view::albums(&tracks)),
             artists: RefCell::new(library_view::artists(&tracks)),
+            cover_keys: RefCell::new(covers::CoverKeys::new(&tracks)),
             tracks: RefCell::new(tracks),
             current_art: RefCell::new(CurrentArt::default()),
             thumbnails: RefCell::new(covers::BoundedCache::new(covers::THUMBNAIL_LIMIT)),

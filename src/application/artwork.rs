@@ -1,7 +1,8 @@
 //! Cover art on its way to the window: the art of whatever plays, and the
 //! thumbnails of lists and grids. Reading — from a file, or from a media
 //! server — and decoding run on the picture worker; a result that arrives
-//! after the listener moved on is dropped.
+//! after the listener moved on is dropped. Thumbnails are cached by cover
+//! key, so the songs of a server album load their shared picture once.
 
 use std::rc::Rc;
 use std::sync::Arc;
@@ -9,7 +10,7 @@ use std::sync::Arc;
 use slint::{ComponentHandle, Image};
 
 use super::{post, Application};
-use crate::covers::{self, Pixels};
+use crate::covers::{self, CoverKey, Pixels};
 use crate::jellyfin::{self, Session};
 use crate::library::{self, CoverSource};
 use crate::persistence::DbState;
@@ -54,8 +55,9 @@ impl Application {
         let weak = Rc::downgrade(self);
         covers.on_unavailable(move |track_id, _revision| {
             weak.upgrade().is_some_and(|application| {
+                let key = application.cover_keys.borrow().key(i64::from(track_id));
                 matches!(
-                    application.thumbnails.borrow().get(i64::from(track_id)),
+                    application.thumbnails.borrow().get(&key),
                     Some(Thumbnail::Failed)
                 )
             })
@@ -147,7 +149,8 @@ impl Application {
         if track_id <= 0 {
             return Image::default();
         }
-        if let Some(thumbnail) = self.thumbnails.borrow().get(track_id) {
+        let key = self.cover_keys.borrow().key(track_id);
+        if let Some(thumbnail) = self.thumbnails.borrow().get(&key) {
             return match thumbnail {
                 Thumbnail::Ready(image) => image.clone(),
                 Thumbnail::Loading | Thumbnail::Absent | Thumbnail::Failed => Image::default(),
@@ -155,18 +158,13 @@ impl Application {
         }
         self.thumbnails
             .borrow_mut()
-            .insert(track_id, Thumbnail::Loading);
+            .insert(key.clone(), Thumbnail::Loading);
         let database = Arc::clone(&self.database);
         let session = self.media_session();
         let epoch = self.thumbnail_epoch.get();
         self.picture_worker.run(move || {
-            let loaded = library_cover(
-                &database,
-                session.as_ref(),
-                track_id,
-                covers::THUMBNAIL_SIDE,
-            );
-            post(move |application| application.thumbnail_loaded(epoch, track_id, loaded));
+            let loaded = keyed_cover(&database, session.as_ref(), &key, covers::THUMBNAIL_SIDE);
+            post(move |application| application.thumbnail_loaded(epoch, key, loaded));
         });
         Image::default()
     }
@@ -174,7 +172,7 @@ impl Application {
     pub(super) fn thumbnail_loaded(
         &self,
         epoch: u64,
-        track_id: i64,
+        key: CoverKey,
         loaded: Result<Option<Pixels>, String>,
     ) {
         if self.thumbnail_epoch.get() != epoch {
@@ -184,12 +182,12 @@ impl Application {
             Ok(Some(pixels)) => Thumbnail::Ready(Image::from_rgba8(pixels)),
             Ok(None) => Thumbnail::Absent,
             Err(error) => {
-                log::error!("cover of track {track_id}: {error}");
+                log::error!("cover {key:?}: {error}");
                 self.notify_cover_unavailable();
                 Thumbnail::Failed
             }
         };
-        self.thumbnails.borrow_mut().insert(track_id, thumbnail);
+        self.thumbnails.borrow_mut().insert(key, thumbnail);
         self.bump_cover_revision();
     }
 
@@ -201,6 +199,20 @@ impl Application {
 
     pub(super) fn notify_cover_unavailable(&self) {
         self.notify_error("error.cover", Vec::new(), Some("cover-unavailable"));
+    }
+}
+
+/// The cover a key names: a track's, found as `library_cover` finds it, or a
+/// server picture, asked for directly.
+fn keyed_cover(
+    database: &DbState,
+    session: Option<&Session>,
+    key: &CoverKey,
+    longest_side: u32,
+) -> Result<Option<Pixels>, String> {
+    match key {
+        CoverKey::Track(track_id) => library_cover(database, session, *track_id, longest_side),
+        CoverKey::ServerPicture(item) => server_picture(session, item, longest_side),
     }
 }
 
@@ -218,13 +230,21 @@ fn library_cover(
         CoverSource::Server { artwork_item: None } => Ok(None),
         CoverSource::Server {
             artwork_item: Some(item),
-        } => {
-            let Some(session) = session else {
-                return Ok(None);
-            };
-            let bytes = jellyfin::artwork(session, &item, longest_side)
-                .map_err(|failure| format!("server picture {item}: {failure:?}"))?;
-            covers::picture_cover(bytes, longest_side).map(Some)
-        }
+        } => server_picture(session, &item, longest_side),
     }
+}
+
+/// A server item's picture, scaled by the server to `longest_side`. Nothing
+/// without a session: the songs leave the library when it ends.
+fn server_picture(
+    session: Option<&Session>,
+    item: &str,
+    longest_side: u32,
+) -> Result<Option<Pixels>, String> {
+    let Some(session) = session else {
+        return Ok(None);
+    };
+    let bytes = jellyfin::artwork(session, item, longest_side)
+        .map_err(|failure| format!("server picture {item}: {failure:?}"))?;
+    covers::picture_cover(bytes, longest_side).map(Some)
 }

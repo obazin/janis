@@ -7,11 +7,12 @@
 //! cross threads; the interface thread turns it into an image.
 
 use std::collections::{HashMap, VecDeque};
+use std::hash::Hash;
 
 use base64::Engine as _;
 use slint::{Rgba8Pixel, SharedPixelBuffer};
 
-use crate::library;
+use crate::library::{self, Track};
 use crate::persistence::DbState;
 
 pub type Pixels = SharedPixelBuffer<Rgba8Pixel>;
@@ -84,19 +85,59 @@ pub fn picture_cover(bytes: Vec<u8>, longest_side: u32) -> Result<Pixels, String
     ))
 }
 
+/// What a cover is cached under. Tracks that show the same server picture —
+/// every song of an album whose art is the album's — share one key, so the
+/// picture is asked for, decoded and kept once.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum CoverKey {
+    /// A track's own cover, read from its file or its album's files.
+    Track(i64),
+    /// A media server's picture of this item.
+    ServerPicture(String),
+}
+
+/// The cover key of every track in the library, so a tile that names a
+/// track finds the cover another track of its album already loaded.
+#[derive(Default)]
+pub struct CoverKeys {
+    server_pictures: HashMap<i64, String>,
+}
+
+impl CoverKeys {
+    pub fn new(tracks: &[Track]) -> Self {
+        Self {
+            server_pictures: tracks
+                .iter()
+                .filter(|track| track.server_id.is_some())
+                .filter_map(|track| Some((track.id, track.artwork_item.clone()?)))
+                .collect(),
+        }
+    }
+
+    /// A track this does not know — or a server song without a picture —
+    /// keys by its own id; its lookup then finds what there is.
+    pub fn key(&self, track_id: i64) -> CoverKey {
+        self.server_pictures
+            .get(&track_id)
+            .map_or(CoverKey::Track(track_id), |item| {
+                CoverKey::ServerPicture(item.clone())
+            })
+    }
+}
+
 /// A cache that forgets its oldest entries past a limit.
 ///
 /// Covers are pinned in memory while cached, so a long session scrolling a
 /// big library must not keep every cover it ever showed; what falls out is
 /// simply loaded again if it scrolls back in.
-pub struct BoundedCache<Value> {
-    entries: HashMap<i64, Value>,
+pub struct BoundedCache<Key, Value> {
+    entries: HashMap<Key, Value>,
     /// Keys from oldest to newest insertion.
-    order: VecDeque<i64>,
+    order: VecDeque<Key>,
     limit: usize,
 }
 
-impl<Value> BoundedCache<Value> {
+impl<Key: Clone + Eq + Hash, Value> BoundedCache<Key, Value> {
     pub fn new(limit: usize) -> Self {
         Self {
             entries: HashMap::new(),
@@ -105,13 +146,13 @@ impl<Value> BoundedCache<Value> {
         }
     }
 
-    pub fn get(&self, key: i64) -> Option<&Value> {
-        self.entries.get(&key)
+    pub fn get(&self, key: &Key) -> Option<&Value> {
+        self.entries.get(key)
     }
 
     /// Stores `value`, replacing what the key held without renewing its age.
-    pub fn insert(&mut self, key: i64, value: Value) {
-        if self.entries.insert(key, value).is_none() {
+    pub fn insert(&mut self, key: Key, value: Value) {
+        if self.entries.insert(key.clone(), value).is_none() {
             self.order.push_back(key);
         }
         while self.order.len() > self.limit {
@@ -158,12 +199,40 @@ mod tests {
         cache.insert(1, "uno");
         cache.insert(3, "three");
 
-        assert_eq!(cache.get(1), None);
-        assert_eq!(cache.get(2), Some(&"two"));
-        assert_eq!(cache.get(3), Some(&"three"));
+        assert_eq!(cache.get(&1), None);
+        assert_eq!(cache.get(&2), Some(&"two"));
+        assert_eq!(cache.get(&3), Some(&"three"));
 
         cache.clear();
-        assert_eq!(cache.get(3), None);
+        assert_eq!(cache.get(&3), None);
+    }
+
+    #[test]
+    fn the_songs_of_an_album_on_a_server_share_its_picture() {
+        let mut first = crate::library::test_support::track(1, "One");
+        first.server_id = Some(7);
+        first.artwork_item = Some("album".to_owned());
+        let mut second = crate::library::test_support::track(2, "Two");
+        second.server_id = Some(7);
+        second.artwork_item = Some("album".to_owned());
+
+        let keys = CoverKeys::new(&[first, second]);
+
+        assert_eq!(keys.key(1), CoverKey::ServerPicture("album".to_owned()));
+        assert_eq!(keys.key(1), keys.key(2));
+    }
+
+    #[test]
+    fn a_file_and_a_server_song_without_a_picture_key_by_their_own_id() {
+        let file = crate::library::test_support::track(1, "On disk");
+        let mut bare = crate::library::test_support::track(2, "No picture");
+        bare.server_id = Some(7);
+
+        let keys = CoverKeys::new(&[file, bare]);
+
+        assert_eq!(keys.key(1), CoverKey::Track(1));
+        assert_eq!(keys.key(2), CoverKey::Track(2));
+        assert_eq!(keys.key(99), CoverKey::Track(99), "an unknown track too");
     }
 
     #[test]

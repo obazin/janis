@@ -46,7 +46,7 @@ The canonical description of user-facing behavior. Every new feature lands here 
 - Albums group by album + **album artist**, so a compilation stays one album instead of splintering per featured artist, and their tracks are ordered by disc, then track, then title. Tracks with no position sort last rather than to the front.
 - **Cover art shows everywhere a track or album appears**: Now Playing and the mini player, the queue card and artist spotlight beneath it, the Library album/artist grids and track rows, and the Discover shelves. Only radio cards stay a gradient by design.
 - Art is read from every tag block in the file, not just the primary one, preferring the front cover and accepting a back cover over nothing. A track with no picture of its own falls back to the rest of its album, so a rip where only the first file is tagged still shows the sleeve throughout.
-- Tiles fetch art only once they scroll into view, decoded off the interface thread and cached per track (300 covers at most), so a large library never loads it all at once. Until it arrives, and for albums that genuinely have none, the generated prism gradient stands in.
+- Tiles fetch art only once they scroll into view, decoded off the interface thread and cached per cover (300 covers at most; the songs of a server album that show its picture share one), so a large library never loads it all at once. Until it arrives, and for albums that genuinely have none, the generated prism gradient stands in.
 - Now Playing shows the track's position on the record ("Track 4 of 9"), disc when there is more than one, year and genre. Titlebar search matches album artist and genre alongside title, artist, album and composer.
 
 ## Playback engine
