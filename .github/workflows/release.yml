@@ -32,7 +32,9 @@ jobs:
               run: |
                   tag="${GITHUB_REF_NAME#v}"
                   cargo="$(grep -m1 '^version = ' Cargo.toml | sed 's/version = "\(.*\)"/\1/')"
-                  nix="$(grep -m1 'version = "' flake.nix | sed 's/.*version = "\(.*\)";/\1/')"
+                  # The flake declares other packages too: read the version that
+                  # follows janis's own name.
+                  nix="$(awk '/pname = "janis";/ { found = 1 } found && /version = "/ { gsub(/.*version = "|";.*/, ""); print; exit }' flake.nix)"
                   echo "tag=$tag Cargo.toml=$cargo flake.nix=$nix"
                   for declared in "$cargo" "$nix"; do
                     if [ "$declared" != "$tag" ]; then
