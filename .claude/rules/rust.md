@@ -19,7 +19,7 @@ paths:
 
 - The controller lives on the interface thread and is reached from other threads only through `application::post`. Nothing that belongs to the window crosses a thread.
 - File reads, picture decoding and scans run on a `background::Worker` (`picture_worker`, `library_worker`); the station connect runs on `station_runtime`, which stays alive because the stream goes on downloading on it. A job ends by posting its result.
-- A result that may arrive after the state moved on is recognised and dropped (the cover `epoch`).
+- A result that may arrive after the state moved on is recognised and dropped: it carries the epoch it was asked under (the current cover, a station's art, thumbnails, a station connection).
 - Short SQLite writes of one preference are the one thing allowed on the interface thread.
 
 ## Window boundary

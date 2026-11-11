@@ -48,11 +48,35 @@ A click updates the mirror at once and the engine's next state event confirms or
 Playback errors, a station that will not connect, unreadable cover art and a failed library change raise a notification, deduplicated by key where a burst is likely. Failing to save a preference does too, where the first version only logged it.
 
 **D13 · One running instance, found through a loopback port** — *current*
-A second launch reads a port number the running instance left in a file beside the database, asks it to come forward, and exits before opening the database: two processes would race the SQLite write lock. A stale file fails to connect and does not block the launch. Standard library only, the same on every platform.
+A second launch reads a port number the running instance left in a file beside the database, asks it to come forward, and exits before opening the database: two processes would race the SQLite write lock. A stale file fails to connect and does not block the launch. Standard library only, the same on every platform. The running instance answers the request, and the launch only steps aside on that answer: after a crash the file can name a port another program has since taken. An instance removes the file on exit only while it still holds its own port.
 Superseded: Tauri's single-instance plugin (D13a, first version).
+Superseded: a launch that stepped aside as soon as it could connect and write to the recorded port (D13b).
 
 **D14 · The data directory keeps its place** — *current*
 `janis.db` stays in the platform's per-user data directory under `com.olivierbazin.janis`, the path Tauri resolved, so libraries made by the first version open unchanged.
+
+**D31 · A late result carries the epoch it was asked under** — *current*
+A station connection (`Player`'s connection epoch, carried by `Effect::ConnectStation`), a station's announced art and a list thumbnail are each tagged when requested and dropped on arrival if the listener has since chosen something else or the library was replaced — the rule the current track's cover already followed. Without it, the outcome of a station left for another cleared the one being connected, and a slow decode put the previous station's art back.
+
+**D32 · The controller is one file per concern** — *current*
+`application.rs` keeps boot, `post`, carrying out effects and shutdown; `application/` holds one file per group of screens (`now_playing_screen`, `library_screens`, `radio_screen`, `settings_screen`, `equalizer_sheet`) and per cross-screen duty (`artwork`, `notices`). What the Now Playing spotlight shows and plays is decided in `library_view`, and the Discover shelves are kept tile by tile like every other list, so a click is an index.
+Superseded: one 1,270-line `application.rs` holding every refresh and every wire (D32a).
+
+**D33 · Sliders that are saved once settled are also saved on quit** — *current*
+The volume and the equalizer gains wait for the drag to rest before reaching the database; what is still waiting when the application quits is written by `Application::shut_down`.
+
+**D34 · An equalizer band updates its own row** — *current*
+The gains model is updated row by row. Replacing it rebuilds every slider — Slint clears a repeater's instances on a model reset — which ends the drag of the one under the pointer.
+
+**D35 · Up Next does not claim an order under shuffle** — *current*
+The engine holds the play queue and draws the shuffled order itself, without reporting it. While shuffle is on, the Up Next card still lists what is left to hear, but unnumbered and under a heading that says the queue is shuffled; a click on a row still plays that track. The change stays inside Janis: having the engine report its order, or moving the queue into Janis, were both set aside.
+
+**D36 · Search rebuilds every list, measured** — *current*
+A keystroke in the search field rebuilds the Library, Local Files and Radio lists whichever screen is open. On a library of 20,000 tracks that takes about 60 ms in a debug build (the `search refresh` line of `JANIS_LOG=debug`), so tracks are not shared between the lists and the refresh is not narrowed to the open screen. To be looked at again if that figure grows.
+
+**D37 · System dialogs are awaited, a fatal start is shown** — *current*
+The file and folder pickers are `rfd`'s asynchronous dialogs, awaited on the interface thread's loop (`slint::spawn_local`), so the window keeps drawing behind them. An error that stops the application from starting is shown in a system message box as well as on standard error, which a launch from the desktop has nowhere to show.
+Superseded: blocking pickers called from the click handler; a start error on standard error only (D37a).
 
 ## Interface
 
@@ -80,6 +104,12 @@ The accordion of a selected album or artist sits under the whole row holding its
 
 **D22 · Interface changes are checked on snapshots** — *current*
 Debug builds can save what the window shows and be put in a state by environment variables (`JANIS_SNAPSHOT`, `JANIS_SCREEN`, `JANIS_AUTOPLAY`, …). It stands in for a person at the screen for everything but pointer interaction, and replaced the Svelte checker as the routine verification.
+
+**D38 · What is not translated** — *current*
+A language is named in its own language ("English", "Français") and the wordmark "JANIS" is a proper noun: both are written in the components that show them. Units and format names ("kHz", "kbps", "FLAC", "Hi-Res") are the same in every language Janis ships in and are formatted in Rust. Everything else comes from the catalogs.
+
+**D39 · A round shape takes its radius from its size** — *current*
+A circle or a pill is `self.width / 2` or `self.height / 2`, not a number that has to be kept equal to half the box. The other radii are `Metrics` tokens (`radius-tag`, `radius-segment`, `radius-tile`, `radius-inset` beside the first five), and a tint of a token is a function in `tokens.slint` (`accent-tint`, `play-pulse-at`).
 
 ## Distribution
 

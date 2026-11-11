@@ -44,10 +44,10 @@ Dependencies run one way. The design system (atoms, molecules, organisms) import
 
 ## Styling
 
-- Only tokens: `Tokens.*`, `Fonts.*`, `Typography.*`, `Metrics.*`, `Motion.*`. No colour, typeface, text size, weight, radius, shadow or duration literal in a component. Padding, spacing and the size of a fixed box may be literal lengths.
-- One dark "prism" theme. A new colour is a new named token; a translucent tint of an accent is its own token (`row-hover`, `accent-ring`), not `.with-alpha()` scattered through components.
+- Only tokens: `Tokens.*`, `Fonts.*`, `Typography.*`, `Metrics.*`, `Motion.*`. No colour, typeface, text size, weight, radius, shadow or duration literal in a component. Padding, spacing and the size of a fixed box may be literal lengths. A circle or a pill takes its radius from its own size (`self.height / 2`), never from a number.
+- One dark "prism" theme. A new colour is a new named token; a translucent tint of an accent is its own token (`row-hover`, `accent-ring`) or a function in `tokens.slint` (`accent-tint`, `play-pulse-at`), not `.with-alpha()` scattered through components.
 - Icons are path data on a 24 × 24 grid in `icons.slint`, drawn with `Glyph` (stroked or filled); no path data in a component.
-- Text comes from the `Strings` global (generated from `translations/en.json`) or from a feature global. A key missing from `en.json` does not compile.
+- Text comes from the `Strings` global (generated from `translations/en.json`) or from a feature global. A key missing from `en.json` does not compile. The only text written in a component is what no language translates: the names of the languages, each in its own, and the "JANIS" wordmark.
 
 ## Lists
 
