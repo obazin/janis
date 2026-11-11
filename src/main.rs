@@ -93,10 +93,13 @@ mod development {
     /// With `JANIS_AUTOPLAY=<search>` set, starts playing the tracks the
     /// library search finds for it at launch — silently — so playback can be
     /// exercised without a person clicking or listening. An empty value plays
-    /// from the top of the library.
+    /// from the top of the library. With `JANIS_AUDIBLE` also set the output
+    /// is left at the saved volume, for when the live trace itself is under test.
     pub fn play_when_asked(application: &Application) {
         if let Ok(search) = std::env::var("JANIS_AUTOPLAY") {
-            application.silence();
+            if std::env::var_os("JANIS_AUDIBLE").is_none() {
+                application.silence();
+            }
             let found = crate::library_view::search_library(&application.tracks(), &search);
             application.play_queue(found.into_iter().take(5).collect(), 0);
         }

@@ -79,6 +79,11 @@ export global Player {
     in property <[SpotlightTrack]> spotlight-tracks;
     in property <[SpotlightAlbum]> spotlight-albums;
 
+    // The clock the screen's animations run on. It advances with the
+    // waveform, at the rate the application redraws, and stands still while
+    // nothing plays.
+    in property <duration> animation-time;
+
     // ── Waveform ──────────────────────────────────────────────────────────
     // Each waveform view reports its size, and gets the trace back as path
     // commands in its own coordinates.

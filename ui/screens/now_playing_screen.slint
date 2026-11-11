@@ -149,7 +149,7 @@ export component NowPlayingScreen inherits Rectangle {
                     width: art.width * 1.45;
                     height: self.width;
                     source: Player.halo;
-                    transform-rotation: Math.mod(animation-tick(), Motion.halo-turn) / Motion.halo-turn * 360deg;
+                    transform-rotation: Math.mod(Player.animation-time, Motion.halo-turn) / Motion.halo-turn * 360deg;
                 }
 
                 ArtTile {

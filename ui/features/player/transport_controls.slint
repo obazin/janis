@@ -1,4 +1,4 @@
-import { Tokens } from "../../tokens.slint";
+import { Tokens, Motion } from "../../tokens.slint";
 import { Icons } from "../../icons.slint";
 import { Strings } from "strings.slint";
 import { Glyph, GlyphMode } from "../../atoms/glyph.slint";
@@ -40,6 +40,8 @@ export component TransportControls inherits HorizontalLayout {
         PlayCircle {
             identifier: IconButtonIdentifier.transport-play-pause;
             playing: Player.playing;
+            // 0 → 1 → 0 over one beat.
+            swell: (1 - cos(Math.mod(Player.animation-time, Motion.pulse) / Motion.pulse * 360deg)) / 2;
             label: Player.playing ? Strings.player-pause : Strings.player-play;
             clicked => { Player.toggled(); }
         }
