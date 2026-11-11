@@ -23,7 +23,7 @@ A native application: Rust throughout, with a [Slint](https://slint.dev) interfa
 ## Quick reference
 
 ```sh
-direnv allow                 # or: nix develop — the Rust toolchain, just, cmake
+direnv allow                 # or: nix develop — the Rust toolchain, just, cmake, slint-lsp
 cargo run                    # the app (`just run`, or `run` in the dev shell)
 just check                   # fmt check, clippy -D warnings, cargo test
 just release-macos           # dist/Janis.app + .dmg (other systems: release-linux, release-windows)
