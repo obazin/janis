@@ -1,13 +1,12 @@
 # Builds the distributable bundles for every desktop platform and attaches
 # them to a draft GitHub release. No signing certificate is involved on any
-# platform: macOS bundles are ad-hoc signed (`bundle.macOS.signingIdentity`
-# is "-" in tauri.conf.json), Windows and Linux bundles are unsigned. The
+# platform: the macOS bundle is ad-hoc signed (`signing-identity = "-"` in
+# Cargo.toml's packager section), Windows and Linux bundles are unsigned. The
 # per-platform first-launch steps this implies are documented in README.md.
 #
 # Trigger: push a tag `vX.Y.Z` whose version matches the one declared in
-# tauri.conf.json, Cargo.toml, package.json and flake.nix. A manual run
-# (workflow_dispatch) builds the same bundles and keeps them as workflow
-# artifacts without touching releases.
+# Cargo.toml and flake.nix. A manual run (workflow_dispatch) builds the same
+# bundles and keeps them as workflow artifacts without touching releases.
 name: release
 
 on:
@@ -20,10 +19,11 @@ permissions:
     contents: write
 
 jobs:
-    # The tag is the release's version; refuse to build if the four places the
+    # The tag is the release's version; refuse to build if the places the
     # version is declared disagree with it, so a release can never carry a
-    # different version than its bundles.
-    verify-version:
+    # different version than its bundles. Then open the draft the builds
+    # attach to.
+    prepare:
         if: github.event_name == 'push'
         runs-on: ubuntu-latest
         steps:
@@ -31,103 +31,105 @@ jobs:
             - name: Compare the tag with every declared version
               run: |
                   tag="${GITHUB_REF_NAME#v}"
-                  conf="$(jq -r .version src-tauri/tauri.conf.json)"
-                  cargo="$(grep -m1 '^version = ' src-tauri/Cargo.toml | sed 's/version = "\(.*\)"/\1/')"
-                  node="$(jq -r .version package.json)"
+                  cargo="$(grep -m1 '^version = ' Cargo.toml | sed 's/version = "\(.*\)"/\1/')"
                   nix="$(grep -m1 'version = "' flake.nix | sed 's/.*version = "\(.*\)";/\1/')"
-                  echo "tag=$tag tauri.conf.json=$conf Cargo.toml=$cargo package.json=$node flake.nix=$nix"
-                  for declared in "$conf" "$cargo" "$node" "$nix"; do
+                  echo "tag=$tag Cargo.toml=$cargo flake.nix=$nix"
+                  for declared in "$cargo" "$nix"; do
                     if [ "$declared" != "$tag" ]; then
                       echo "::error::version mismatch: tag v$tag vs declared $declared"
                       exit 1
                     fi
                   done
+            - name: Open the draft release
+              env:
+                  GH_TOKEN: ${{ github.token }}
+              run: |
+                  version="${GITHUB_REF_NAME#v}"
+                  cat > notes.md <<EOF
+                  Unsigned builds — see the [install notes](https://github.com/obazin/janis#install) for the first-launch step each platform asks for.
+
+                  - **macOS**: \`curl -fsSL https://raw.githubusercontent.com/obazin/janis/main/scripts/macos/install.sh | sh\` (no Gatekeeper prompt), or \`Janis_${version}_aarch64.dmg\` (Apple Silicon) / \`Janis_${version}_x64.dmg\` (Intel) by hand
+                  - **Windows**: \`Janis_${version}_x64-setup.exe\` (or the \`.msi\`)
+                  - **Linux**: \`.AppImage\`, \`.deb\` or \`.rpm\`, x86_64 and arm64
+                  - **Nix** (Linux and macOS): \`nix profile install github:obazin/janis\`, or \`nix run github:obazin/janis\` to try it
+                  EOF
+                  gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 ||
+                    gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
+                      --draft --title "Janis $version" --notes-file notes.md --generate-notes
 
     build:
-        needs: verify-version
-        # workflow_dispatch skips verify-version; run the builds anyway.
-        if: always() && (needs.verify-version.result == 'success' || needs.verify-version.result == 'skipped')
+        needs: prepare
+        # workflow_dispatch skips prepare; run the builds anyway.
+        if: always() && (needs.prepare.result == 'success' || needs.prepare.result == 'skipped')
         strategy:
             fail-fast: false
             matrix:
                 include:
                     - platform: macos-latest # Apple Silicon
-                      target: aarch64-apple-darwin
                     - platform: macos-15-intel # Intel Macs
-                      target: x86_64-apple-darwin
-                    - platform: ubuntu-22.04 # oldest glibc/webkit the bundles will need
-                      target: x86_64-unknown-linux-gnu
+                    - platform: ubuntu-22.04 # oldest glibc the bundles will need
                     - platform: ubuntu-22.04-arm
-                      target: aarch64-unknown-linux-gnu
                     - platform: windows-latest
-                      target: x86_64-pc-windows-msvc
         runs-on: ${{ matrix.platform }}
         steps:
             - uses: actions/checkout@v7
 
-            # webkit/gtk for the window, alsa for cpal's output backend, the rest
-            # for the AppImage/deb/rpm bundlers. cmake (libopus) ships with the image.
+            # fontconfig, xkbcommon, wayland, X11 and GL for the window; alsa for
+            # the audio output; the rest for the AppImage and deb bundlers. cmake
+            # (libopus) ships with the image.
             - name: Install Linux build dependencies
               if: runner.os == 'Linux'
               run: |
                   sudo apt-get update
-                  sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf xdg-utils libasound2-dev
-
-            - uses: pnpm/action-setup@v6
-              with:
-                  version: 10
-
-            - uses: actions/setup-node@v7
-              with:
-                  node-version: 22
-                  cache: pnpm
+                  sudo apt-get install -y libasound2-dev libfontconfig1-dev libxkbcommon-dev \
+                    libxkbcommon-x11-dev libwayland-dev libx11-dev libxcursor-dev libxi-dev \
+                    libxrandr-dev libxcb1-dev libgl1-mesa-dev libegl1-mesa-dev patchelf xdg-utils
 
             - uses: dtolnay/rust-toolchain@stable
-              with:
-                  targets: ${{ matrix.target }}
 
             - uses: swatinem/rust-cache@v2
-              with:
-                  workspaces: './src-tauri -> target'
 
-            - name: Install frontend dependencies
-              run: pnpm install --frozen-lockfile
+            - name: Install the packagers
+              shell: bash
+              run: |
+                  cargo install cargo-packager --locked
+                  if [ "$RUNNER_OS" = "Linux" ]; then
+                    cargo install cargo-generate-rpm --locked
+                  fi
 
-            - uses: tauri-apps/tauri-action@v1
-              id: tauri
-              env:
-                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-              with:
-                  args: --target ${{ matrix.target }}
-                  # No updater plugin: nothing consumes latest.json or the .sig files.
-                  uploadUpdaterJson: false
-                  uploadUpdaterSignatures: false
-                  # Tag pushes attach the bundles to a draft release; manual runs keep
-                  # them as workflow artifacts only.
-                  tagName: ${{ github.event_name == 'push' && github.ref_name || '' }}
-                  releaseName: ${{ github.event_name == 'push' && 'Janis __VERSION__' || '' }}
-                  releaseDraft: true
-                  generateReleaseNotes: ${{ github.event_name == 'push' }}
-                  releaseBody: |
-                      Unsigned builds — see the [install notes](https://github.com/obazin/janis#install) for the first-launch step each platform asks for.
+            # Each runner builds for its own architecture, and the packager
+            # makes every format its platform has.
+            - name: Build the bundles
+              run: cargo packager --release
 
-                      - **macOS**: `curl -fsSL https://raw.githubusercontent.com/obazin/janis/main/scripts/macos/install.sh | sh` (no Gatekeeper prompt), or `Janis_x.y.z_aarch64.dmg` (Apple Silicon) / `Janis_x.y.z_x64.dmg` (Intel) by hand
-                      - **Windows**: `Janis_x.y.z_x64-setup.exe` (or the `.msi`)
-                      - **Linux**: `.AppImage`, `.deb` or `.rpm`, x86_64 and arm64
-                      - **Nix** (Linux and macOS): `nix profile install github:obazin/janis`, or `nix run github:obazin/janis` to try it
-                  uploadWorkflowArtifacts: ${{ github.event_name == 'workflow_dispatch' }}
+            # The packager has no rpm format; this one is built from the same
+            # release binary.
+            - name: Build the rpm
+              if: runner.os == 'Linux'
+              run: |
+                  cargo generate-rpm
+                  cp target/generate-rpm/*.rpm dist/
 
-            # The action also uploads the macOS updater archive (Janis_x.y.z_<arch>.app.tar.gz),
-            # which nothing consumes without the updater plugin; keep it off the release.
-            - name: Drop the updater archive from the release
-              if: runner.os == 'macOS' && github.event_name == 'push'
+            - name: Gather the bundles
+              shell: bash
+              run: |
+                  mkdir -p bundles
+                  find dist -maxdepth 1 -type f \
+                    \( -name '*.dmg' -o -name '*.exe' -o -name '*.msi' \
+                       -o -name '*.AppImage' -o -name '*.deb' -o -name '*.rpm' \) \
+                    -exec cp {} bundles/ \;
+                  ls -la bundles
+
+            - name: Attach the bundles to the draft release
+              if: github.event_name == 'push'
+              shell: bash
               env:
                   GH_TOKEN: ${{ github.token }}
-              run: |
-                  case "${{ matrix.target }}" in
-                    aarch64-apple-darwin) archive_arch="aarch64" ;;
-                    x86_64-apple-darwin) archive_arch="x64" ;;
-                  esac
-                  gh release delete-asset "${{ github.ref_name }}" \
-                    "Janis_${{ steps.tauri.outputs.appVersion }}_${archive_arch}.app.tar.gz" \
-                    --repo "$GITHUB_REPOSITORY" --yes
+              run: gh release upload "$GITHUB_REF_NAME" bundles/* --repo "$GITHUB_REPOSITORY" --clobber
+
+            - name: Keep the bundles as workflow artifacts
+              if: github.event_name == 'workflow_dispatch'
+              uses: actions/upload-artifact@v4
+              with:
+                  name: janis-${{ matrix.platform }}
+                  path: bundles/*
