@@ -19,3 +19,7 @@ fmt-rust:
 
 fmt-rust-check:
     cargo fmt --check
+
+# Build the installers of this platform into dist/ (needs `cargo install cargo-packager`).
+release:
+    cargo packager --release
