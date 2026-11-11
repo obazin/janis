@@ -13,7 +13,7 @@ use crate::audio::Source;
 use crate::text::compare_labels;
 use crate::translations::Translations;
 
-const STATIONS: &str = include_str!("lib/features/radio/stations.json");
+const STATIONS: &str = include_str!("../data/stations.json");
 
 /// The genre chip that clears the genre filter.
 pub const ALL_GENRES_KEY: &str = "radio.genre.all";

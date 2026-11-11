@@ -1,6 +1,6 @@
 //! Compiles the user interface and generates the translated-strings global.
 //!
-//! `src/lib/i18n/en.json` is the reference catalog: every key in it becomes a
+//! `translations/en.json` is the reference catalog: every key in it becomes a
 //! property of the Slint `Strings` global, so a component that names a missing
 //! key fails to compile, and a Rust function that fills every property from a
 //! lookup, so switching language updates every label on screen.
@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::path::PathBuf;
 
-const REFERENCE_CATALOG: &str = "src/lib/i18n/en.json";
+const REFERENCE_CATALOG: &str = "translations/en.json";
 
 fn main() {
     println!("cargo:rerun-if-changed={REFERENCE_CATALOG}");

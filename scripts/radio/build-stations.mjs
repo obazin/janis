@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Rebuilds the web-radio catalog at src/lib/features/radio/stations.json.
+// Rebuilds the web-radio catalog at data/stations.json.
 //
 // It merges two sources:
 //   1. curated.json — the hand-picked flagship stations (SomaFM, Radio France,
@@ -12,16 +12,16 @@
 // The result is static data baked into the app — nothing here runs at runtime.
 // Run it to refresh the catalog:  node scripts/radio/build-stations.mjs
 //
-// New genre keys must also exist in src/lib/i18n/{en,fr}.json (the TranslationKey
-// type is derived from en.json), and new country codes need a radio.country.<cc>
-// key in both. See scripts/radio/README.md.
+// New genre keys must also exist in translations/{en,fr}.json, and new country
+// codes need a radio.country.<cc> key in both; `cargo test` checks it. See
+// scripts/radio/README.md.
 
 import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const OUT = join(HERE, '..', '..', 'src', 'lib', 'features', 'radio', 'stations.json');
+const OUT = join(HERE, '..', '..', 'data', 'stations.json');
 const USER_AGENT = 'Janis/0.1 (+https://github.com/obazin/janis)';
 const MIRRORS = ['https://de1.api.radio-browser.info', 'https://nl1.api.radio-browser.info'];
 

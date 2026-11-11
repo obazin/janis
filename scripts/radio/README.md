@@ -1,6 +1,6 @@
 # Web-radio catalog builder
 
-Regenerates `src/lib/features/radio/stations.json`, the static list the Radio screen ships. The catalog is baked at build time — the app makes no directory calls at runtime, it only opens the stream you click.
+Regenerates `data/stations.json`, the static list the Radio screen ships. The catalog is baked at build time — the app makes no directory calls at runtime, it only opens the stream you click.
 
 ## Sources
 
@@ -25,7 +25,7 @@ It fetches live from a Radio Browser mirror (with a fallback and a polite delay 
 
 ## When the mapping introduces a new key
 
-Genres and countries are rendered through i18n, so the type-check fails until the keys exist in **both** `src/lib/i18n/en.json` and `fr.json` (the `TranslationKey` type is derived from `en.json`):
+Genres and countries are shown through the translation catalogs, so `cargo test` fails until the keys exist in **both** `translations/en.json` and `fr.json` (a test checks every station's genre and country has a label, another that both catalogs hold the same keys):
 
 - a new `radio.genre.<x>` used by `GENRE_RULES`
 - a new `radio.country.<cc>` for every country code in `CAPS`
