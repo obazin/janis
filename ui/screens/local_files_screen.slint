@@ -1,0 +1,208 @@
+import { Tokens, Fonts, Typography, Metrics, Motion, Accent } from "../tokens.slint";
+import { Icons } from "../icons.slint";
+import { Strings } from "strings.slint";
+import { Glyph } from "../atoms/glyph.slint";
+import { GhostButton } from "../atoms/ghost_button.slint";
+import { SectionLabel } from "../atoms/section_label.slint";
+import { ScreenHeader } from "../molecules/screen_header.slint";
+import { ScrollArea } from "../molecules/scroll_area.slint";
+import { Library } from "../features/library/library.slint";
+import { LocalTable } from "../features/library/local_table.slint";
+
+// Where files come from: the drop zone, the scanned files as a table, and the
+// watched folders.
+export component LocalFilesScreen inherits Rectangle {
+    property <length> side: 44px;
+    property <length> content-width: page.content-width - root.side - 32px;
+    property <length> folder-height: 54px;
+
+    page := ScrollArea {
+        content-height: folders.y + (Library.folders.length > 0 ? folders.height : 0px) + 40px;
+
+        top := VerticalLayout {
+            x: root.side;
+            y: 0;
+            width: root.content-width;
+            height: self.preferred-height;
+            padding-top: 36px;
+            spacing: 24px;
+
+            ScreenHeader {
+                eyebrow: Strings.local-eyebrow;
+                tone: Accent.lime;
+                title: Strings.local-title;
+            }
+
+            Rectangle {
+                height: zone.preferred-height;
+                border-radius: Metrics.radius-art;
+                border-width: 2px;
+                border-color: Tokens.drop-zone-outline;
+                background: drop.has-hover ? Tokens.drop-zone-hover : Tokens.drop-zone;
+                animate background { duration: Motion.base; }
+                accessible-role: button;
+                accessible-label: Strings.local-drop-title;
+                accessible-action-default => { Library.add-music(); }
+
+                zone := VerticalLayout {
+                    padding-top: 44px;
+                    padding-bottom: 44px;
+                    padding-left: 20px;
+                    padding-right: 20px;
+                    HorizontalLayout {
+                        alignment: center;
+                        Glyph {
+                            width: 46px;
+                            height: 46px;
+                            icon: Icons.upload;
+                            weight: 1.6;
+                            tint: Tokens.lime;
+                        }
+                    }
+                    Rectangle {
+                        height: 14px;
+                    }
+                    Text {
+                        text: Strings.local-drop-title;
+                        font-family: Fonts.display;
+                        font-weight: Typography.extrabold;
+                        font-size: Typography.heading-md;
+                        color: Tokens.text;
+                        horizontal-alignment: center;
+                    }
+                    Rectangle {
+                        height: 4px;
+                    }
+                    Text {
+                        text: Strings.local-drop-desc;
+                        font-size: Typography.body-em;
+                        color: Tokens.text-muted;
+                        horizontal-alignment: center;
+                    }
+                    Rectangle {
+                        height: 14px;
+                    }
+                    Text {
+                        text: Strings.local-drop-note;
+                        font-size: Typography.body;
+                        font-weight: Typography.semibold;
+                        color: Tokens.lime;
+                        horizontal-alignment: center;
+                    }
+                }
+
+                drop := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => { Library.add-music(); }
+                }
+            }
+
+            HorizontalLayout {
+                spacing: 10px;
+                VerticalLayout {
+                    horizontal-stretch: 1;
+                    alignment: center;
+                    SectionLabel {
+                        label: Library.scanned-heading;
+                    }
+                }
+                if Library.scan-report != "": Text {
+                    text: Library.scan-report;
+                    font-size: Typography.caption;
+                    color: Tokens.text-muted;
+                    vertical-alignment: center;
+                }
+                GhostButton {
+                    label: Strings.local-add-folder;
+                    icon: Icons.plus;
+                    clicked => { Library.add-folder(); }
+                }
+                GhostButton {
+                    label: Strings.local-rescan;
+                    icon: Icons.refresh;
+                    clicked => { Library.rescan(); }
+                }
+            }
+        }
+
+        table := LocalTable {
+            x: root.side;
+            y: top.height + 8px;
+            width: root.content-width;
+            visible: Library.local-tracks.length > 0;
+            tracks: Library.local-tracks;
+            view-top: page.scroll-offset - self.y;
+            view-height: page.height;
+            clicked(index) => { Library.local-track-clicked(index); }
+        }
+
+        folders := Rectangle {
+            x: root.side;
+            y: table.y + (table.visible ? table.height : 0px) + 28px;
+            width: root.content-width;
+            height: 27px + Library.folders.length * root.folder-height;
+            visible: Library.folders.length > 0;
+
+            SectionLabel {
+                x: 0;
+                y: 0;
+                label: Strings.local-folders;
+            }
+
+            Rectangle {
+                y: 27px;
+                height: Library.folders.length * root.folder-height;
+                border-radius: Metrics.radius-card;
+                border-width: 1px;
+                border-color: Tokens.border;
+                clip: true;
+                for folder[index] in Library.folders: Rectangle {
+                    y: index * root.folder-height;
+                    height: root.folder-height;
+                    if index > 0: Rectangle {
+                        y: 0;
+                        height: 1px;
+                        background: Tokens.divider;
+                    }
+                    HorizontalLayout {
+                        padding-left: 16px;
+                        padding-right: 16px;
+                        spacing: 16px;
+                        VerticalLayout {
+                            alignment: center;
+                            Glyph {
+                                width: 17px;
+                                height: 17px;
+                                icon: Icons.folder;
+                                weight: 1.9;
+                                tint: Tokens.text-muted;
+                            }
+                        }
+                        Text {
+                            horizontal-stretch: 1;
+                            text: folder.path;
+                            font-size: Typography.body-em;
+                            color: Tokens.text-secondary;
+                            horizontal-alignment: left;
+                            vertical-alignment: center;
+                            overflow: elide;
+                        }
+                        Text {
+                            text: folder.track-count;
+                            font-size: Typography.caption;
+                            color: Tokens.text-muted;
+                            vertical-alignment: center;
+                        }
+                        VerticalLayout {
+                            alignment: center;
+                            GhostButton {
+                                label: Strings.local-remove-folder;
+                                clicked => { Library.folder-removed(folder.id); }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

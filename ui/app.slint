@@ -15,6 +15,7 @@ import { Covers } from "features/library/covers.slint";
 import { AppTitlebar } from "screens/app_titlebar.slint";
 import { NowPlayingScreen } from "screens/now_playing_screen.slint";
 import { LibraryScreen } from "screens/library_screen.slint";
+import { LocalFilesScreen } from "screens/local_files_screen.slint";
 import { Library } from "features/library/library.slint";
 
 export { Strings, Shell, Player, Covers, Equalizer, Library, Tokens }
@@ -67,6 +68,7 @@ export component AppWindow inherits Window {
                     add-music => { Library.add-music(); }
                 }
                 if Shell.screen == "library": LibraryScreen { }
+                if Shell.screen == "local": LocalFilesScreen { }
             }
         }
 

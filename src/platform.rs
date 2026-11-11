@@ -38,6 +38,18 @@ pub fn select_backend() -> Result<(), String> {
         .map_err(|error| format!("select the windowing backend: {error}"))
 }
 
+/// Calls `dropped` for each file the user drops on the window.
+pub fn on_file_dropped(window: &slint::Window, mut dropped: impl FnMut(PathBuf) + 'static) {
+    use slint::winit_030::winit::event::WindowEvent;
+    use slint::winit_030::{EventResult, WinitWindowAccessor};
+    window.on_winit_window_event(move |_, event| {
+        if let WindowEvent::DroppedFile(path) = event {
+            dropped(path.clone());
+        }
+        EventResult::Propagate
+    });
+}
+
 /// Starts moving the window with the pointer, for a title bar the application
 /// draws itself.
 pub fn drag_window(window: &slint::Window) {
