@@ -4,10 +4,11 @@
 //! hands over to the running one — which comes to the front — and exits.
 //!
 //! The running instance listens on a loopback port of the system's choosing
-//! and leaves its number in a file beside the database; a launch that can
-//! reach it there says hello and leaves. A stale file — the instance that
-//! wrote it is gone — simply fails to connect, and the launch carries on as
-//! the one instance.
+//! and leaves its number in a file beside the database; a launch that
+//! reaches it there says hello, hears the answer and leaves. A stale file —
+//! the instance that wrote it is gone — fails to connect, or reaches some
+//! other program that does not answer as Janis would, and the launch carries
+//! on as the one instance.
 
 use std::io::{Read, Write};
 use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream};
@@ -17,17 +18,31 @@ use std::time::Duration;
 const PORT_FILE: &str = "instance.port";
 /// What a second launch says, so that a stray connection is not mistaken for one.
 const GREETING: &[u8] = b"janis:show";
+/// What the running instance answers, so that another program listening on a
+/// port a stale file names is not mistaken for it.
+const ANSWER: &[u8] = b"janis:here";
 const PATIENCE: Duration = Duration::from_millis(500);
 
 /// Held by the one running instance for as long as it runs.
 pub struct Instance {
     port_file: PathBuf,
+    port: u16,
 }
 
 impl Drop for Instance {
     fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.port_file);
+        // Only this instance's own file: one written since by another
+        // instance is that one's to remove.
+        if recorded_port(&self.port_file) == Some(self.port) {
+            let _ = std::fs::remove_file(&self.port_file);
+        }
     }
+}
+
+fn recorded_port(port_file: &Path) -> Option<u16> {
+    std::fs::read_to_string(port_file)
+        .ok()
+        .and_then(|text| text.trim().parse().ok())
 }
 
 /// Claims the instance, calling `shown` — from a thread of its own — whenever
@@ -60,27 +75,31 @@ pub fn claim(
                 let mut greeting = [0u8; GREETING.len()];
                 let _ = stream.set_read_timeout(Some(PATIENCE));
                 if stream.read_exact(&mut greeting).is_ok() && greeting == GREETING {
+                    let _ = stream.write_all(ANSWER);
                     shown();
                 }
             }
         })
         .map_err(|error| format!("start the instance thread: {error}"))?;
 
-    Ok(Some(Instance { port_file }))
+    Ok(Some(Instance { port_file, port }))
 }
 
-/// True when a running instance was reached and asked to come forward.
+/// True when a running instance was reached, asked to come forward, and
+/// answered.
 fn greet_running_instance(port_file: &Path) -> bool {
-    let Some(port) = std::fs::read_to_string(port_file)
-        .ok()
-        .and_then(|text| text.trim().parse::<u16>().ok())
-    else {
+    let Some(port) = recorded_port(port_file) else {
         return false;
     };
     let address = SocketAddr::from((Ipv4Addr::LOCALHOST, port));
-    TcpStream::connect_timeout(&address, PATIENCE)
-        .and_then(|mut stream| stream.write_all(GREETING))
-        .is_ok()
+    let Ok(mut stream) = TcpStream::connect_timeout(&address, PATIENCE) else {
+        return false;
+    };
+    let mut answer = [0u8; ANSWER.len()];
+    stream.set_read_timeout(Some(PATIENCE)).is_ok()
+        && stream.write_all(GREETING).is_ok()
+        && stream.read_exact(&mut answer).is_ok()
+        && answer == ANSWER
 }
 
 #[cfg(test)]
@@ -110,6 +129,37 @@ mod tests {
         was_shown
             .recv_timeout(Duration::from_secs(5))
             .expect("the first instance is asked to come forward");
+        let _ = std::fs::remove_dir_all(&directory);
+    }
+
+    #[test]
+    fn another_program_on_the_recorded_port_does_not_block_a_launch() {
+        let directory = directory("stranger");
+        std::fs::create_dir_all(&directory).expect("temp dir");
+        // Something else listens where a stale file points, and never
+        // answers as Janis would.
+        let stranger = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).expect("a free port");
+        let port = stranger.local_addr().expect("its address").port();
+        std::fs::write(directory.join(PORT_FILE), port.to_string()).expect("write");
+
+        let launch = claim(&directory, || {}).expect("the launch carries on");
+
+        assert!(launch.is_some());
+        drop(launch);
+        drop(stranger);
+        let _ = std::fs::remove_dir_all(&directory);
+    }
+
+    #[test]
+    fn an_instance_leaves_the_port_file_of_another_alone() {
+        let directory = directory("overwritten");
+        let first = claim(&directory, || {}).expect("the launch claims the instance");
+        // Another instance has since recorded its own port.
+        std::fs::write(directory.join(PORT_FILE), "1").expect("write");
+
+        drop(first);
+
+        assert!(directory.join(PORT_FILE).exists());
         let _ = std::fs::remove_dir_all(&directory);
     }
 
