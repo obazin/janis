@@ -14,8 +14,7 @@ use crate::audio;
 use crate::covers;
 use crate::library::{self, ScanReport, Track, WatchedFolder};
 use crate::library_view::{
-    self, AlbumGroup, ArtistGroup, LibraryTab, Selection, SelectionKind, RECENT_TRACK_COUNT,
-    SHELF_TILE_COUNT,
+    self, AlbumGroup, ArtistGroup, LibraryTab, Selection, SelectionKind, SHELF_TILE_COUNT,
 };
 use crate::persistence::DbState;
 use crate::text;
@@ -29,6 +28,8 @@ pub(super) struct LibraryScreen {
     pub tab: LibraryTab,
     pub selection: Option<Selection>,
     shown_tracks: Vec<Track>,
+    /// The "Recently added" rows, newest first.
+    recent_tracks: Vec<Track>,
     shown_albums: Vec<AlbumGroup>,
     shown_artists: Vec<ArtistGroup>,
     local_tracks: Vec<Track>,
@@ -119,14 +120,7 @@ impl Application {
             application.play_queue(tracks, row(index));
         }));
         view.on_recent_clicked(self.handler(|application, index: i32| {
-            let tracks: Vec<Track> = application
-                .library_screen
-                .borrow()
-                .shown_tracks
-                .iter()
-                .take(RECENT_TRACK_COUNT)
-                .cloned()
-                .collect();
+            let tracks = application.library_screen.borrow().recent_tracks.clone();
             application.play_queue(tracks, row(index));
         }));
         view.on_selection_track_clicked(self.handler(|application, index: i32| {
@@ -216,19 +210,22 @@ impl Application {
         let tracks = self.tracks.borrow();
         let albums = self.albums.borrow();
         let artists = self.artists.borrow();
+        let order = self.library_order.borrow();
         let search = self.search.borrow();
         let mut screen = self.library_screen.borrow_mut();
         let view = self.window.global::<user_interface::Library>();
 
-        screen.shown_tracks = library_view::search_library(&tracks, &search);
-        screen.shown_albums = library_view::albums_matching(&albums, &screen.shown_tracks)
+        screen.shown_tracks = library_view::library_songs(&tracks, &order, &search);
+        screen.recent_tracks = library_view::recently_added(&tracks, &search);
+        screen.shown_albums = library_view::albums_matching(&albums, &order, &screen.shown_tracks)
             .into_iter()
             .cloned()
             .collect();
-        screen.shown_artists = library_view::artists_matching(&artists, &screen.shown_tracks)
-            .into_iter()
-            .cloned()
-            .collect();
+        screen.shown_artists =
+            library_view::artists_matching(&artists, &order, &screen.shown_tracks)
+                .into_iter()
+                .cloned()
+                .collect();
 
         view.set_empty(tracks.is_empty());
         view.set_tab(screen.tab.identifier().into());
@@ -248,11 +245,8 @@ impl Application {
         );
         self.library_songs
             .set_vec(track_rows(&screen.shown_tracks, false, &translations));
-        self.library_recent.set_vec(track_rows(
-            &screen.shown_tracks[..screen.shown_tracks.len().min(RECENT_TRACK_COUNT)],
-            false,
-            &translations,
-        ));
+        self.library_recent
+            .set_vec(track_rows(&screen.recent_tracks, false, &translations));
 
         Self::show_selection(
             &screen,
@@ -477,8 +471,12 @@ impl Application {
 
     /// Replaces the library the screens are built from.
     pub(super) fn take_library(&self, snapshot: LibrarySnapshot) {
-        *self.albums.borrow_mut() = library_view::albums(&snapshot.tracks);
-        *self.artists.borrow_mut() = library_view::artists(&snapshot.tracks);
+        let albums = library_view::albums(&snapshot.tracks);
+        let artists = library_view::artists(&snapshot.tracks);
+        *self.library_order.borrow_mut() =
+            library_view::LibraryOrder::new(&snapshot.tracks, &albums, &artists);
+        *self.albums.borrow_mut() = albums;
+        *self.artists.borrow_mut() = artists;
         *self.cover_keys.borrow_mut() = covers::CoverKeys::new(&snapshot.tracks);
         *self.tracks.borrow_mut() = snapshot.tracks;
         *self.folders.borrow_mut() = snapshot.folders;

@@ -7,7 +7,7 @@ use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 
 use crate::library::Track;
-use crate::text::{compare_labels, format_time};
+use crate::text::{compare_labels, format_time, label_key};
 use crate::translations::Translations;
 
 /// Rows in the Library screen's "Recently added" list.
@@ -126,28 +126,105 @@ pub fn normalized_query(search: &str) -> String {
     search.trim().to_lowercase()
 }
 
-/// The tracks the Library screen's search keeps: any of title, artist, album,
-/// composer, album artist or genre containing the query.
+/// The tracks the Library screen's search keeps, in the order given: any of
+/// title, artist, album, composer, album artist or genre containing the
+/// query.
 pub fn search_library(tracks: &[Track], search: &str) -> Vec<Track> {
     let query = normalized_query(search);
-    if query.is_empty() {
-        return tracks.to_vec();
-    }
     tracks
         .iter()
-        .filter(|track| {
-            [
-                Some(&track.title),
-                track.artist.as_ref(),
-                track.album.as_ref(),
-                track.composer.as_ref(),
-                track.album_artist.as_ref(),
-                track.genre.as_ref(),
-            ]
-            .into_iter()
-            .flatten()
-            .any(|field| field.to_lowercase().contains(&query))
-        })
+        .filter(|track| library_match(track, &query))
+        .cloned()
+        .collect()
+}
+
+/// Whether the Library search keeps `track`; `query` is normalised.
+fn library_match(track: &Track, query: &str) -> bool {
+    query.is_empty()
+        || [
+            Some(&track.title),
+            track.artist.as_ref(),
+            track.album.as_ref(),
+            track.composer.as_ref(),
+            track.album_artist.as_ref(),
+            track.genre.as_ref(),
+        ]
+        .into_iter()
+        .flatten()
+        .any(|field| field.to_lowercase().contains(query))
+}
+
+/// The order of the Library tabs: songs by title, albums by name, artists by
+/// name, alphabetically as a reader expects (`text::compare_labels`). Kept as
+/// positions into the library's tracks, albums and artists, worked out once
+/// per library, so a search only filters. Discover, Local Files, the
+/// "Recently added" rows and Now Playing keep the library's own order, newest
+/// addition first.
+#[derive(Debug, Default)]
+pub struct LibraryOrder {
+    songs: Vec<usize>,
+    albums: Vec<usize>,
+    artists: Vec<usize>,
+}
+
+impl LibraryOrder {
+    pub fn new(tracks: &[Track], albums: &[AlbumGroup], artists: &[ArtistGroup]) -> Self {
+        Self {
+            // Songs of the same name, then by artist and album.
+            songs: sorted_positions(tracks, |track| {
+                (
+                    label_key(&track.title),
+                    missing_last(track.artist.as_deref()),
+                    missing_last(track.album.as_deref()),
+                )
+            }),
+            // Albums of the same name, by artist; untitled albums last.
+            albums: sorted_positions(albums, |album| {
+                (
+                    missing_last(album.album.as_deref()),
+                    missing_last(album.artist.as_deref()),
+                )
+            }),
+            artists: sorted_positions(artists, |artist| label_key(&artist.artist)),
+        }
+    }
+}
+
+/// The positions of `items` in the order of their keys, each key worked out
+/// once. Equal keys keep the items' own order.
+fn sorted_positions<Item, Key: Ord>(items: &[Item], key: impl Fn(&Item) -> Key) -> Vec<usize> {
+    let mut positions: Vec<usize> = (0..items.len()).collect();
+    positions.sort_by_cached_key(|&position| key(&items[position]));
+    positions
+}
+
+/// A label's sort key, an absent or blank label after every present one.
+fn missing_last(label: Option<&str>) -> (bool, (String, String)) {
+    match label.filter(|label| !label.trim().is_empty()) {
+        Some(label) => (false, label_key(label)),
+        None => (true, Default::default()),
+    }
+}
+
+/// The Songs tab: the tracks the search keeps, in alphabetical order.
+pub fn library_songs(tracks: &[Track], order: &LibraryOrder, search: &str) -> Vec<Track> {
+    let query = normalized_query(search);
+    order
+        .songs
+        .iter()
+        .filter_map(|&position| tracks.get(position))
+        .filter(|track| library_match(track, &query))
+        .cloned()
+        .collect()
+}
+
+/// The "Recently added" rows: the newest additions the search keeps.
+pub fn recently_added(tracks: &[Track], search: &str) -> Vec<Track> {
+    let query = normalized_query(search);
+    tracks
+        .iter()
+        .filter(|track| library_match(track, &query))
+        .take(RECENT_TRACK_COUNT)
         .cloned()
         .collect()
 }
@@ -172,26 +249,32 @@ pub fn search_local_files(tracks: &[Track], search: &str) -> Vec<Track> {
         .collect()
 }
 
-/// The albums with at least one track the search kept.
+/// The albums with at least one track the search kept, in alphabetical order.
 pub fn albums_matching<'groups>(
     groups: &'groups [AlbumGroup],
+    order: &LibraryOrder,
     kept: &[Track],
 ) -> Vec<&'groups AlbumGroup> {
     let kept: HashSet<i64> = kept.iter().map(|track| track.id).collect();
-    groups
+    order
+        .albums
         .iter()
+        .filter_map(|&position| groups.get(position))
         .filter(|group| group.tracks.iter().any(|track| kept.contains(&track.id)))
         .collect()
 }
 
-/// The artists with at least one track the search kept.
+/// The artists with at least one track the search kept, in alphabetical order.
 pub fn artists_matching<'groups>(
     groups: &'groups [ArtistGroup],
+    order: &LibraryOrder,
     kept: &[Track],
 ) -> Vec<&'groups ArtistGroup> {
     let kept: HashSet<i64> = kept.iter().map(|track| track.id).collect();
-    groups
+    order
+        .artists
         .iter()
+        .filter_map(|&position| groups.get(position))
         .filter(|group| group.tracks.iter().any(|track| kept.contains(&track.id)))
         .collect()
 }
@@ -635,14 +718,78 @@ mod tests {
         let album_groups = albums(&tracks);
         let artist_groups = artists(&tracks);
 
+        let order = LibraryOrder::new(&tracks, &album_groups, &artist_groups);
+
         let kept = search_library(&tracks, "needle");
 
-        let matching_albums = albums_matching(&album_groups, &kept);
+        let matching_albums = albums_matching(&album_groups, &order, &kept);
         assert_eq!(matching_albums.len(), 1);
         assert_eq!(matching_albums[0].album.as_deref(), Some("Haystack"));
-        let matching_artists = artists_matching(&artist_groups, &kept);
+        let matching_artists = artists_matching(&artist_groups, &order, &kept);
         assert_eq!(matching_artists.len(), 1);
         assert_eq!(matching_artists[0].artist, "Farmer");
+    }
+
+    #[test]
+    fn the_library_tabs_are_alphabetical_ignoring_case_and_accents() {
+        // Newest addition first, as the library is read.
+        let mut untitled = track(5, "Unnamed");
+        untitled.artist = Some("zed".to_owned());
+        let tracks = [
+            untitled,
+            album_track(4, "beta", "Zénith", "Émile", Some(1)),
+            album_track(3, "Alpha", "apogée", "zed", Some(1)),
+            album_track(2, "Éclair", "Bridge", "Abel", Some(1)),
+            album_track(1, "Alpha", "Bridge", "Abel", Some(2)),
+        ];
+        let album_groups = albums(&tracks);
+        let artist_groups = artists(&tracks);
+        let order = LibraryOrder::new(&tracks, &album_groups, &artist_groups);
+
+        let song_identifiers: Vec<i64> = library_songs(&tracks, &order, "")
+            .iter()
+            .map(|track| track.id)
+            .collect();
+        assert_eq!(
+            song_identifiers,
+            [1, 3, 4, 2, 5],
+            "songs by title, the same title by artist"
+        );
+        let album_names: Vec<Option<&str>> = albums_matching(&album_groups, &order, &tracks)
+            .iter()
+            .map(|album| album.album.as_deref())
+            .collect();
+        assert_eq!(
+            album_names,
+            [Some("apogée"), Some("Bridge"), Some("Zénith"), None],
+            "albums by name, an untitled album last"
+        );
+        let artist_names: Vec<&str> = artists_matching(&artist_groups, &order, &tracks)
+            .iter()
+            .map(|artist| artist.artist.as_str())
+            .collect();
+        assert_eq!(artist_names, ["Abel", "Émile", "zed"]);
+        assert_eq!(
+            titles(&library_songs(&tracks, &order, "bridge")),
+            ["Alpha", "Éclair"],
+            "a search filters without reordering"
+        );
+    }
+
+    #[test]
+    fn recently_added_keeps_the_newest_additions_the_search_keeps() {
+        let tracks: Vec<Track> = (0..12)
+            .rev()
+            .map(|id| track(id, &format!("Song {id}")))
+            .collect();
+
+        let recent = recently_added(&tracks, "");
+        assert_eq!(recent.len(), RECENT_TRACK_COUNT);
+        assert_eq!(recent[0].id, 11, "the newest first");
+        assert_eq!(
+            titles(&recently_added(&tracks, "song 1")),
+            ["Song 11", "Song 10", "Song 1"]
+        );
     }
 
     #[test]

@@ -134,6 +134,10 @@ Janis does not connect to Spotify, and has no screen announcing that it will. Sp
 **D48 · The Jellyfin card and a text field atom** — *current*
 The server is set up in a card of the Settings screen, between the audio output and the language: the address, the user name and the password, then a Sign in button; signed in, the server's name, the user and the song count, with Sync now and Sign out. A status line under it says what is happening or what went wrong. Its fields are the `TextField` atom, made for it (a label above an inset input, plain or password). The titlebar search keeps its own inline input. The fields live in the `Jellyfin` global, so a half-typed address survives leaving Settings.
 
+**D49 · The Library tabs are alphabetical** — *current*
+Albums by name (then by artist; untitled albums last), artists by name, songs by title (then by artist and album), compared by `text::compare_labels`: case and accents ignored, and whatever leads up to the first letter or digit skipped, so "'Round Midnight" files under R and a stray leading space does not put a title first. Inside an album the running order stays (disc, track, title). The order is worked out once per library (`library_view::LibraryOrder`, positions into the lists the controller already holds), so a search only filters; on a 13,905-song library it takes about 67 ms in a debug build, at launch and after a sync or a rescan. "Recently added", Discover, Local Files and the Now Playing spotlight keep the library's own order, newest addition first, which is what their shelves mean. Leading articles ("The", "Les") are not skipped.
+Superseded: albums newest addition first, artists most tracks first, songs newest addition first (D49a), the order Discover still uses.
+
 ## Distribution
 
 **D23 · Installers from cargo-packager, the rpm from cargo-generate-rpm** — *current*
