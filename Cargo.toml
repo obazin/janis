@@ -74,3 +74,48 @@ audio-stack-rs = { git = "https://github.com/obazin/audio-stack-rs", tag = "spec
 # dependencies while keeping our own crate debuggable.
 [profile.dev.package."*"]
 opt-level = 2
+
+# ── Distribution ──────────────────────────────────────────────────────────────
+# `cargo packager --release` builds the installers of the platform it runs on
+# into `dist/`: a DMG on macOS, NSIS and MSI installers on Windows, an
+# AppImage and a deb on Linux. No signing certificate is involved: the macOS
+# bundle is ad-hoc signed, the others are unsigned.
+[package.metadata.packager]
+product-name = "Janis"
+identifier = "com.olivierbazin.janis"
+publisher = "Olivier Bazin"
+homepage = "https://github.com/obazin/janis"
+category = "Music"
+description = "Open-source desktop audio player"
+long-description = "Local library with real metadata, curated web radio, a live 10-band equalizer and live waveform visualisation."
+out-dir = "dist"
+before-packaging-command = "cargo build --release"
+icons = [
+    "packaging/icons/32x32.png",
+    "packaging/icons/128x128.png",
+    "packaging/icons/128x128@2x.png",
+    "packaging/icons/icon.icns",
+    "packaging/icons/icon.ico",
+]
+
+[package.metadata.packager.macos]
+signing-identity = "-"
+minimum-system-version = "11.0"
+
+# cpal's Linux backend links ALSA, which the packager does not add by itself.
+[package.metadata.packager.deb]
+depends = ["libasound2"]
+
+# The rpm is built by `cargo generate-rpm`, from the same release binary.
+[package.metadata.generate-rpm]
+name = "janis"
+summary = "Open-source desktop audio player"
+assets = [
+    { source = "target/release/Janis", dest = "/usr/bin/Janis", mode = "755" },
+    { source = "packaging/linux/janis.desktop", dest = "/usr/share/applications/janis.desktop", mode = "644" },
+    { source = "packaging/icons/128x128.png", dest = "/usr/share/icons/hicolor/128x128/apps/janis.png", mode = "644" },
+    { source = "packaging/icons/128x128@2x.png", dest = "/usr/share/icons/hicolor/256x256/apps/janis.png", mode = "644" },
+]
+
+[package.metadata.generate-rpm.requires]
+"libasound.so.2()(64bit)" = "*"

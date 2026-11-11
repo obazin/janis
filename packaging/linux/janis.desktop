@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Janis
+Comment=Open-source desktop audio player
+Exec=Janis
+Icon=janis
+Categories=AudioVideo;Audio;Player;
+Terminal=false
