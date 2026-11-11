@@ -73,7 +73,7 @@ walkdir = "2"
 # inter-band phase distortion, offered by the equalizer sheet as a quality
 # mode. Pure code in the crate — it reuses the `realfft` the analyser already
 # links — so it pulls in no new dependency.
-audio-stack-rs = { git = "https://github.com/obazin/audio-stack-rs", tag = "spectral-dsp", features = [
+audio-stack-rs = { git = "https://github.com/obazin/audio-stack-rs", tag = "remote-tracks", features = [
     "fir-eq",
 ] }
 
@@ -127,8 +127,3 @@ assets = [
 
 [package.metadata.generate-rpm.requires]
 "libasound.so.2()(64bit)" = "*"
-
-# TEMPORARY while the remote queue entries are developed in the sibling
-# checkout; removed when the new tag is published.
-[patch."https://github.com/obazin/audio-stack-rs"]
-audio-stack-rs = { path = "../audio-stack-rs" }
