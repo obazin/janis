@@ -47,6 +47,12 @@ fn main() -> ExitCode {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             eprintln!("janis: {error}");
+            // A launch from the desktop has no terminal to read that in.
+            rfd::MessageDialog::new()
+                .set_level(rfd::MessageLevel::Error)
+                .set_title("Janis")
+                .set_description(error)
+                .show();
             ExitCode::FAILURE
         }
     }
