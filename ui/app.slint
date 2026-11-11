@@ -14,8 +14,10 @@ import { EqualizerOverlay } from "features/equalizer/equalizer_overlay.slint";
 import { Covers } from "features/library/covers.slint";
 import { AppTitlebar } from "screens/app_titlebar.slint";
 import { NowPlayingScreen } from "screens/now_playing_screen.slint";
+import { LibraryScreen } from "screens/library_screen.slint";
+import { Library } from "features/library/library.slint";
 
-export { Strings, Shell, Player, Covers, Equalizer, Tokens }
+export { Strings, Shell, Player, Covers, Equalizer, Library, Tokens }
 
 export component AppWindow inherits Window {
     title: "Janis";
@@ -61,7 +63,10 @@ export component AppWindow inherits Window {
 
             Rectangle {
                 horizontal-stretch: 1;
-                if Shell.screen == "now-playing": NowPlayingScreen { }
+                if Shell.screen == "now-playing": NowPlayingScreen {
+                    add-music => { Library.add-music(); }
+                }
+                if Shell.screen == "library": LibraryScreen { }
             }
         }
 

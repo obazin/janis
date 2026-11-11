@@ -96,8 +96,10 @@ mod development {
         }
     }
 
-    /// `JANIS_SCREEN=<identifier>` opens on that screen, and `JANIS_EQUALIZER`
-    /// opens the equalizer sheet, so each can be looked at in a snapshot.
+    /// `JANIS_SCREEN=<identifier>` opens on that screen, `JANIS_EQUALIZER`
+    /// opens the equalizer sheet, `JANIS_LIBRARY` a Library tab and
+    /// `JANIS_SEARCH` fills the search field, so each can be looked at in a
+    /// snapshot.
     pub fn open_what_was_asked(window: &AppWindow) {
         let shell = window.global::<crate::user_interface::Shell>();
         if let Ok(screen) = std::env::var("JANIS_SCREEN") {
@@ -105,6 +107,23 @@ mod development {
         }
         if std::env::var_os("JANIS_EQUALIZER").is_some() {
             shell.set_equalizer_open(true);
+        }
+        // `JANIS_LIBRARY=<tab>[:<card>]` opens a Library tab and, in a grid,
+        // the card at that place.
+        if let Ok(request) = std::env::var("JANIS_LIBRARY") {
+            let library = window.global::<crate::user_interface::Library>();
+            let (tab, card) = request.split_once(':').unwrap_or((&request, ""));
+            library.invoke_tab_selected(tab.into());
+            if let Ok(card) = card.parse() {
+                match tab {
+                    "artists" => library.invoke_artist_clicked(card),
+                    _ => library.invoke_album_clicked(card),
+                }
+            }
+        }
+        if let Ok(search) = std::env::var("JANIS_SEARCH") {
+            shell.set_search(search.as_str().into());
+            shell.invoke_search_edited(search.into());
         }
     }
 

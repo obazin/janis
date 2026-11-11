@@ -262,6 +262,67 @@ pub fn art_seed(track: &Track) -> String {
     )
 }
 
+/// The tabs of the Library screen.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum LibraryTab {
+    Playlists,
+    Artists,
+    #[default]
+    Albums,
+    Songs,
+}
+
+impl LibraryTab {
+    /// The name the interface knows the tab by.
+    pub fn identifier(self) -> &'static str {
+        match self {
+            LibraryTab::Playlists => "playlists",
+            LibraryTab::Artists => "artists",
+            LibraryTab::Albums => "albums",
+            LibraryTab::Songs => "songs",
+        }
+    }
+
+    pub fn from_identifier(identifier: &str) -> Option<Self> {
+        [Self::Playlists, Self::Artists, Self::Albums, Self::Songs]
+            .into_iter()
+            .find(|tab| tab.identifier() == identifier)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SelectionKind {
+    Album,
+    Artist,
+}
+
+/// The album or artist browsed in the Library grid instead of played.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Selection {
+    pub kind: SelectionKind,
+    pub key: String,
+    pub label: String,
+    pub tracks: Vec<Track>,
+}
+
+/// Selects `next`, or clears the selection when it is already the selected
+/// one — clicking the open tile again is how the listener backs out of it.
+pub fn toggle_selection(current: &mut Option<Selection>, next: Selection) {
+    let same = current
+        .as_ref()
+        .is_some_and(|selected| selected.kind == next.kind && selected.key == next.key);
+    *current = if same { None } else { Some(next) };
+}
+
+/// The number a track row shows: its place in the list, or — in an album —
+/// the position its tags give it.
+pub fn row_number(track: &Track, index: usize, use_track_number: bool) -> u32 {
+    track
+        .track_number
+        .filter(|_| use_track_number)
+        .unwrap_or(index as u32 + 1)
+}
+
 /// The three lists the Now Playing queue card switches between.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum QueueView {
@@ -596,6 +657,57 @@ mod tests {
             queue_heading(QueueView::Album, 4, 1, Some(&current), &translations),
             "Blue"
         );
+    }
+
+    #[test]
+    fn clicking_the_selected_tile_again_clears_the_selection() {
+        let album = |key: &str| Selection {
+            kind: SelectionKind::Album,
+            key: key.to_owned(),
+            label: key.to_owned(),
+            tracks: Vec::new(),
+        };
+        let mut selection = None;
+
+        toggle_selection(&mut selection, album("a"));
+        assert_eq!(selection.as_ref().map(|s| s.key.as_str()), Some("a"));
+        toggle_selection(&mut selection, album("b"));
+        assert_eq!(selection.as_ref().map(|s| s.key.as_str()), Some("b"));
+        toggle_selection(&mut selection, album("b"));
+        assert_eq!(selection, None);
+
+        // An artist that happens to share an album's key is a different tile.
+        toggle_selection(&mut selection, album("x"));
+        toggle_selection(
+            &mut selection,
+            Selection {
+                kind: SelectionKind::Artist,
+                ..album("x")
+            },
+        );
+        assert_eq!(selection.map(|s| s.kind), Some(SelectionKind::Artist));
+    }
+
+    #[test]
+    fn rows_are_numbered_by_place_or_by_the_album_position() {
+        let mut tagged = track(1, "a");
+        tagged.track_number = Some(7);
+        assert_eq!(row_number(&tagged, 0, false), 1);
+        assert_eq!(row_number(&tagged, 0, true), 7);
+        assert_eq!(row_number(&track(2, "b"), 4, true), 5);
+    }
+
+    #[test]
+    fn tabs_round_trip_through_their_identifiers() {
+        for tab in [
+            LibraryTab::Playlists,
+            LibraryTab::Artists,
+            LibraryTab::Albums,
+            LibraryTab::Songs,
+        ] {
+            assert_eq!(LibraryTab::from_identifier(tab.identifier()), Some(tab));
+        }
+        assert_eq!(LibraryTab::from_identifier("nowhere"), None);
     }
 
     #[test]

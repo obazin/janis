@@ -1,0 +1,52 @@
+import { Library, LibraryCard } from "library.slint";
+import { AlbumCard } from "album_card.slint";
+import { LibraryTrackAccordion } from "library_track_accordion.slint";
+
+// The album or artist grid: as many cards per row as fit, and — under the row
+// of the selected card — its tracks, in place.
+export component CardGrid inherits Rectangle {
+    in property <[LibraryCard]> cards;
+    in property <bool> shows-detail;
+    // Where the visible window starts, measured from the top of the grid.
+    in property <length> view-top;
+    in property <length> view-height;
+    callback card-clicked(index: int);
+
+    property <length> gap: 20px;
+    property <length> narrowest-card: 180px;
+    property <int> columns: max(1, floor((root.width + root.gap) / (root.narrowest-card + root.gap)));
+    property <length> card-width: (root.width - (root.columns - 1) * root.gap) / root.columns;
+    property <length> card-height: root.card-width + (root.shows-detail ? 70px : 52px);
+    property <length> line-height: root.card-height + root.gap;
+    property <int> line-count: ceil(root.cards.length / root.columns);
+
+    // The line holding the selected card, or -1 when none of these is selected.
+    out property <int> selected-line: Library.selection-index >= 0 ? floor(Library.selection-index / root.columns) : -1;
+    out property <length> accordion-top: (root.selected-line + 1) * root.line-height;
+    property <length> accordion-room: root.selected-line >= 0 ? accordion.height + root.gap : 0px;
+
+    height: root.line-count * root.line-height + root.accordion-room;
+
+    for card[index] in root.cards: AlbumCard {
+        property <int> line: floor(index / root.columns);
+        x: mod(index, root.columns) * (root.card-width + root.gap);
+        y: self.line * root.line-height + (root.selected-line >= 0 && self.line > root.selected-line ? root.accordion-room : 0px);
+        width: root.card-width;
+        height: root.card-height;
+        card: card;
+        active: index == Library.selection-index;
+        shows-detail: root.shows-detail;
+        clicked => { root.card-clicked(index); }
+    }
+
+    accordion := LibraryTrackAccordion {
+        y: root.accordion-top;
+        visible: root.selected-line >= 0;
+        heading: Library.selection-heading;
+        tracks: Library.selection-tracks;
+        view-top: root.view-top - root.accordion-top;
+        view-height: root.view-height;
+        track-clicked(index) => { Library.selection-track-clicked(index); }
+        closed => { Library.selection-closed(); }
+    }
+}

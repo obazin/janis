@@ -1,0 +1,145 @@
+import { Tokens, Accent } from "../tokens.slint";
+import { Icons } from "../icons.slint";
+import { Strings } from "strings.slint";
+import { Chip } from "../atoms/chip.slint";
+import { EmptyState } from "../atoms/empty_state.slint";
+import { PrimaryButton } from "../atoms/primary_button.slint";
+import { SectionLabel } from "../atoms/section_label.slint";
+import { ScreenHeader } from "../molecules/screen_header.slint";
+import { ScrollArea } from "../molecules/scroll_area.slint";
+import { Library } from "../features/library/library.slint";
+import { CardGrid } from "../features/library/card_grid.slint";
+import { TrackList } from "../features/library/track_list.slint";
+
+// The library: albums and artists as grids that open in place, every song as
+// one list, and what was added last.
+export component LibraryScreen inherits Rectangle {
+    property <length> side: 44px;
+    property <length> section-gap: 36px;
+    property <length> content-width: page.content-width - root.side - 32px;
+    property <bool> grid-tab: Library.tab == "albums" || Library.tab == "artists";
+    property <bool> shows-recent: !Library.empty && Library.tab != "songs" && Library.tab != "playlists" && !Library.selection-present && Library.recent.length > 0;
+
+    page := ScrollArea {
+        content-height: recent.y + (root.shows-recent ? recent.height : 0px) + 40px;
+
+        top := VerticalLayout {
+            x: root.side;
+            y: 0;
+            width: root.content-width;
+            height: self.preferred-height;
+            padding-top: 36px;
+            spacing: 24px;
+
+            ScreenHeader {
+                eyebrow: Strings.library-eyebrow;
+                tone: Accent.violet;
+                title: Strings.library-title;
+                PrimaryButton {
+                    label: Strings.library-add-music;
+                    icon: Icons.plus;
+                    clicked => { Library.add-music(); }
+                }
+            }
+
+            if Library.empty: EmptyState {
+                icon: Icons.library;
+                title: Strings.library-empty-title;
+                description: Strings.library-empty-desc;
+                action-label: Strings.local-add-folder;
+                action-icon: Icons.plus;
+                action-clicked => { Library.add-folder(); }
+            }
+
+            if !Library.empty: HorizontalLayout {
+                alignment: start;
+                spacing: 8px;
+                Chip {
+                    label: Strings.library-tab-playlists;
+                    active: Library.tab == "playlists";
+                    clicked => { Library.tab-selected("playlists"); }
+                }
+                Chip {
+                    label: Strings.library-tab-artists;
+                    active: Library.tab == "artists";
+                    clicked => { Library.tab-selected("artists"); }
+                }
+                Chip {
+                    label: Strings.library-tab-albums;
+                    active: Library.tab == "albums";
+                    clicked => { Library.tab-selected("albums"); }
+                }
+                Chip {
+                    label: Strings.library-tab-songs;
+                    active: Library.tab == "songs";
+                    clicked => { Library.tab-selected("songs"); }
+                }
+            }
+
+            if !Library.empty && Library.tab == "playlists": EmptyState {
+                icon: Icons.library;
+                title: Strings.library-playlists-soon-title;
+                description: Strings.library-playlists-soon-desc;
+            }
+        }
+
+        body := Rectangle {
+            x: root.side;
+            y: top.height + 24px;
+            width: root.content-width;
+            height: Library.empty ? 0px : root.grid-tab ? grid.height : Library.tab == "songs" ? songs.height : 0px;
+
+            grid := CardGrid {
+                y: 0;
+                visible: !Library.empty && root.grid-tab;
+                cards: Library.tab == "albums" ? Library.albums : Library.artists;
+                shows-detail: Library.tab == "albums";
+                view-top: page.scroll-offset - body.y;
+                view-height: page.height;
+                card-clicked(index) => {
+                    if Library.tab == "albums" {
+                        Library.album-clicked(index);
+                    } else {
+                        Library.artist-clicked(index);
+                    }
+                }
+            }
+
+            songs := TrackList {
+                y: 0;
+                visible: !Library.empty && Library.tab == "songs";
+                tracks: Library.songs;
+                view-top: page.scroll-offset - body.y;
+                view-height: page.height;
+                clicked(index) => { Library.song-clicked(index); }
+            }
+        }
+
+        recent := VerticalLayout {
+            x: root.side;
+            y: body.y + body.height + (body.height > 0 ? root.section-gap : 0px);
+            width: root.content-width;
+            height: self.preferred-height;
+            visible: root.shows-recent;
+            spacing: 8px;
+            SectionLabel {
+                label: Strings.library-recently-added;
+            }
+            recent-list := TrackList {
+                tracks: Library.recent;
+                // Short enough to draw whole.
+                view-top: 0px;
+                view-height: self.height;
+                clicked(index) => { Library.recent-clicked(index); }
+            }
+        }
+    }
+
+    // A freshly opened album or artist is brought into view.
+    property <int> selection: Library.selection-index;
+    changed selection => {
+        if root.selection >= 0 && body.y + grid.accordion-top > page.scroll-offset + page.height - 180px {
+            page.scroll-to(body.y + grid.accordion-top - 180px);
+        }
+    }
+}

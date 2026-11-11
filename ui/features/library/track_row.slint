@@ -1,0 +1,91 @@
+import { Tokens, Fonts, Typography, Motion } from "../../tokens.slint";
+import { CoverArt } from "cover_art.slint";
+import { LibraryTrack } from "library.slint";
+
+// A row of a library track list: number, cover, title and artist, composer,
+// duration.
+export component TrackRow inherits Rectangle {
+    in property <LibraryTrack> track;
+    // Every row but the first is ruled off from the one above.
+    in property <bool> ruled;
+    callback clicked();
+
+    background: touch.has-hover ? Tokens.row-hover : transparent;
+    animate background { duration: Motion.fast; }
+    accessible-role: button;
+    accessible-label: root.track.title;
+    accessible-action-default => { root.clicked(); }
+
+    if root.ruled: Rectangle {
+        y: 0;
+        height: 1px;
+        background: Tokens.divider;
+    }
+
+    HorizontalLayout {
+        padding-left: 14px;
+        padding-right: 14px;
+        spacing: 16px;
+        Text {
+            width: 26px;
+            text: root.track.number;
+            font-family: Fonts.mono;
+            font-size: Typography.body;
+            color: Tokens.text-faint;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+        VerticalLayout {
+            alignment: center;
+            CoverArt {
+                width: 38px;
+                height: 38px;
+                radius: 8px;
+                track-id: root.track.track-id;
+                gradient-index: root.track.gradient-index;
+            }
+        }
+        VerticalLayout {
+            horizontal-stretch: 1;
+            alignment: center;
+            Text {
+                text: root.track.title;
+                font-size: Typography.body-em;
+                font-weight: Typography.semibold;
+                color: Tokens.text;
+                horizontal-alignment: left;
+                overflow: elide;
+            }
+            Text {
+                text: root.track.artist;
+                font-size: Typography.caption;
+                color: Tokens.text-muted;
+                horizontal-alignment: left;
+                overflow: elide;
+            }
+        }
+        Text {
+            width: 140px;
+            text: root.track.composer;
+            font-size: Typography.body;
+            color: Tokens.text-muted;
+            horizontal-alignment: left;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+        Text {
+            width: 70px;
+            text: root.track.duration;
+            font-family: Fonts.mono;
+            font-size: Typography.caption;
+            color: Tokens.text-muted;
+            horizontal-alignment: right;
+            vertical-alignment: center;
+        }
+    }
+
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}

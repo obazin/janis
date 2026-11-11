@@ -5,13 +5,26 @@
 
 use log::{Level, LevelFilter, Log, Metadata, Record};
 
+/// The crates whose log lines follow `JANIS_LOG`.
+const OWN_TARGETS: [&str; 3] = ["Janis", "janis", "audio_stack_rs"];
+
 struct StandardErrorLogger;
 
 static LOGGER: StandardErrorLogger = StandardErrorLogger;
 
 impl Log for StandardErrorLogger {
     fn enabled(&self, metadata: &Metadata) -> bool {
-        metadata.level() <= log::max_level()
+        // Libraries are only heard when something is wrong: their warnings
+        // are about the files they read, not about Janis.
+        let own = OWN_TARGETS
+            .iter()
+            .any(|target| metadata.target().starts_with(target));
+        metadata.level()
+            <= if own {
+                log::max_level()
+            } else {
+                LevelFilter::Error
+            }
     }
 
     fn log(&self, record: &Record) {
