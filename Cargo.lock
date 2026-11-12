@@ -2777,6 +2777,7 @@ dependencies = [
  "base64 0.22.1",
  "dirs",
  "image",
+ "libc",
  "log",
  "reqwest",
  "rfd",
@@ -2787,6 +2788,7 @@ dependencies = [
  "slint-build",
  "tokio",
  "walkdir",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
