@@ -111,8 +111,8 @@ impl Application {
             application.toggle_selection(Selection {
                 kind: SelectionKind::Artist,
                 key: artist.artist.clone(),
+                tracks: library_view::artist_tracks(&artist),
                 label: artist.artist,
-                tracks: artist.tracks,
             });
         }));
         view.on_song_clicked(self.handler(|application, index: i32| {
@@ -244,9 +244,9 @@ impl Application {
                 .collect::<Vec<_>>(),
         );
         self.library_songs
-            .set_vec(track_rows(&screen.shown_tracks, false, &translations));
+            .set_vec(track_rows(&screen.shown_tracks, None, &translations));
         self.library_recent
-            .set_vec(track_rows(&screen.recent_tracks, false, &translations));
+            .set_vec(track_rows(&screen.recent_tracks, None, &translations));
 
         Self::show_selection(
             &screen,
@@ -286,7 +286,7 @@ impl Application {
                 view.set_selection_heading(selection.label.as_str().into());
                 rows.set_vec(track_rows(
                     &selection.tracks,
-                    selection.kind == SelectionKind::Album,
+                    Some(selection.kind),
                     translations,
                 ));
             }
@@ -345,7 +345,7 @@ impl Application {
 
         screen.local_tracks = library_view::search_local_files(&tracks, &search);
         self.library_local
-            .set_vec(track_rows(&screen.local_tracks, false, &translations));
+            .set_vec(track_rows(&screen.local_tracks, None, &translations));
         view.set_scanned_heading(
             translations
                 .translate(
@@ -553,11 +553,14 @@ fn artist_card(artist: &ArtistGroup, translations: &Translations) -> LibraryCard
     }
 }
 
+/// Rows for a track list. An album's rows are numbered by their place on
+/// the record, an artist's are titled album first; `None` is a plain list.
 pub(super) fn track_rows(
     tracks: &[Track],
-    use_track_number: bool,
+    browsed: Option<SelectionKind>,
     translations: &Translations,
 ) -> Vec<LibraryTrack> {
+    let use_track_number = browsed == Some(SelectionKind::Album);
     let unknown_artist = translations.text("common.unknownArtist");
     tracks
         .iter()
@@ -569,7 +572,10 @@ pub(super) fn track_rows(
                 library_view::row_number(track, index, use_track_number)
             )
             .into(),
-            title: track.title.as_str().into(),
+            title: match browsed {
+                Some(SelectionKind::Artist) => library_view::artist_row_title(track).into(),
+                _ => track.title.as_str().into(),
+            },
             artist: track.artist.as_deref().unwrap_or(&unknown_artist).into(),
             composer: track.composer.as_deref().unwrap_or_default().into(),
             format: track.format.as_str().into(),

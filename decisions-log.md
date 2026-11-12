@@ -142,6 +142,10 @@ The server is set up in a card of the Settings screen, between the audio output 
 Albums by name (then by artist; untitled albums last), artists by name, songs by title (then by artist and album), compared by `text::compare_labels`: case and accents ignored, and whatever leads up to the first letter or digit skipped, so "'Round Midnight" files under R and a stray leading space does not put a title first. Inside an album the running order stays (disc, track, title). The order is worked out once per library (`library_view::LibraryOrder`, positions into the lists the controller already holds), so a search only filters; on a 13,905-song library it takes about 67 ms in a debug build, at launch and after a sync or a rescan. "Recently added", Discover, Local Files and the Now Playing spotlight keep the library's own order, newest addition first, which is what their shelves mean. Leading articles ("The", "Les") are not skipped.
 Superseded: albums newest addition first, artists most tracks first, songs newest addition first (D49a), the order Discover still uses.
 
+**D51 · An artist's tracks are listed album by album** — *current* (2026-11-12)
+Browsing an artist in the Library lists its tracks grouped by album, albums alphabetical by `text::compare_labels` (untitled last), each album in its running order, and titles each row "Album - Song" ("Electric Ladyland - Voodoo Child") since the album is what tells two takes or two periods apart in a long list. A click plays from that row in this order. Only the panel does this (`library_view::artist_tracks`): the artist grouping keeps the library's order, so the Discover artist shelf and the Now Playing spotlight are unchanged.
+Superseded: the artist's tracks in the library's order, titled by song alone (D51a).
+
 ## Distribution
 
 **D23 · Installers from cargo-packager, the rpm from cargo-generate-rpm** — *current*
