@@ -339,7 +339,7 @@ impl Application {
             let weak = self.window.as_weak();
             move || {
                 if let Some(window) = weak.upgrade() {
-                    platform::drag_window(window.window());
+                    platform::drag_window(&window);
                 }
             }
         });
