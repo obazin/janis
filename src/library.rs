@@ -341,7 +341,7 @@ pub fn list_tracks(db: &DbState) -> Result<Vec<Track>, String> {
                     track_number, track_total, disc_number, disc_total,
                     year, genre, album_artist,
                     rg_track_gain_db, rg_track_peak, loudness_lufs, loudness_peak,
-                    server_id, artwork_item
+                    server_id, artwork_item, rg_album_gain_db, rg_album_peak
              FROM tracks ORDER BY added_at DESC, id DESC",
         )
         .map_err(|e| format!("prepare list_tracks: {}", e))?;
@@ -371,15 +371,16 @@ pub fn list_tracks(db: &DbState) -> Result<Vec<Track>, String> {
                 year: row.get(18)?,
                 genre: row.get(19)?,
                 album_artist: row.get(20)?,
-                // Tag first, measurement second, and the peak from whichever
-                // source supplied the gain.
-                gain_db: {
-                    let tag_gain: Option<f64> = row.get(21)?;
-                    let tag_peak: Option<f64> = row.get(22)?;
-                    let lufs: Option<f64> = row.get(23)?;
-                    let measured_peak: Option<f64> = row.get(24)?;
-                    gain_db(tag_gain, lufs, tag_peak.or(measured_peak))
-                },
+                gain_db: resolved_gain(
+                    Gains {
+                        album: row.get(27)?,
+                        album_peak: row.get(28)?,
+                        track: row.get(21)?,
+                        track_peak: row.get(22)?,
+                    },
+                    row.get(23)?,
+                    row.get(24)?,
+                ),
             })
         })
         .and_then(|rows| rows.collect::<Result<Vec<_>, _>>())
@@ -608,6 +609,73 @@ pub fn rescan_library(db: &DbState) -> Result<ScanReport, String> {
     Ok(report)
 }
 
+/// The gains a track's tags — or its server — carry, in dB, each with the
+/// linear peak measured alongside it when one was.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Gains {
+    pub album: Option<f64>,
+    pub album_peak: Option<f64>,
+    pub track: Option<f64>,
+    pub track_peak: Option<f64>,
+}
+
+/// The gain a track plays at, in dB.
+///
+/// The album gain first, so the songs of one record keep the loudness
+/// differences their mastering gave them; the track gain when the album has
+/// none; the measured loudness when there is no gain at all. Each gain keeps
+/// its own peak, and borrows the other's when it has none, so a boost never
+/// lifts the loudest sample past full scale for want of a figure.
+pub fn resolved_gain(gains: Gains, lufs: Option<f64>, measured_peak: Option<f64>) -> f64 {
+    let tagged = match (gains.album, gains.track) {
+        (Some(album), _) if album.is_finite() => {
+            Some((album, gains.album_peak.or(gains.track_peak)))
+        }
+        (_, Some(track)) if track.is_finite() => {
+            Some((track, gains.track_peak.or(gains.album_peak)))
+        }
+        _ => None,
+    };
+    match tagged {
+        Some((gain, peak)) => gain_db(Some(gain), None, peak.or(measured_peak)),
+        None => gain_db(None, lufs, measured_peak),
+    }
+}
+
+/// A file the background measurement still has to read.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PendingLoudness {
+    pub track_id: i64,
+    pub path: String,
+}
+
+/// The files with no gain at all — no ReplayGain tag, no measurement — that
+/// the background measurement should read, in library order. A server's songs
+/// are left out: their gains come with the server's listing, and their audio
+/// is not on this disk.
+pub fn tracks_needing_loudness(db: &DbState) -> Result<Vec<PendingLoudness>, String> {
+    let conn = db.lock();
+    let mut statement = conn
+        .prepare(
+            "SELECT id, path FROM tracks
+             WHERE server_id IS NULL
+               AND rg_track_gain_db IS NULL AND rg_album_gain_db IS NULL
+               AND loudness_lufs IS NULL
+             ORDER BY added_at DESC, id DESC",
+        )
+        .map_err(|e| format!("prepare tracks_needing_loudness: {}", e))?;
+    let pending = statement
+        .query_map([], |row| {
+            Ok(PendingLoudness {
+                track_id: row.get(0)?,
+                path: row.get(1)?,
+            })
+        })
+        .and_then(|rows| rows.collect::<Result<Vec<_>, _>>())
+        .map_err(|e| format!("read tracks needing loudness: {}", e))?;
+    Ok(pending)
+}
+
 /// The engine's route to the loudness columns.
 pub struct LoudnessStore(pub Arc<DbState>);
 
@@ -628,7 +696,8 @@ impl crate::audio::Store for LoudnessStore {
 pub fn needs_loudness(db: &DbState, track_id: i64) -> bool {
     let conn = db.lock();
     conn.query_row(
-        "SELECT rg_track_gain_db IS NULL AND loudness_lufs IS NULL
+        "SELECT rg_track_gain_db IS NULL AND rg_album_gain_db IS NULL
+                AND loudness_lufs IS NULL
          FROM tracks WHERE id = ?1",
         [track_id],
         |row| row.get::<_, i64>(0),
@@ -637,7 +706,8 @@ pub fn needs_loudness(db: &DbState, track_id: i64) -> bool {
     .unwrap_or(false)
 }
 
-/// Records a loudness measurement taken while a track played.
+/// Records a loudness measurement, taken while a track played or read from
+/// its file in the background.
 ///
 /// Written outside `upsert_track` on purpose: a rescan re-reads tags and would
 /// otherwise wipe a measurement it knows nothing about.
@@ -959,5 +1029,95 @@ mod tests {
         );
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_album_gain_wins_over_the_track_gain() {
+        let gains = Gains {
+            album: Some(-5.0),
+            track: Some(-8.0),
+            ..Gains::default()
+        };
+        assert_eq!(resolved_gain(gains, Some(-30.0), None), -5.0);
+    }
+
+    #[test]
+    fn a_track_gain_stands_in_when_the_album_has_none() {
+        let gains = Gains {
+            track: Some(-8.0),
+            ..Gains::default()
+        };
+        assert_eq!(resolved_gain(gains, Some(-30.0), None), -8.0);
+    }
+
+    #[test]
+    fn a_measurement_stands_in_when_no_gain_is_known() {
+        assert_eq!(resolved_gain(Gains::default(), Some(-23.0), None), 5.0);
+        assert_eq!(resolved_gain(Gains::default(), None, None), 0.0);
+    }
+
+    #[test]
+    fn a_boost_is_held_below_the_peak_of_the_gain_it_uses() {
+        // A peak of 0.5 is -6 dBFS: with the -1 dB ceiling, at most +5 dB.
+        let gains = Gains {
+            album: Some(9.0),
+            album_peak: Some(0.5),
+            ..Gains::default()
+        };
+        assert!((resolved_gain(gains, None, None) - 5.021).abs() < 0.01);
+        let borrowed = Gains {
+            album: Some(9.0),
+            track_peak: Some(0.5),
+            ..Gains::default()
+        };
+        assert!(
+            (resolved_gain(borrowed, None, None) - 5.021).abs() < 0.01,
+            "an album gain without a peak borrows the track's"
+        );
+    }
+
+    #[test]
+    fn only_local_files_without_any_gain_wait_for_a_measurement() {
+        let directory = std::env::temp_dir().join("janis-pending-loudness-test");
+        let _ = std::fs::remove_dir_all(&directory);
+        let database = crate::persistence::init(directory.clone()).expect("db");
+        let folder = directory.join("watched");
+        write_wav(&folder.join("first.wav"));
+        write_wav(&folder.join("second.wav"));
+        add_watched_folder(&database, &folder.to_string_lossy()).expect("scan");
+        let server_id = signed_in(&database);
+        sync_server_tracks(&database, server_id, vec![server_song("a", "One")]).expect("sync");
+
+        let pending = tracks_needing_loudness(&database).expect("pending");
+        assert_eq!(pending.len(), 2, "the server's song is not a file here");
+        assert!(pending.iter().all(|track| track.path.ends_with(".wav")));
+
+        store_loudness(&database, pending[0].track_id, -20.0, 0.5);
+        let still = tracks_needing_loudness(&database).expect("pending");
+        assert_eq!(still, vec![pending[1].clone()]);
+        assert!(!needs_loudness(&database, pending[0].track_id));
+
+        let _ = std::fs::remove_dir_all(&directory);
+    }
+
+    #[test]
+    fn a_servers_gains_are_kept_and_played() {
+        let directory = std::env::temp_dir().join("janis-server-gain-test");
+        let _ = std::fs::remove_dir_all(&directory);
+        let database = crate::persistence::init(directory.clone()).expect("db");
+        let server_id = signed_in(&database);
+        let mut song = server_song("a", "One");
+        song.metadata.rg_track_gain_db = Some(-7.0);
+        song.metadata.rg_album_gain_db = Some(-4.0);
+        sync_server_tracks(&database, server_id, vec![song]).expect("sync");
+
+        let tracks = list_tracks(&database).expect("tracks");
+        assert_eq!(tracks[0].gain_db, -4.0, "the album's gain");
+        assert!(
+            !needs_loudness(&database, tracks[0].id),
+            "a song with a gain is not measured as it plays"
+        );
+
+        let _ = std::fs::remove_dir_all(&directory);
     }
 }

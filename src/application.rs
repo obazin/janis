@@ -10,6 +10,7 @@ mod artwork;
 mod equalizer_sheet;
 mod jellyfin_settings;
 mod library_screens;
+mod loudness;
 mod notices;
 mod now_playing_screen;
 mod radio_screen;
@@ -117,6 +118,8 @@ pub struct Application {
     discover_rediscover: Rc<VecModel<user_interface::LibraryCard>>,
     discover_artists: Rc<VecModel<user_interface::LibraryCard>>,
     library_worker: Worker,
+    /// Measures the files that carry no gain, and keeps what it found.
+    loudness: loudness::LoudnessMeasurement,
     favourite_stations: RefCell<FavouriteStations>,
     /// The Jellyfin server the listener signed in to, as Settings shows it.
     media_server: RefCell<MediaServerState>,
@@ -219,6 +222,7 @@ impl Application {
             discover_rediscover: Rc::new(VecModel::default()),
             discover_artists: Rc::new(VecModel::default()),
             library_worker: Worker::new("janis library")?,
+            loudness: loudness::LoudnessMeasurement::new()?,
             favourite_stations: RefCell::new(favourite_stations),
             media_server: RefCell::new(MediaServerState::default()),
             server_worker: Worker::new("janis media server")?,
@@ -266,6 +270,8 @@ impl Application {
         application.refresh_radio();
         application.refresh_settings();
         application.refresh_jellyfin();
+        // The files that arrived without a gain are measured meanwhile.
+        application.measure_loudness();
         Ok(application)
     }
 
@@ -273,6 +279,7 @@ impl Application {
     /// loop has ended, while the process is still alive.
     pub fn shut_down(&self) {
         self.frame_timer.stop();
+        self.loudness.stop();
         // What was still waiting for its slider to settle is saved now.
         self.volume_timer.stop();
         self.save_volume();
@@ -462,7 +469,13 @@ impl Application {
                 Effect::LoadQueue { tracks, index } => self.engine.load_queue(
                     tracks
                         .iter()
-                        .map(|track| audio::queue_entry(track, self.track_location(track)))
+                        .map(|track| {
+                            audio::queue_entry(
+                                track,
+                                self.track_location(track),
+                                self.loudness.gain_of(track),
+                            )
+                        })
                         .collect(),
                     index,
                 ),

@@ -505,7 +505,7 @@ checksum = "1254ebf6529f3763c491acfb5ab6e960809e3c75a38584cc664f8c5667fb7107"
 [[package]]
 name = "audio-stack-rs"
 version = "0.1.0"
-source = "git+https://github.com/obazin/audio-stack-rs?tag=remote-tracks#072589b2f3bca7c463f3f33f7b3dc5e1c202c15f"
+source = "git+https://github.com/obazin/audio-stack-rs?tag=measure-file#656f972b6f5f9b5646b031b4289708202817b34a"
 dependencies = [
  "base64 0.22.1",
  "biquad",

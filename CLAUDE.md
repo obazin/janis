@@ -52,7 +52,7 @@ Development hooks, debug builds only:
 | Module | Job | May depend on |
 |---|---|---|
 | `src/main.rs` | Composition: logger, the one-instance claim, backend, window, controller; the development hooks | everything |
-| `src/application.rs`, `src/application/*.rs` | The controller on the interface thread: boot, carrying out effects, engine events, covers, notifications, refreshes; one file per group of screens (`now_playing_screen`, `library_screens`, `radio_screen`, `settings_screen`, `jellyfin_settings`, `equalizer_sheet`) and per shared duty (`artwork`, `notices`) | every module, generated UI types |
+| `src/application.rs`, `src/application/*.rs` | The controller on the interface thread: boot, carrying out effects, engine events, covers, notifications, refreshes; one file per group of screens (`now_playing_screen`, `library_screens`, `radio_screen`, `settings_screen`, `jellyfin_settings`, `equalizer_sheet`) and per shared duty (`artwork`, `loudness`, `notices`) | every module, generated UI types |
 | `src/effects.rs` | `Effect`: what a state module asks the controller to do | `library`, `persistence`, `radio` (types only) |
 | `src/player.rs` | The playback mirror: what plays, transport flags, position interpolation | `audio` (event types), `effects` |
 | `src/equalizer.rs`, `src/playback_options.rs` | The EQ (bands, presets, linear phase); the four playback switches | `audio` (constants), `effects`, `persistence` (types) |

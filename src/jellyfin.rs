@@ -168,6 +168,11 @@ pub struct Item {
     album_primary_image_tag: Option<String>,
     people: Vec<Person>,
     media_sources: Vec<MediaSource>,
+    /// The song's gain in dB against -18 LUFS, the ReplayGain 2.0 reference:
+    /// the server's own EBU R128 measurement, or the file's ReplayGain tag.
+    normalization_gain: Option<f64>,
+    /// The same for the whole album the song is on.
+    album_normalization_gain: Option<f64>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -294,11 +299,14 @@ pub fn item_song(item: &Item, server_identifier: &str) -> ServerSong {
             year: item.production_year,
             genre: item.genres.first().cloned(),
             album_artist: non_empty(&item.album_artist),
-            // The engine measures a server song's loudness as it plays, as it
-            // does for any untagged file.
-            rg_track_gain_db: None,
+            // The server's gains stand where a file's ReplayGain tags would.
+            // It gives no peak, so none is known. A song it has not measured
+            // is measured by the engine as it plays, like any untagged file.
+            rg_track_gain_db: item.normalization_gain.filter(|gain| gain.is_finite()),
             rg_track_peak: None,
-            rg_album_gain_db: None,
+            rg_album_gain_db: item
+                .album_normalization_gain
+                .filter(|gain| gain.is_finite()),
             rg_album_peak: None,
         },
         artwork_item,
@@ -777,6 +785,8 @@ mod tests {
         "Container": "flac",
         "ImageTags": {},
         "AlbumPrimaryImageTag": "tag",
+        "NormalizationGain": -7.3,
+        "AlbumNormalizationGain": -5.9,
         "People": [{"Name": "Thomas", "Type": "Composer"}, {"Name": "Singer", "Type": "Artist"}],
         "MediaSources": [{
             "Path": "/media/music/Daft Punk/Homework/07 - Alive.flac",
@@ -816,6 +826,15 @@ mod tests {
             Some("album"),
             "a song without its own picture shows its album's"
         );
+        assert_eq!(
+            (metadata.rg_track_gain_db, metadata.rg_album_gain_db),
+            (Some(-7.3), Some(-5.9)),
+            "the server's gains stand for ReplayGain tags"
+        );
+        assert_eq!(
+            (metadata.rg_track_peak, metadata.rg_album_peak),
+            (None, None)
+        );
     }
 
     #[test]
@@ -846,6 +865,10 @@ mod tests {
         assert!(!song.metadata.lossless);
         assert_eq!(song.metadata.duration_secs, 0.0);
         assert_eq!(song.artwork_item, None);
+        assert_eq!(
+            song.metadata.rg_track_gain_db, None,
+            "a song the server has not measured has no gain"
+        );
     }
 
     #[test]
