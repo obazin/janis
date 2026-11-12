@@ -8,7 +8,7 @@ A native application written in **Rust**, with a **[Slint](https://slint.dev)** 
 
 - **Now Playing** — hero album art (embedded cover art, or a generated prism gradient), track/artist/composer/album metadata, live waveform with click-to-seek, transport with shuffle/repeat, volume, a queue card (up next / playlist / current album), and an artist spotlight drawn from your library.
 - **Library** — scan folders or import files; albums, artists and songs views grouped from real tags (`lofty`); search from the titlebar.
-- **Jellyfin** — sign in to your Jellyfin server in Settings and its songs join the library, playing the original files from the server through the same engine (EQ, gapless, normalization, waveform), with the server's cover art.
+- **Jellyfin** — sign in to your Jellyfin server in Settings and its songs join the library, playing the original files from the server through the same engine (EQ, gapless, normalization with the server's own gains, waveform), with the server's cover art.
 - **Discover** — shelves derived from your own library (recently added albums, artists, rediscoveries).
 - **Web Radio** — curated station list (SomaFM, FIP, Radio Paradise, KEXP, …) with country and genre filters, and favourites you star.
 - **Local Files** — drop zone (real OS drag-and-drop), scanned-library table with format badges, watched-folder management, rescan.

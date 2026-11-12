@@ -73,7 +73,7 @@ walkdir = "2"
 # inter-band phase distortion, offered by the equalizer sheet as a quality
 # mode. Pure code in the crate — it reuses the `realfft` the analyser already
 # links — so it pulls in no new dependency.
-audio-stack-rs = { git = "https://github.com/obazin/audio-stack-rs", tag = "remote-tracks", features = [
+audio-stack-rs = { git = "https://github.com/obazin/audio-stack-rs", tag = "measure-file", features = [
     "fir-eq",
 ] }
 

@@ -467,6 +467,8 @@ impl Application {
             }
         }
         self.refresh_everything();
+        // What the scan brought in without a gain is measured next.
+        self.measure_loudness();
     }
 
     /// Replaces the library the screens are built from.
