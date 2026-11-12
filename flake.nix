@@ -182,7 +182,15 @@
               name = "janis";
             }).overrideAttrs
               (old: {
-                nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ shorthands ++ audioTools ++ releaseTools ++ editorTools;
+                # pkg-config: its setup hook fills PKG_CONFIG_PATH from
+                # buildInputs, which is how fontconfig and alsa-lib are found.
+                nativeBuildInputs =
+                  (old.nativeBuildInputs or [ ])
+                  ++ [ pkgs.pkg-config ]
+                  ++ shorthands
+                  ++ audioTools
+                  ++ releaseTools
+                  ++ editorTools;
                 buildInputs = (old.buildInputs or [ ]) ++ audioLibs ++ windowLibs;
                 # Prepended: the bundle's own hook exec's into zsh, so anything
                 # appended after it would never run.
