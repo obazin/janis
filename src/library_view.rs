@@ -121,6 +121,33 @@ pub fn artists(tracks: &[Track]) -> Vec<ArtistGroup> {
     groups
 }
 
+/// What browsing an artist lists: the artist's tracks album by album,
+/// albums alphabetical (untitled last; two albums of one name apart by album
+/// artist), each in its running order.
+pub fn artist_tracks(group: &ArtistGroup) -> Vec<Track> {
+    let mut tracks = group.tracks.clone();
+    tracks.sort_by(|left, right| {
+        missing_last(left.album.as_deref())
+            .cmp(&missing_last(right.album.as_deref()))
+            .then_with(|| left.album_artist.cmp(&right.album_artist))
+            .then_with(|| compare_in_album(left, right))
+    });
+    tracks
+}
+
+/// A row title in the artist panel: the album, then the song, as
+/// "Electric Ladyland - Voodoo Child"; the song alone when untitled.
+pub fn artist_row_title(track: &Track) -> String {
+    match track
+        .album
+        .as_deref()
+        .filter(|album| !album.trim().is_empty())
+    {
+        Some(album) => format!("{album} - {}", track.title),
+        None => track.title.clone(),
+    }
+}
+
 /// The search field's text as the filters compare it.
 pub fn normalized_query(search: &str) -> String {
     search.trim().to_lowercase()
@@ -457,7 +484,7 @@ pub fn renewed_selection(
         SelectionKind::Artist => artists
             .iter()
             .find(|artist| artist.artist == selection.key)
-            .map(|artist| artist.tracks.clone()),
+            .map(artist_tracks),
     }?;
     Some(Selection {
         tracks,
@@ -1028,6 +1055,63 @@ mod tests {
         assert_eq!(renewed.label, "A");
 
         assert_eq!(renewed_selection(selection, &[], &[]), None);
+    }
+
+    #[test]
+    fn an_artist_lists_albums_alphabetically_each_in_running_order() {
+        let mut untitled = album_track(1, "Loose", "", "Jimi", None);
+        untitled.album = None;
+        let tracks = vec![
+            untitled,
+            album_track(2, "Voodoo Child", "Electric Ladyland", "Jimi", Some(15)),
+            album_track(3, "Purple Haze", "are You Experienced", "Jimi", Some(1)),
+            album_track(
+                4,
+                "Have You Ever Been",
+                "Electric Ladyland",
+                "Jimi",
+                Some(3),
+            ),
+            album_track(5, "Little Wing", "Axis: Bold as Love", "Jimi", Some(4)),
+        ];
+        let group = &artists(&tracks)[0];
+
+        let listed = artist_tracks(group);
+
+        assert_eq!(
+            titles(&listed),
+            [
+                "Purple Haze",
+                "Little Wing",
+                "Have You Ever Been",
+                "Voodoo Child",
+                "Loose"
+            ]
+        );
+        assert_eq!(
+            artist_row_title(&listed[3]),
+            "Electric Ladyland - Voodoo Child"
+        );
+        assert_eq!(artist_row_title(&listed[4]), "Loose");
+    }
+
+    #[test]
+    fn a_renewed_artist_selection_keeps_the_album_order() {
+        let tracks = [
+            album_track(1, "Second", "B", "X", Some(1)),
+            album_track(2, "First", "A", "X", Some(1)),
+        ];
+        let selection = Selection {
+            kind: SelectionKind::Artist,
+            key: "X".to_owned(),
+            label: "X".to_owned(),
+            tracks: Vec::new(),
+        };
+
+        let renewed = renewed_selection(selection, &albums(&tracks), &artists(&tracks))
+            .expect("the artist is still there");
+
+        assert_eq!(titles(&renewed.tracks), ["First", "Second"]);
     }
 
     #[test]
