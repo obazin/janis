@@ -23,7 +23,7 @@ Janis ships one "prism" theme. Every colour, typeface, text size, radius, shadow
 macOS, Windows and Linux. `src/platform.rs` holds what differs behind neutral names: the data directory, the title bar the application draws itself where the system keeps its window buttons over it, window dragging, bringing the window forward, files dropped on the window. Only macOS has been run; the other two compile by construction and are untested.
 
 **D6 · Dev shell and package from the `chess-flake` workspace** — *current*
-The flake composes the workspace's `rustShell` bundle (the name is historical; the bundle is domain-agnostic) and adds cmake for libopus and, on Linux, the libraries the window and the audio output need. The package is built with the workspace's Rust toolchain through `makeRustPlatform`, because nixpkgs' own compiler (1.91) trails what Slint 1.18 requires (1.92).
+The flake composes the workspace's `rustShell` bundle (the name is historical; the bundle is domain-agnostic) and adds cmake for libopus and, on Linux, the libraries the window and the audio output need. The package is built with the workspace's Rust toolchain through `makeRustPlatform`, because nixpkgs' own compiler (1.91) trails what Slint 1.18 requires (1.92). The lock overrides `workspace/nixpkgs` to at least the revision of the NixOS that runs Janis: a development build loads the system's graphics driver from `/run/opengl-driver` at run time, and a Mesa built against a newer glibc than the dev shell's fails to load, which leaves no OpenGL and no window.
 Superseded: the `tauriShell` bundle with Node, pnpm and the webkit stack (D6a, first version).
 
 **D47 · `reqwest` for the Jellyfin calls** — *current*
