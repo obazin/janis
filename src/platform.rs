@@ -38,6 +38,42 @@ pub fn select_backend() -> Result<(), String> {
         .map_err(|error| format!("select the windowing backend: {error}"))
 }
 
+/// Lowers the calling thread to the priority the system keeps for work no one
+/// is waiting on: it gets the processor only when nothing else wants it, on
+/// efficiency cores where the processor has them, and its disk reads give way
+/// to everyone else's. A thread at this priority must therefore never hold a
+/// lock another thread waits on.
+pub fn lower_current_thread_priority() {
+    // Background quality of service: efficiency cores, throttled disk and
+    // network reads.
+    #[cfg(target_os = "macos")]
+    let failed = unsafe {
+        libc::pthread_set_qos_class_self_np(libc::qos_class_t::QOS_CLASS_BACKGROUND, 0) != 0
+    };
+    // The weakest niceness, which the disk schedulers also read. On Linux a
+    // thread is its own scheduling entity, addressed by its thread id.
+    #[cfg(target_os = "linux")]
+    let failed =
+        unsafe { libc::setpriority(libc::PRIO_PROCESS, libc::gettid() as libc::id_t, 19) != 0 };
+    // Background mode lowers the processor, disk and memory priorities at once.
+    #[cfg(target_os = "windows")]
+    let failed = unsafe {
+        use windows_sys::Win32::System::Threading::{
+            GetCurrentThread, SetThreadPriority, THREAD_MODE_BACKGROUND_BEGIN,
+        };
+        SetThreadPriority(GetCurrentThread(), THREAD_MODE_BACKGROUND_BEGIN) == 0
+    };
+    #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+    let failed = false;
+    if failed {
+        log::warn!(
+            "lower the priority of the {} thread: {}",
+            std::thread::current().name().unwrap_or("unnamed"),
+            std::io::Error::last_os_error()
+        );
+    }
+}
+
 /// Brings the window in front of the others and gives it the keyboard.
 pub fn bring_forward(window: &slint::Window) {
     use slint::winit_030::WinitWindowAccessor;

@@ -14,7 +14,8 @@ use std::sync::{Arc, Mutex};
 use super::{post, Application};
 use crate::audio;
 use crate::background::Worker;
-use crate::library::{self, Gains, Track};
+use crate::library::{self, Gains, PendingLoudness, Track};
+use crate::platform;
 
 /// What the controller keeps for the background measurement.
 pub(super) struct LoudnessMeasurement {
@@ -32,8 +33,13 @@ pub(super) struct LoudnessMeasurement {
 
 impl LoudnessMeasurement {
     pub fn new() -> Result<Self, String> {
+        let worker = Worker::new("janis loudness")?;
+        // Measuring can take a whole processor core for minutes after music is
+        // added; at the lowest priority it yields to playback, the interface
+        // and everything else the computer is doing.
+        worker.run(platform::lower_current_thread_priority);
         Ok(Self {
-            worker: Worker::new("janis loudness")?,
+            worker,
             measured_gains: Default::default(),
             tried: Default::default(),
             stopping: Default::default(),
@@ -56,22 +62,28 @@ impl LoudnessMeasurement {
 }
 
 impl Application {
-    /// Measures, one after another on the loudness thread, every file in the
-    /// library that has no gain yet. Called at start-up and after each scan;
-    /// a call made while a measurement runs waits behind it and then finds
-    /// only what is still missing.
+    /// Measures every file in the library that has no gain yet. Called at
+    /// start-up and after each scan.
+    ///
+    /// The loudness thread runs at the lowest priority, where its disk access
+    /// gives way to every other thread's, so it never takes the database lock
+    /// the engine also waits on: the library thread finds the files and
+    /// stores each result. A call made while a measurement runs queues behind
+    /// it, and skips the files that one has already tried.
     pub(super) fn measure_loudness(&self) {
         let database = Arc::clone(&self.database);
+        self.library_worker
+            .run(move || match library::tracks_needing_loudness(&database) {
+                Ok(pending) => post(move |application| application.measure_files(pending)),
+                Err(error) => log::warn!("loudness measurement: {error}"),
+            });
+    }
+
+    /// Measures `pending`, one file after another, on the loudness thread.
+    fn measure_files(&self, pending: Vec<PendingLoudness>) {
         let tried = Arc::clone(&self.loudness.tried);
         let stopping = Arc::clone(&self.loudness.stopping);
         self.loudness.worker.run(move || {
-            let pending = match library::tracks_needing_loudness(&database) {
-                Ok(pending) => pending,
-                Err(error) => {
-                    log::warn!("loudness measurement: {error}");
-                    return;
-                }
-            };
             for track in pending {
                 if stopping.load(Ordering::Relaxed) {
                     return;
@@ -86,30 +98,27 @@ impl Application {
                 }
                 match audio::measure_file(Path::new(&track.path)) {
                     Ok(measured) => {
-                        // The database lock is held only for this one write.
-                        library::store_loudness(
-                            &database,
-                            track.track_id,
-                            measured.lufs,
-                            measured.peak,
-                        );
-                        let gain = library::resolved_gain(
-                            Gains::default(),
-                            Some(measured.lufs),
-                            Some(measured.peak),
-                        );
                         let track_id = track.track_id;
-                        post(move |application| {
-                            application
-                                .loudness
-                                .measured_gains
-                                .borrow_mut()
-                                .insert(track_id, gain);
-                        });
+                        post(move |application| application.loudness_measured(track_id, measured));
                     }
                     Err(error) => log::warn!("loudness measurement: {error}"),
                 }
             }
+        });
+    }
+
+    /// Plays `track_id` at its measured gain from the next queue on, and
+    /// stores the measurement from the library thread.
+    fn loudness_measured(&self, track_id: i64, measured: audio::Measured) {
+        let gain =
+            library::resolved_gain(Gains::default(), Some(measured.lufs), Some(measured.peak));
+        self.loudness
+            .measured_gains
+            .borrow_mut()
+            .insert(track_id, gain);
+        let database = Arc::clone(&self.database);
+        self.library_worker.run(move || {
+            library::store_loudness(&database, track_id, measured.lufs, measured.peak);
         });
     }
 }
