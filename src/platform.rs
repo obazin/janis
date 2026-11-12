@@ -61,11 +61,27 @@ pub fn on_file_dropped(window: &slint::Window, mut dropped: impl FnMut(PathBuf) 
 
 /// Starts moving the window with the pointer, for a title bar the application
 /// draws itself.
-pub fn drag_window(window: &slint::Window) {
+///
+/// While the system moves the window it holds the pointer, and on Wayland, X11
+/// and Windows the button's release never reaches the window. Slint would then
+/// keep the title bar's press, hand it every later click and so start a new
+/// move on each one, leaving the window unclickable. Once the move has begun,
+/// the pointer is reported as having left the window, which cancels that press
+/// without a click. The report is sent from the event loop, not from here,
+/// because this runs inside the dispatch of the press itself.
+pub fn drag_window(component: &(impl slint::ComponentHandle + 'static)) {
     use slint::winit_030::WinitWindowAccessor;
-    window.with_winit_window(|winit_window| {
+    component.window().with_winit_window(|winit_window| {
         if let Err(error) = winit_window.drag_window() {
             log::warn!("start window drag: {error}");
+        }
+    });
+    let weak = component.as_weak();
+    slint::Timer::single_shot(std::time::Duration::ZERO, move || {
+        if let Some(component) = weak.upgrade() {
+            component
+                .window()
+                .dispatch_event(slint::platform::WindowEvent::PointerExited);
         }
     });
 }
