@@ -135,11 +135,13 @@ export component LibraryScreen inherits Rectangle {
         }
     }
 
-    // A freshly opened album or artist is brought into view.
+    // Opening an album or artist always lands the same way: the panel of the
+    // one open before has already closed, and the row of the opened tile is
+    // scrolled to the top of the page, its tracks unfolding beneath it.
     property <int> selection: Library.selection-index;
     changed selection => {
-        if root.selection >= 0 && body.y + grid.accordion-top > page.scroll-offset + page.height - 180px {
-            page.scroll-to(body.y + grid.accordion-top - 180px);
+        if root.selection >= 0 {
+            page.scroll-to(body.y + grid.selected-line-top);
         }
     }
 }
