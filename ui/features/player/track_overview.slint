@@ -1,0 +1,79 @@
+import { Tokens } from "../../tokens.slint";
+import { Player } from "player.slint";
+
+// The shape of the whole current track, as a DAW draws an audio clip: a
+// lighter peak envelope around a solid RMS body, from the start of the track
+// on the left to its end on the right. Rust draws it as an alpha mask at this
+// element's size in physical pixels; it is coloured here twice, the part
+// already played in the waveform gradient, the rest muted, cut at the
+// playhead. A middle line stands for what is not read yet. A click seeks.
+export component TrackOverview inherits Rectangle {
+    in property <string> seek-label;
+
+    property <int> physical-width: round(root.width / 1phx);
+    property <int> physical-height: round(root.height / 1phx);
+    property <length> playhead-x: root.width * Player.overview-playhead;
+
+    function report-size() {
+        Player.overview-resized(root.physical-width, root.physical-height);
+    }
+
+    init => { root.report-size(); }
+    changed physical-width => { root.report-size(); }
+    changed physical-height => { root.report-size(); }
+
+    // What is not read yet still reads as a track.
+    Rectangle {
+        y: (root.height - self.height) / 2;
+        height: 1px;
+        background: Tokens.border-emphasis;
+    }
+
+    Image {
+        width: root.width;
+        height: root.height;
+        source: Player.overview;
+        image-fit: fill;
+        colorize: Tokens.overview-rest;
+    }
+
+    // The same mask in the waveform gradient, cut at the playhead. The image
+    // keeps the full width, so the gradient spans the whole track.
+    Rectangle {
+        x: 0;
+        width: root.playhead-x;
+        clip: true;
+        Image {
+            x: 0;
+            width: root.width;
+            height: root.height;
+            source: Player.overview;
+            image-fit: fill;
+            colorize: Tokens.waveform;
+        }
+    }
+
+    // Where a click would seek, while the pointer is over the shape.
+    if touch.has-hover: Rectangle {
+        x: touch.mouse-x - self.width / 2;
+        width: 1px;
+        background: Tokens.border-emphasis;
+    }
+
+    Rectangle {
+        x: root.playhead-x - self.width / 2;
+        width: 2px;
+        border-radius: self.width / 2;
+        background: Tokens.text;
+    }
+
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        accessible-role: slider;
+        accessible-label: root.seek-label;
+        accessible-value-minimum: 0;
+        accessible-value-maximum: 1;
+        accessible-value: Player.overview-playhead;
+        clicked => { Player.seek(self.mouse-x / self.width); }
+    }
+}

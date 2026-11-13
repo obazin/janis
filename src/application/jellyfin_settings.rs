@@ -154,14 +154,9 @@ impl Application {
     /// on its server.
     pub(super) fn track_location(&self, track: &Track) -> Location {
         if let Some(server_id) = track.server_id {
-            let state = self.media_server.borrow();
-            let location = state
-                .server()
-                .filter(|server| server.id == server_id)
-                .and_then(|server| {
-                    Session::new(server, &self.device_identifier)
-                        .stream_location(&track.path, &track.format)
-                });
+            let location = self
+                .session_for(server_id)
+                .and_then(|session| session.stream_location(&track.path, &track.format));
             if let Some(location) = location {
                 return location;
             }
@@ -173,6 +168,35 @@ impl Application {
             );
         }
         Location::File(PathBuf::from(&track.path))
+    }
+
+    /// Where a track's overview is read from, in the order to try them: its
+    /// file; or, for a song on the signed-in server, the server's small
+    /// transcode, then the original file should the server not transcode. A
+    /// song on a server Janis is not signed in to has nowhere to be read from.
+    pub(super) fn overview_locations(&self, track: &Track) -> Vec<Location> {
+        let Some(server_id) = track.server_id else {
+            return vec![Location::File(PathBuf::from(&track.path))];
+        };
+        let Some(session) = self.session_for(server_id) else {
+            return Vec::new();
+        };
+        [
+            session.overview_location(&track.path),
+            session.stream_location(&track.path, &track.format),
+        ]
+        .into_iter()
+        .flatten()
+        .collect()
+    }
+
+    /// The signed-in session, when it is the one of server `server_id`.
+    fn session_for(&self, server_id: i64) -> Option<Session> {
+        self.media_server
+            .borrow()
+            .server()
+            .filter(|server| server.id == server_id)
+            .map(|server| Session::new(server, &self.device_identifier))
     }
 
     /// The signed-in session, for the cover loader.

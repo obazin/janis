@@ -171,6 +171,11 @@ impl Application {
         self.show_current_details(&view, &player, &translations);
         self.refresh_output_readout(&player);
         self.refresh_active_station(&player);
+        self.refresh_track_overview(&player);
+        // A seek while paused moves the playhead, with no frame to carry it.
+        let progress = player.live_progress(Instant::now());
+        view.set_progress(progress as f32);
+        self.show_overview_playhead(progress);
 
         // The waveform stops ticking once it has come to rest; anything that
         // sets it moving again starts it back up.
@@ -495,7 +500,9 @@ impl Application {
 
         let view = self.window.global::<user_interface::Player>();
         let (width, height) = (view.get_mini_wave_width(), view.get_mini_wave_height());
-        if width > 0.0 && height > 0.0 {
+        // While the track's overview stands in for it, the mini trace is not
+        // drawn.
+        if width > 0.0 && height > 0.0 && !view.get_overview_shown() {
             view.set_mini_wave_commands(visualizer.path_commands(width, height).into());
         }
         let (width, height) = (view.get_big_wave_width(), view.get_big_wave_height());
@@ -510,6 +517,7 @@ impl Application {
         }
         let progress = player.live_progress(now) as f32;
         view.set_progress(progress);
+        self.show_overview_playhead(f64::from(progress));
         view.set_playhead_level(visualizer.height_at(progress, 1.0));
 
         if visualizer.at_rest(playing) {

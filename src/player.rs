@@ -220,9 +220,15 @@ impl Player {
             }
             EngineEvent::TrackChanged { index } => {
                 self.index = index;
-                vec![Effect::LoadCover(
-                    self.queue.get(index).map(|track| track.id),
-                )]
+                // The new track starts from its beginning; the engine's next
+                // position report confirms its exact length.
+                if let Some(track) = self.queue.get(index) {
+                    self.position_seconds = 0.0;
+                    self.duration_seconds = track.duration_secs;
+                    self.position_at = now;
+                }
+                let track_id = self.queue.get(index).map(|track| track.id);
+                vec![Effect::LoadCover(track_id), Effect::LoadOverview(track_id)]
             }
             EngineEvent::Device {
                 name, sample_rate, ..
@@ -276,7 +282,9 @@ impl Player {
         self.position_seconds = 0.0;
         self.duration_seconds = self.queue[self.index].duration_secs;
         self.position_at = now;
-        effects.push(Effect::LoadCover(Some(self.queue[self.index].id)));
+        let track_id = self.queue[self.index].id;
+        effects.push(Effect::LoadCover(Some(track_id)));
+        effects.push(Effect::LoadOverview(Some(track_id)));
         effects.push(Effect::LoadQueue {
             tracks: self.queue.clone(),
             index: self.index,
@@ -295,6 +303,7 @@ impl Player {
         self.connecting = true;
         self.connection_epoch += 1;
         effects.push(Effect::LoadCover(None));
+        effects.push(Effect::LoadOverview(None));
         effects.push(Effect::ConnectStation {
             station,
             epoch: self.connection_epoch,
@@ -446,6 +455,7 @@ mod tests {
             [
                 Effect::ShowStreamCover(None),
                 Effect::LoadCover(Some(2)),
+                Effect::LoadOverview(Some(2)),
                 Effect::LoadQueue { tracks, index: 1 },
             ]
         );
@@ -460,16 +470,31 @@ mod tests {
     }
 
     #[test]
-    fn a_track_change_moves_the_index_and_asks_for_the_new_cover() {
+    fn a_track_change_starts_the_new_track_and_asks_for_its_cover_and_overview() {
         let now = Instant::now();
         let mut player = Player::new(now);
-        player.play_queue(vec![timed_track(1, 10.0), timed_track(2, 10.0)], 0, now);
+        player.play_queue(vec![timed_track(1, 300.0), timed_track(2, 120.0)], 0, now);
+        player.apply(
+            EngineEvent::Position {
+                position_secs: 299.0,
+                duration_secs: 300.0,
+            },
+            now,
+            &no_stations,
+        );
 
         let effects = player.apply(EngineEvent::TrackChanged { index: 1 }, now, &no_stations);
 
         assert_eq!(player.current().map(|track| track.id), Some(2));
         assert_eq!(player.current_index(), Some(1));
-        assert_eq!(effects, [Effect::LoadCover(Some(2))]);
+        // The gapless join is drawn at once against the new track's length,
+        // not the old one's until the engine next reports a position.
+        assert_eq!(player.position_seconds(), 0.0);
+        assert_eq!(player.duration_seconds(), 120.0);
+        assert_eq!(
+            effects,
+            [Effect::LoadCover(Some(2)), Effect::LoadOverview(Some(2))]
+        );
     }
 
     #[test]

@@ -12,8 +12,9 @@ use std::sync::{Arc, Mutex};
 // module names `audio_stack_rs` directly.
 pub use audio_stack_rs::{
     audio_extension, gain_db, measure_file, read_cover, read_metadata, AudioEngine, CoverArt,
-    EngineEvent, Location, Measured, Metadata, Mode, QueueEntry, RemoteFile, Source, Store,
-    AUDIO_EXTENSIONS, CENTER_FREQS, EQ_BAND_COUNT, FRAME_BYTES, LOSSLESS_EXTENSIONS,
+    EngineEvent, Location, Measured, Metadata, Mode, OverviewSlice, QueueEntry, RemoteFile, Source,
+    Store, AUDIO_EXTENSIONS, CENTER_FREQS, EQ_BAND_COUNT, FRAME_BYTES, LOSSLESS_EXTENSIONS,
+    OVERVIEW_SLICES_PER_SECOND,
 };
 
 use crate::library::Track;

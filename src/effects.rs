@@ -89,6 +89,9 @@ pub enum Effect {
     // ── Presentation ─────────────────────────────────────────────────────────
     /// Show this track's cover art as the current art; `None` clears it.
     LoadCover(Option<i64>),
+    /// Read this track's overview, the shape the mini player draws of the
+    /// whole track; `None` (a station) puts the oscilloscope back.
+    LoadOverview(Option<i64>),
     /// Show the art a station announced (a `data:` URL); `None` clears it.
     ShowStreamCover(Option<String>),
     /// The engine reported its linear-phase mode and what it costs.

@@ -9,9 +9,11 @@ import { OpenEqualizerButton } from "../equalizer/open_equalizer_button.slint";
 import { Shell } from "../../shell.slint";
 import { Player } from "player.slint";
 import { Waveform } from "waveform.slint";
+import { TrackOverview } from "track_overview.slint";
 
-// The bar along the bottom of the window: what is playing, the transport, a
-// small trace, and the way into the equalizer. Present on every screen.
+// The bar along the bottom of the window: what is playing, the transport,
+// the shape of the track (or, for a station, a small trace), and the way
+// into the equalizer. Present on every screen.
 export component MiniPlayer inherits Rectangle {
     height: Metrics.mini-player-height;
     background: Tokens.mini-player;
@@ -109,7 +111,13 @@ export component MiniPlayer inherits Rectangle {
         VerticalLayout {
             horizontal-stretch: 1;
             alignment: center;
-            Waveform {
+            // A track draws its whole shape; a station, or nothing, the
+            // trace.
+            if Player.overview-shown: TrackOverview {
+                height: 44px;
+                seek-label: Strings.player-seek;
+            }
+            if !Player.overview-shown: Waveform {
                 height: 44px;
             }
         }

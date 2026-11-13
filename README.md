@@ -6,6 +6,7 @@ A native application written in **Rust**, with a **[Slint](https://slint.dev)** 
 
 ## Features
 
+- **Mini player** — the bottom bar, on every screen: what plays, the transport, and the shape of the whole track as a DAW draws it (peaks around an RMS body, the played part in colour, click to seek), read in the background for local files and Jellyfin songs alike; a station shows a live oscilloscope.
 - **Now Playing** — hero album art (embedded cover art, or a generated prism gradient), track/artist/composer/album metadata, live waveform with click-to-seek, transport with shuffle/repeat, volume, a queue card (up next / playlist / current album), and an artist spotlight drawn from your library.
 - **Library** — scan folders or import files; albums, artists and songs views grouped from real tags (`lofty`); search from the titlebar.
 - **Jellyfin** — sign in to your Jellyfin server in Settings and its songs join the library, playing the original files from the server through the same engine (EQ, gapless, normalization with the server's own gains, waveform), with the server's cover art.

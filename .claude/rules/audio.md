@@ -18,4 +18,5 @@ paths:
 - **Stations.** `AudioEngine::play_stream` is the one asynchronous call. It runs on `station_runtime`, which must outlive the call: the stream downloads on the runtime that opened it.
 - **The realtime callback** is the engine's; nothing in Janis runs there. Do not add work to `send_frame`.
 - **Shutdown.** `Application::shut_down` stops the engine after the event loop ends, while the process is alive.
+- **The overview.** `AudioEngine::read_overview` decodes a whole track, separately from playback, and blocks: call it only from the thread `application/track_overview.rs` starts for each read. A Jellyfin song is read from the server's small transcode (`Session::overview_location`), never a second full download of the original unless the server will not transcode.
 - **The trace.** `Visualizer` turns the frame's 160 leading bytes into path commands sized to each waveform view. The analyser sits after the volume stage, so a muted engine draws a flat trace: test the trace with `JANIS_AUDIBLE` and the system output muted.
