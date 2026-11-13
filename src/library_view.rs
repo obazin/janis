@@ -181,8 +181,8 @@ fn library_match(track: &Track, query: &str) -> bool {
         .any(|field| field.to_lowercase().contains(query))
 }
 
-/// The order of the Library tabs: songs by title, albums by name, artists by
-/// name, alphabetically as a reader expects (`text::compare_labels`). Kept as
+/// The order of the Library tabs: songs by artist, album and title, albums by
+/// name, artists by name, alphabetically as a reader expects (`text::compare_labels`). Kept as
 /// positions into the library's tracks, albums and artists, worked out once
 /// per library, so a search only filters. Discover, Local Files, the
 /// "Recently added" rows and Now Playing keep the library's own order, newest
@@ -197,12 +197,13 @@ pub struct LibraryOrder {
 impl LibraryOrder {
     pub fn new(tracks: &[Track], albums: &[AlbumGroup], artists: &[ArtistGroup]) -> Self {
         Self {
-            // Songs of the same name, then by artist and album.
+            // Songs by artist, then album, then title; a missing artist or
+            // album after every present one.
             songs: sorted_positions(tracks, |track| {
                 (
-                    label_key(&track.title),
                     missing_last(track.artist.as_deref()),
                     missing_last(track.album.as_deref()),
+                    label_key(&track.title),
                 )
             }),
             // Albums of the same name, by artist; untitled albums last.
@@ -779,8 +780,8 @@ mod tests {
             .collect();
         assert_eq!(
             song_identifiers,
-            [1, 3, 4, 2, 5],
-            "songs by title, the same title by artist"
+            [1, 2, 4, 3, 5],
+            "songs by artist, then album, then title; an untitled album last"
         );
         let album_names: Vec<Option<&str>> = albums_matching(&album_groups, &order, &tracks)
             .iter()
