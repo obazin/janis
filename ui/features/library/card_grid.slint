@@ -27,7 +27,10 @@ export component CardGrid inherits Rectangle {
 
     // The line holding the selected card, or -1 when none of these is selected.
     out property <int> selected-line: Library.selection-index >= 0 ? floor(Library.selection-index / root.columns) : -1;
-    out property <length> accordion-top: (root.selected-line + 1) * root.line-height;
+    // Where that line starts. Lines above the selected one are never pushed
+    // down by the accordion, so this holds as soon as the selection changes.
+    out property <length> selected-line-top: root.selected-line * root.line-height;
+    property <length> accordion-top: root.selected-line-top + root.line-height;
     property <length> accordion-room: root.selected-line >= 0 ? accordion.height + root.gap : 0px;
 
     // The first line in view. Below the open accordion, lines sit lower by

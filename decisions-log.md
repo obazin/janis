@@ -123,6 +123,7 @@ Superseded: a 60 fps waveform timer with the glow and the pulse on the display's
 
 **D21 · An album opens under its card's row** — *current*
 The accordion of a selected album or artist sits under the whole row holding its card. The first version's grid placed it immediately after the card, leaving the rest of that row empty.
+Opening a tile scrolls its row to the top of the page, whatever was open before and wherever the row was (2026-11-13). The page used to scroll only when the panel would open near the bottom of the view, so a panel closing above the opened tile shifted the grid under the pointer and the tracks could land out of view.
 
 **D22 · Interface changes are checked on snapshots** — *current*
 Debug builds can save what the window shows and be put in a state by environment variables (`JANIS_SNAPSHOT`, `JANIS_SCREEN`, `JANIS_AUTOPLAY`, …). It stands in for a person at the screen for everything but pointer interaction, and replaced the Svelte checker as the routine verification.
