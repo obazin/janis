@@ -27,6 +27,9 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 const DEFAULT_PORT: u16 = 8096;
 /// How a server song's library key starts; the rest is `<server>/<item>`.
 const SONG_ADDRESS_SCHEME: &str = "jellyfin://";
+/// Bits per second of the transcode an overview is read from: plenty for a
+/// shape, and about half a megabyte for a minute.
+const OVERVIEW_BIT_RATE: &str = "64000";
 
 /// Why a call to the server did not work out.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -89,6 +92,25 @@ impl Session {
         Some(Location::Remote(RemoteFile {
             url: url.into(),
             extension,
+        }))
+    }
+
+    /// Where the overview of a song is read from: the server's own
+    /// low-bitrate mono MP3 of it, a few percent of the original's size, so
+    /// drawing the shape of a song does not download it a second time at full
+    /// size. The shape of a transcode is the shape of the original.
+    pub fn overview_location(&self, song_address: &str) -> Option<Location> {
+        let item = item_of_song_address(song_address)?;
+        let mut url =
+            reqwest::Url::parse(&format!("{}/Audio/{item}/stream.mp3", self.address)).ok()?;
+        url.query_pairs_mut()
+            .append_pair("audioCodec", "mp3")
+            .append_pair("audioBitRate", OVERVIEW_BIT_RATE)
+            .append_pair("audioChannels", "1")
+            .append_pair("api_key", &self.access_token);
+        Some(Location::Remote(RemoteFile {
+            url: url.into(),
+            extension: Some("mp3".to_owned()),
         }))
     }
 }
@@ -754,6 +776,19 @@ mod tests {
             })
         );
         assert_eq!(session().stream_location("/music/a.flac", "FLAC"), None);
+    }
+
+    #[test]
+    fn a_song_overview_reads_a_small_mono_transcode_with_the_token() {
+        assert_eq!(
+            session().overview_location("jellyfin://server/item"),
+            Some(Location::Remote(RemoteFile {
+                url: "http://jellyfin.local:8096/Audio/item/stream.mp3?audioCodec=mp3&audioBitRate=64000&audioChannels=1&api_key=token"
+                    .to_owned(),
+                extension: Some("mp3".to_owned()),
+            }))
+        );
+        assert_eq!(session().overview_location("/music/a.flac"), None);
     }
 
     #[test]

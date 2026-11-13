@@ -22,6 +22,7 @@ mod library_view;
 mod logging;
 mod media_server;
 mod notifications;
+mod overview;
 mod persistence;
 mod platform;
 mod playback_options;

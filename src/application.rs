@@ -15,6 +15,7 @@ mod notices;
 mod now_playing_screen;
 mod radio_screen;
 mod settings_screen;
+mod track_overview;
 
 use artwork::{CurrentArt, Thumbnail};
 use now_playing_screen::NowPlayingLists;
@@ -120,6 +121,8 @@ pub struct Application {
     library_worker: Worker,
     /// Measures the files that carry no gain, and keeps what it found.
     loudness: loudness::LoudnessMeasurement,
+    /// The shape of the current track, as the mini player draws it.
+    track_overview: RefCell<track_overview::TrackOverview>,
     favourite_stations: RefCell<FavouriteStations>,
     /// The Jellyfin server the listener signed in to, as Settings shows it.
     media_server: RefCell<MediaServerState>,
@@ -223,6 +226,7 @@ impl Application {
             discover_artists: Rc::new(VecModel::default()),
             library_worker: Worker::new("janis library")?,
             loudness: loudness::LoudnessMeasurement::new()?,
+            track_overview: RefCell::new(track_overview::TrackOverview::new()),
             favourite_stations: RefCell::new(favourite_stations),
             media_server: RefCell::new(MediaServerState::default()),
             server_worker: Worker::new("janis media server")?,
@@ -280,6 +284,7 @@ impl Application {
     pub fn shut_down(&self) {
         self.frame_timer.stop();
         self.loudness.stop();
+        self.track_overview.borrow().stop();
         // What was still waiting for its slider to settle is saved now.
         self.volume_timer.stop();
         self.save_volume();
@@ -360,6 +365,7 @@ impl Application {
         self.connect_settings();
         self.connect_jellyfin();
         self.connect_player();
+        self.connect_track_overview();
         self.connect_equalizer();
         self.connect_covers();
         platform::on_file_dropped(self.window.window(), {
@@ -536,6 +542,7 @@ impl Application {
                 Effect::SyncMediaServer { server, epoch } => self.sync_media_server(server, epoch),
                 Effect::SignOutMediaServer { server } => self.sign_out_media_server(server),
                 Effect::LoadCover(track_id) => self.load_current_cover(track_id),
+                Effect::LoadOverview(track_id) => self.load_overview(track_id),
                 Effect::ShowStreamCover(url) => self.show_stream_cover(url),
                 Effect::LinearPhaseReported {
                     enabled,

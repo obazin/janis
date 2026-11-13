@@ -98,6 +98,18 @@ export global Player {
     // Where the trace sits at the playhead, as a share of the view's height.
     in property <float> playhead-level: 0.5;
 
+    // ── Track overview ────────────────────────────────────────────────────
+    // The shape of the whole current track, which the mini player draws in
+    // place of the trace while a track plays: an alpha mask, drawn by Rust at
+    // the size the view reports in physical pixels, and coloured here. Empty
+    // while the first slices are read.
+    in property <bool> overview-shown;
+    in property <image> overview;
+    // `progress`, in whole pixels of the overview: the playhead redraws the
+    // window only when it reaches the next pixel.
+    in property <float> overview-playhead;
+    callback overview-resized(width: int, height: int);
+
     callback toggled();
     callback next();
     callback previous();

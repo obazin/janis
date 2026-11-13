@@ -52,7 +52,7 @@ Development hooks, debug builds only:
 | Module | Job | May depend on |
 |---|---|---|
 | `src/main.rs` | Composition: logger, the one-instance claim, backend, window, controller; the development hooks | everything |
-| `src/application.rs`, `src/application/*.rs` | The controller on the interface thread: boot, carrying out effects, engine events, covers, notifications, refreshes; one file per group of screens (`now_playing_screen`, `library_screens`, `radio_screen`, `settings_screen`, `jellyfin_settings`, `equalizer_sheet`) and per shared duty (`artwork`, `loudness`, `notices`) | every module, generated UI types |
+| `src/application.rs`, `src/application/*.rs` | The controller on the interface thread: boot, carrying out effects, engine events, covers, notifications, refreshes; one file per group of screens (`now_playing_screen`, `library_screens`, `radio_screen`, `settings_screen`, `jellyfin_settings`, `equalizer_sheet`) and per shared duty (`artwork`, `loudness`, `notices`, `track_overview`) | every module, generated UI types |
 | `src/effects.rs` | `Effect`: what a state module asks the controller to do | `library`, `persistence`, `radio` (types only) |
 | `src/player.rs` | The playback mirror: what plays, transport flags, position interpolation | `audio` (event types), `effects` |
 | `src/equalizer.rs`, `src/playback_options.rs` | The EQ (bands, presets, linear phase); the four playback switches | `audio` (constants), `effects`, `persistence` (types) |
@@ -62,7 +62,7 @@ Development hooks, debug builds only:
 | `src/notifications.rs` | Error notifications, deduplicated by key | nothing |
 | `src/library_view.rs` | Pure: album and artist grouping, search, the Now Playing lists, the Library selection | `library` (types), `text`, `translations` |
 | `src/radio.rs` | The station catalog (`data/stations.json`) and its filters | `audio` (types), `text`, `translations` |
-| `src/visualizer.rs`, `src/halo.rs` | The oscilloscope trace as path commands; the glow picture behind the Now Playing art | nothing (`halo`: `covers` type) |
+| `src/visualizer.rs`, `src/halo.rs`, `src/overview.rs` | The oscilloscope trace as path commands; the glow picture behind the Now Playing art; the track overview's alpha mask | nothing (`halo`: `covers` type; `overview`: `audio` and `covers` types) |
 | `src/covers.rs` | Cover art from base64 to pixels; the bounded thumbnail cache | `library`, `persistence` |
 | `src/translations.rs`, `src/text.rs` | The catalogs and lookups; label ordering and formatting | `library` (types) |
 | `src/library.rs`, `src/persistence.rs` | The scanner, watched folders, cover lookup; the database, its migrations, the preferences. The only SQL | `audio` (facade functions), rusqlite, walkdir |
@@ -82,12 +82,13 @@ engine            → EngineBridge → post() → Player::apply → effects → 
 a station click   → Player::play_station → Effect::ConnectStation → the station runtime → same path
 a Jellyfin sync   → MediaServerState::sync → Effect::SyncMediaServer → server worker → tracks → library refresh
 a server song     → Effect::LoadQueue → Location::Remote (original file, downloaded as it plays) → same path
+a new track       → Effect::LoadOverview → overview thread → AudioEngine::read_overview → slices → overview::mask → Player.overview
 ```
 
 | Slint global | File | Carries |
 |---|---|---|
 | `Shell` | `ui/shell.slint` | Open screen, search text, equalizer sheet, notifications, window drag |
-| `Player` | `ui/features/player/player.slint` | What is playing, transport, waveform, animation clock, queue card, artist spotlight |
+| `Player` | `ui/features/player/player.slint` | What is playing, transport, waveform, track overview, animation clock, queue card, artist spotlight |
 | `Equalizer` | `ui/features/equalizer/equalizer.slint` | Gains, presets, linear phase |
 | `Library` | `ui/features/library/library.slint` | Library, Local Files and Discover lists; library actions |
 | `Covers` | `ui/features/library/covers.slint` | Thumbnails by track id, loaded as tiles appear |

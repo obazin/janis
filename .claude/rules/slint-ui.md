@@ -15,7 +15,7 @@ Each component belongs to exactly one tier and only uses tiers below it. One com
 | Atoms | `atoms/` | `Glyph`, `IconButton` (with the `IconButtonIdentifier` registry), `Chip`, `Badge`, `PrimaryButton`, `GhostButton`, `SectionLabel`, `Eyebrow`, `Toggle`, `TextField` (with `TextFieldKind`), `ArtTile`, `EmptyState` |
 | Molecules | `molecules/` | `NavItem`, `ToggleRow`, `PlayCircle`, `ScreenHeader`, `ScrollArea` |
 | Organisms | `organisms/` | `SidebarNav`, `Toaster` |
-| Features | `features/<name>/` | player: `MiniPlayer`, `Waveform`, `TransportControls`, `VolumeSlider`, `NowPlayingQueue` · equalizer: `EqualizerOverlay`, `EqualizerBandSlider`, `OpenEqualizerButton` · library: `CoverArt`, `AlbumCard`, `CardGrid`, `TrackRow`, `TrackList`, `LibraryTrackAccordion`, `LocalRow`, `LocalTable`, `ShelfTile`, `Shelf`, `ArtistSpotlight` · radio: `StationCard` · jellyfin: `JellyfinCard` |
+| Features | `features/<name>/` | player: `MiniPlayer`, `Waveform`, `TrackOverview`, `TransportControls`, `VolumeSlider`, `NowPlayingQueue` · equalizer: `EqualizerOverlay`, `EqualizerBandSlider`, `OpenEqualizerButton` · library: `CoverArt`, `AlbumCard`, `CardGrid`, `TrackRow`, `TrackList`, `LibraryTrackAccordion`, `LocalRow`, `LocalTable`, `ShelfTile`, `Shelf`, `ArtistSpotlight` · radio: `StationCard` · jellyfin: `JellyfinCard` |
 | Screens | `screens/` | `AppTitlebar`, `NowPlayingScreen`, `LibraryScreen`, `DiscoverScreen`, `RadioScreen`, `LocalFilesScreen`, `SettingsScreen` |
 | Page | `app.slint` | `AppWindow`: title bar, sidebar, the open screen, the mini player, and what floats above them |
 
