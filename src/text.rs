@@ -42,8 +42,11 @@ pub fn fold(text: &str) -> String {
             'ò'..='ö' => key.push('o'),
             'ù'..='ü' => key.push('u'),
             'ý' | 'ÿ' => key.push('y'),
+            'ø' => key.push('o'),
+            'ł' => key.push('l'),
             'æ' => key.push_str("ae"),
             'œ' => key.push_str("oe"),
+            'ß' => key.push_str("ss"),
             other => key.push(other),
         }
     }
@@ -89,12 +92,20 @@ pub fn quality_label(track: &Track) -> String {
     }
 }
 
-/// Monogram for generated art: first two characters of the title.
+/// Monogram for generated art: the title's first two letters, in capitals;
+/// a letter whose capital is two letters ("ß") fills both.
 pub fn art_initials(title: &str) -> String {
-    if title.is_empty() {
-        return "?".to_owned();
+    let initials: String = title
+        .trim_start()
+        .chars()
+        .flat_map(char::to_uppercase)
+        .take(2)
+        .collect();
+    if initials.is_empty() {
+        "?".to_owned()
+    } else {
+        initials
     }
-    title.chars().take(2).flat_map(char::to_uppercase).collect()
 }
 
 /// How many gradients the generated art tile chooses between.
@@ -207,5 +218,55 @@ mod tests {
         assert_eq!(sample_rate_label(Some(44_100)), "44.1 kHz");
         assert_eq!(sample_rate_label(Some(96_000)), "96.0 kHz");
         assert_eq!(sample_rate_label(None), "—");
+    }
+
+    #[test]
+    fn labels_differing_only_by_case_sort_in_a_fixed_order() {
+        assert_eq!(compare_labels("ABC", "abc"), Ordering::Less);
+        assert_eq!(compare_labels("abc", "ABC"), Ordering::Greater);
+        assert_eq!(compare_labels("abc", "abc"), Ordering::Equal);
+    }
+
+    #[test]
+    fn ligatures_and_other_latin_letters_sort_and_search_as_their_plain_letters() {
+        assert_eq!(fold("Æon"), "aeon");
+        assert_eq!(fold("Œuvre"), "oeuvre");
+        assert_eq!(fold("Sigur Rós"), "sigur ros");
+        assert_eq!(fold("Mø"), "mo");
+        assert_eq!(fold("Straße"), "strasse");
+        assert_eq!(fold("Łódka"), "lodka");
+    }
+
+    #[test]
+    fn initials_are_two_letters_even_for_a_letter_that_uppercases_to_two() {
+        assert_eq!(art_initials("ßa"), "SS");
+        assert_eq!(art_initials("  abba"), "AB");
+        assert_eq!(art_initials("x"), "X");
+        assert_eq!(art_initials(""), "?");
+        assert_eq!(art_initials("   "), "?");
+    }
+
+    #[test]
+    fn a_quality_badge_says_hi_res_from_the_bit_depth_or_the_sample_rate_alone() {
+        assert_eq!(
+            quality_label(&track(1, "a").quality("FLAC", 16, 96_000)),
+            "Hi-Res · FLAC 16/96"
+        );
+        assert_eq!(
+            quality_label(&track(1, "a").quality("FLAC", 16, 48_000)),
+            "FLAC 16/48"
+        );
+        let depth_only = crate::library::Track {
+            bit_depth: Some(24),
+            ..track(1, "a")
+        };
+        assert_eq!(quality_label(&depth_only), "Hi-Res · FLAC");
+    }
+
+    #[test]
+    fn an_hour_reads_in_minutes_and_a_time_that_is_not_a_number_as_zero() {
+        assert_eq!(format_time(3600.0), "60:00");
+        assert_eq!(format_time(f64::INFINITY), "0:00");
+        assert_eq!(format_time(-5.0), "0:00");
     }
 }
