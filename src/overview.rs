@@ -93,7 +93,11 @@ pub fn mask(
 /// `progress` (0 to 1) rounded down to a whole pixel of a view `width`
 /// pixels wide, so a playhead only moves when it reaches the next pixel.
 pub fn pixel_progress(progress: f64, width: usize) -> f64 {
-    let progress = progress.clamp(0.0, 1.0);
+    let progress = if progress.is_nan() {
+        0.0
+    } else {
+        progress.clamp(0.0, 1.0)
+    };
     if width == 0 {
         return progress;
     }
@@ -227,5 +231,11 @@ mod tests {
     #[test]
     fn the_slices_say_how_long_they_last() {
         assert_eq!(seconds_of(&second(LOUD)), 1.0);
+    }
+
+    #[test]
+    fn a_progress_that_is_not_a_number_is_the_start() {
+        assert_eq!(pixel_progress(f64::NAN, 100), 0.0);
+        assert_eq!(pixel_progress(f64::NAN, 0), 0.0);
     }
 }

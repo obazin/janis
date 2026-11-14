@@ -154,7 +154,9 @@ impl Player {
 
     /// Boot hydration: the volume comes from the preferences row.
     pub fn restore_volume(&mut self, volume: f64) -> Vec<Effect> {
-        self.volume = volume.clamp(0.0, 1.0);
+        if !volume.is_nan() {
+            self.volume = volume.clamp(0.0, 1.0);
+        }
         vec![Effect::SetVolume(self.volume)]
     }
 
@@ -381,6 +383,9 @@ impl Player {
     }
 
     pub fn set_volume(&mut self, volume: f64) -> Vec<Effect> {
+        if volume.is_nan() {
+            return Vec::new();
+        }
         self.volume = volume.clamp(0.0, 1.0);
         vec![
             Effect::SetVolume(self.volume),
@@ -794,5 +799,19 @@ mod tests {
         assert_eq!(player.toggle_repeat(), [Effect::SetRepeat(true)]);
         assert_eq!(player.toggle_shuffle(), [Effect::SetShuffle(false)]);
         assert!(player.repeat());
+    }
+
+    #[test]
+    fn a_volume_that_is_not_a_number_is_refused() {
+        let now = Instant::now();
+        let mut player = Player::new(now);
+        player.set_volume(0.5);
+        assert!(player.set_volume(f64::NAN).is_empty());
+        assert_eq!(player.volume(), 0.5);
+        assert_eq!(
+            player.restore_volume(f64::NAN),
+            [Effect::SetVolume(0.5)],
+            "the engine keeps the volume it had"
+        );
     }
 }
