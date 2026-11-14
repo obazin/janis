@@ -96,11 +96,9 @@ pub struct Application {
     thumbnails: RefCell<covers::BoundedCache<covers::CoverKey, Thumbnail>>,
     /// Which cover each library track shows, renewed with the library.
     cover_keys: RefCell<covers::CoverKeys>,
-    /// Bumped when the library is replaced, so a thumbnail read from the
-    /// library as it was is recognised and dropped.
-    thumbnail_epoch: Cell<u64>,
     /// The thumbnails tiles asked for that are not cached: waiting to be
-    /// confirmed by the tiles still in view, or loading.
+    /// confirmed by the tiles still in view, or loading; its epoch drops a
+    /// thumbnail read from the library as it was before it was replaced.
     cover_requests: RefCell<CoverRequests<covers::CoverKey>>,
     /// Runs the cover checks while requests wait.
     cover_timer: Timer,
@@ -218,7 +216,6 @@ impl Application {
             tracks: RefCell::new(tracks),
             current_art: RefCell::new(CurrentArt::default()),
             thumbnails: RefCell::new(covers::BoundedCache::new(covers::THUMBNAIL_LIMIT)),
-            thumbnail_epoch: Cell::new(0),
             cover_requests: RefCell::new(CoverRequests::new(
                 artwork::PARALLEL_THUMBNAILS,
                 artwork::PARALLEL_PREFETCHES,

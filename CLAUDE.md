@@ -65,7 +65,7 @@ Development hooks, debug builds only:
 | `src/now_playing.rs` | Pure: what Now Playing and the mini player say about what plays, and which cover they show | `audio` (types), `library_view`, `player`, `text`, `translations` |
 | `src/radio.rs` | The station catalog (`data/stations.json`) and its filters | `audio` (types), `text`, `translations` |
 | `src/visualizer.rs`, `src/halo.rs`, `src/overview.rs` | The oscilloscope trace as path commands; the glow picture behind the Now Playing art; the track overview's alpha mask | nothing (`halo`: `covers` type; `overview`: `audio` and `covers` types) |
-| `src/covers.rs` | Cover art from base64 to pixels; the bounded thumbnail cache | `library`, `persistence` |
+| `src/covers.rs` | Cover art from base64 to pixels; the bounded thumbnail cache; which loads of the art of what plays are still wanted | `library` (types) |
 | `src/cover_requests.rs` | Which thumbnails to load: the requests the tiles still in view repeat, then the places just beyond a list at rest, a few at once | nothing |
 | `src/translations.rs`, `src/text.rs` | The catalogs and lookups; label ordering and formatting | `library` (types) |
 | `src/library.rs`, `src/persistence.rs` | The scanner, watched folders, cover lookup; the database, its migrations, the preferences. The only SQL | `audio` (facade functions), rusqlite, walkdir |

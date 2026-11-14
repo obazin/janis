@@ -217,7 +217,7 @@ impl Application {
         view.set_station_genre(text.station_genre.into());
 
         let art = self.current_art.borrow();
-        let shown = now_playing::cover_shown(player.mode(), art.track_cover_failed);
+        let shown = now_playing::cover_shown(player.mode(), art.requests.failed());
         let cover = if shown.stream {
             art.stream_cover.clone()
         } else {
