@@ -162,31 +162,33 @@ impl Application {
         view.on_shelf_tile_clicked({
             let weak = std::rc::Rc::downgrade(self);
             move |shelf, index| {
-                if let (Some(application), Some(place)) = (weak.upgrade(), list_place(index)) {
-                    application.play_shelf_tile(&shelf, place);
+                let shelf = library_view::Shelf::from_identifier(&shelf);
+                if let (Some(application), Some(shelf), Some(place)) =
+                    (weak.upgrade(), shelf, list_place(index))
+                {
+                    application.play_shelf_tile(shelf, place);
                 }
             }
         });
     }
 
     /// A click on a Discover tile plays the album or the artist it shows.
-    fn play_shelf_tile(&self, shelf: &str, index: usize) {
+    fn play_shelf_tile(&self, shelf: library_view::Shelf, index: usize) {
         let tracks = {
             let screen = self.library_screen.borrow();
             match shelf {
-                "recent" => screen
+                library_view::Shelf::RecentAlbums => screen
                     .recent_albums
                     .get(index)
                     .map(|album| album.tracks.clone()),
-                "rediscover" => screen
+                library_view::Shelf::Rediscover => screen
                     .rediscover_albums
                     .get(index)
                     .map(|album| album.tracks.clone()),
-                "artists" => screen
+                library_view::Shelf::Artists => screen
                     .shelf_artists
                     .get(index)
                     .map(|artist| artist.tracks.clone()),
-                _ => None,
             }
         };
         if let Some(tracks) = tracks {
@@ -375,16 +377,7 @@ impl Application {
         view.set_scan_report(
             self.last_report
                 .get()
-                .map(|report| {
-                    translations.translate(
-                        "local.scanReport",
-                        &[
-                            ("added", report.added.to_string()),
-                            ("updated", report.updated.to_string()),
-                            ("skipped", report.skipped.to_string()),
-                        ],
-                    )
-                })
+                .map(|report| library_view::scan_report_line(&report, &translations))
                 .unwrap_or_default()
                 .into(),
         );

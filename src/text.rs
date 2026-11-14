@@ -50,6 +50,14 @@ pub fn fold(text: &str) -> String {
     key
 }
 
+/// The output's sample rate as the Settings readout shows it, "48.0 kHz", or
+/// a dash before the output opens.
+pub fn sample_rate_label(sample_rate: Option<u32>) -> String {
+    sample_rate
+        .map(|rate| format!("{:.1} kHz", f64::from(rate) / 1000.0))
+        .unwrap_or_else(|| "—".to_owned())
+}
+
 /// Seconds → "m:ss" (floors, clamps negatives and non-numbers to 0).
 pub fn format_time(seconds: f64) -> String {
     let whole = if seconds.is_finite() {
@@ -192,5 +200,12 @@ mod tests {
             labels,
             ["Ambient", "Éclectique", "électronique", "Rock", "Zouk"]
         );
+    }
+
+    #[test]
+    fn a_sample_rate_reads_in_kilohertz_and_none_as_a_dash() {
+        assert_eq!(sample_rate_label(Some(44_100)), "44.1 kHz");
+        assert_eq!(sample_rate_label(Some(96_000)), "96.0 kHz");
+        assert_eq!(sample_rate_label(None), "—");
     }
 }
