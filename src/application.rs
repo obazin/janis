@@ -38,6 +38,7 @@ use crate::library::{self, LoudnessStore, ScanReport, Track, WatchedFolder};
 use crate::library_view::{self, AlbumGroup, ArtistGroup, QueueView};
 use crate::media_server::MediaServerState;
 use crate::notifications::Notifications;
+use crate::overview_reads::OverviewReads;
 use crate::persistence::{self, DbState, Preferences};
 use crate::platform;
 use crate::playback_options::PlaybackOptions;
@@ -136,7 +137,7 @@ pub struct Application {
     /// Measures the files that carry no gain, and keeps what it found.
     loudness: loudness::LoudnessMeasurement,
     /// The shape of the current track, as the mini player draws it.
-    track_overview: RefCell<track_overview::TrackOverview>,
+    track_overview: RefCell<OverviewReads>,
     favourite_stations: RefCell<FavouriteStations>,
     /// The Jellyfin server the listener signed in to, as Settings shows it.
     media_server: RefCell<MediaServerState>,
@@ -250,7 +251,7 @@ impl Application {
             discover_artists: Rc::new(VecModel::default()),
             library_worker: Worker::new("janis library")?,
             loudness: loudness::LoudnessMeasurement::new()?,
-            track_overview: RefCell::new(track_overview::TrackOverview::new()),
+            track_overview: RefCell::new(OverviewReads::default()),
             favourite_stations: RefCell::new(favourite_stations),
             media_server: RefCell::new(MediaServerState::default()),
             server_worker: Worker::new("janis media server")?,

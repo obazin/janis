@@ -60,6 +60,7 @@ Development hooks, debug builds only:
 | `src/media_server.rs` | The Jellyfin server signed in to: sign-in, sync and sign-out decisions | `effects`, `jellyfin`, `library`, `persistence` (types) |
 | `src/jellyfin.rs` | The Jellyfin client (sign-in, song listing, pictures) and the pure mapping of its answers | `audio` (types), `library` (types), `persistence` (types), reqwest |
 | `src/notifications.rs` | Error notifications, deduplicated by key | nothing |
+| `src/overview_reads.rs` | The track overview's reads: which start, which results count, what is kept, the order places are tried in | `audio` (types), `covers` (cache) |
 | `src/library_view.rs` | Pure: album and artist grouping, search, the Now Playing lists, the Library selection | `library` (types), `text`, `translations` |
 | `src/now_playing.rs` | Pure: what Now Playing and the mini player say about what plays, and which cover they show | `audio` (types), `library_view`, `player`, `text`, `translations` |
 | `src/radio.rs` | The station catalog (`data/stations.json`) and its filters | `audio` (types), `text`, `translations` |

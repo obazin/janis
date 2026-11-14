@@ -25,6 +25,7 @@ mod media_server;
 mod notifications;
 mod now_playing;
 mod overview;
+mod overview_reads;
 mod persistence;
 mod platform;
 mod playback_options;
