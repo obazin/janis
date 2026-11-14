@@ -37,6 +37,8 @@ pub struct MediaServerState {
     message_key: Option<&'static str>,
     /// Tags the request in flight, so a late answer is recognised.
     epoch: u64,
+    /// Where a sign-in started from, which is where a failed one returns.
+    signing_in_from: Phase,
 }
 
 impl MediaServerState {
@@ -81,6 +83,7 @@ impl MediaServerState {
             self.message_key = Some("jellyfin.status.userName");
             return Vec::new();
         }
+        self.signing_in_from = self.phase;
         self.phase = Phase::SigningIn;
         self.message_key = Some("jellyfin.status.signingIn");
         self.epoch += 1;
@@ -110,10 +113,12 @@ impl MediaServerState {
             }
             Err(failure) => {
                 log::warn!("Jellyfin sign-in: {failure:?}");
-                self.phase = if self.server.is_some() {
-                    Phase::SignInAgain
-                } else {
-                    Phase::SignedOut
+                // A failed attempt to switch server or user leaves the current
+                // one signed in: its token still works.
+                self.phase = match (self.signing_in_from, &self.server) {
+                    (Phase::SignedIn, Some(_)) => Phase::SignedIn,
+                    (_, Some(_)) => Phase::SignInAgain,
+                    (_, None) => Phase::SignedOut,
                 };
                 self.message_key = Some(failure_key(&failure));
                 Vec::new()
@@ -397,5 +402,48 @@ mod tests {
         let mut state = MediaServerState::default();
         let effects = state.sign_in("host", "listener", "hunter2");
         assert!(!format!("{effects:?}").contains("hunter2"));
+    }
+
+    #[test]
+    fn a_failed_sign_in_while_signed_in_keeps_the_current_server() {
+        let mut state = signed_in();
+        let current = state.server().cloned();
+        let epoch = sign_in_epoch(&state.sign_in("http://other.local", "someone", "wrong"));
+
+        assert!(state
+            .sign_in_finished(epoch, Err(Failure::CredentialsRejected))
+            .is_empty());
+
+        assert_eq!(state.phase(), Phase::SignedIn);
+        assert_eq!(state.server().cloned(), current);
+        assert_eq!(
+            state.message_key(),
+            Some(failure_key(&Failure::CredentialsRejected))
+        );
+    }
+
+    #[test]
+    fn signing_in_again_as_another_user_replaces_the_server_and_reads_its_songs() {
+        let mut state = signed_in();
+        let epoch = sign_in_epoch(&state.sign_in("http://jellyfin.local:8096", "other", "right"));
+        let other = MediaServer {
+            id: 2,
+            user_identifier: "other".to_owned(),
+            user_name: "other".to_owned(),
+            access_token: "other token".to_owned(),
+            ..server()
+        };
+
+        let effects = state.sign_in_finished(epoch, Ok(other.clone()));
+
+        assert_eq!(state.server(), Some(&other));
+        assert_eq!(state.phase(), Phase::Syncing);
+        assert_eq!(
+            effects,
+            [Effect::SyncMediaServer {
+                server: other,
+                epoch: epoch + 1,
+            }]
+        );
     }
 }
