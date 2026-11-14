@@ -5,7 +5,7 @@ use std::rc::Rc;
 
 use slint::ComponentHandle;
 
-use super::Application;
+use super::{list_place, Application};
 use crate::player::Player;
 use crate::radio::{self, Station, ALL_COUNTRIES_KEY, ALL_GENRES_KEY};
 use crate::text;
@@ -74,12 +74,8 @@ impl Application {
             }
         }));
         view.on_station_clicked(self.handler(|application, index: i32| {
-            let station = application
-                .radio_screen
-                .borrow()
-                .shown
-                .get(usize::try_from(index).unwrap_or(usize::MAX))
-                .cloned();
+            let station = list_place(index)
+                .and_then(|place| application.radio_screen.borrow().shown.get(place).cloned());
             if let Some(station) = station {
                 let effects = application.player.borrow_mut().play_station(station);
                 application.run(effects);

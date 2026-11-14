@@ -4,7 +4,7 @@ use std::rc::Rc;
 
 use slint::{ComponentHandle, Model, ModelRc, VecModel};
 
-use super::Application;
+use super::{list_place, Application};
 use crate::equalizer;
 use crate::user_interface;
 
@@ -23,11 +23,11 @@ impl Application {
         equalizer.on_band_changed({
             let weak = Rc::downgrade(self);
             move |index, gain| {
-                if let Some(application) = weak.upgrade() {
-                    let effects = application.equalizer.borrow_mut().set_band(
-                        usize::try_from(index).unwrap_or(usize::MAX),
-                        f64::from(gain),
-                    );
+                if let (Some(application), Some(band)) = (weak.upgrade(), list_place(index)) {
+                    let effects = application
+                        .equalizer
+                        .borrow_mut()
+                        .set_band(band, f64::from(gain));
                     application.run(effects);
                     application.refresh_equalizer();
                 }

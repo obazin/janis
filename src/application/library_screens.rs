@@ -8,7 +8,8 @@ use std::sync::Arc;
 use slint::ComponentHandle;
 
 use super::{
-    album_gradient_index, gradient_index, interface_id, post, with_application, Application,
+    album_gradient_index, gradient_index, interface_id, list_place, post, with_application,
+    Application,
 };
 use crate::audio;
 use crate::covers;
@@ -82,12 +83,14 @@ impl Application {
             }),
         );
         view.on_album_clicked(self.handler(|application, index: i32| {
-            let album = application
-                .library_screen
-                .borrow()
-                .shown_albums
-                .get(row(index))
-                .cloned();
+            let album = list_place(index).and_then(|place| {
+                application
+                    .library_screen
+                    .borrow()
+                    .shown_albums
+                    .get(place)
+                    .cloned()
+            });
             let Some(album) = album else {
                 return;
             };
@@ -105,12 +108,14 @@ impl Application {
             });
         }));
         view.on_artist_clicked(self.handler(|application, index: i32| {
-            let artist = application
-                .library_screen
-                .borrow()
-                .shown_artists
-                .get(row(index))
-                .cloned();
+            let artist = list_place(index).and_then(|place| {
+                application
+                    .library_screen
+                    .borrow()
+                    .shown_artists
+                    .get(place)
+                    .cloned()
+            });
             let Some(artist) = artist else {
                 return;
             };
@@ -123,11 +128,11 @@ impl Application {
         }));
         view.on_song_clicked(self.handler(|application, index: i32| {
             let tracks = application.library_screen.borrow().shown_tracks.clone();
-            application.play_queue(tracks, row(index));
+            application.play_list(tracks, index);
         }));
         view.on_recent_clicked(self.handler(|application, index: i32| {
             let tracks = application.library_screen.borrow().recent_tracks.clone();
-            application.play_queue(tracks, row(index));
+            application.play_list(tracks, index);
         }));
         view.on_selection_track_clicked(self.handler(|application, index: i32| {
             let tracks = application
@@ -137,7 +142,7 @@ impl Application {
                 .as_ref()
                 .map(|selection| selection.tracks.clone());
             if let Some(tracks) = tracks {
-                application.play_queue(tracks, row(index));
+                application.play_list(tracks, index);
             }
         }));
         view.on_selection_closed(self.action(|application| {
@@ -155,7 +160,7 @@ impl Application {
         view.set_folders(self.library_folders.clone().into());
         view.on_local_track_clicked(self.handler(|application, index: i32| {
             let tracks = application.library_screen.borrow().local_tracks.clone();
-            application.play_queue(tracks, row(index));
+            application.play_list(tracks, index);
         }));
         view.on_rescan(self.action(Application::rescan));
         view.on_folder_removed(self.handler(|application, id: i32| {
@@ -171,8 +176,8 @@ impl Application {
         view.on_shelf_tile_clicked({
             let weak = std::rc::Rc::downgrade(self);
             move |shelf, index| {
-                if let Some(application) = weak.upgrade() {
-                    application.play_shelf_tile(&shelf, row(index));
+                if let (Some(application), Some(place)) = (weak.upgrade(), list_place(index)) {
+                    application.play_shelf_tile(&shelf, place);
                 }
             }
         });
@@ -543,10 +548,6 @@ fn await_dialog(dialog: impl std::future::Future<Output = ()> + 'static) {
     if let Err(error) = slint::spawn_local(dialog) {
         log::error!("open a system dialog: {error}");
     }
-}
-
-fn row(index: i32) -> usize {
-    usize::try_from(index).unwrap_or(usize::MAX)
 }
 
 fn album_card(album: &AlbumGroup, translations: &Translations) -> LibraryCard {
