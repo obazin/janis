@@ -462,6 +462,14 @@ impl Application {
     // ── Playback ────────────────────────────────────────────────────────────
 
     /// Replaces the queue and starts at `index`.
+    /// Plays a list the window shows from the row clicked; a row that is not
+    /// in the list plays nothing.
+    fn play_list(&self, tracks: Vec<Track>, index: i32) {
+        if let Some(place) = list_place(index).filter(|place| *place < tracks.len()) {
+            self.play_queue(tracks, place);
+        }
+    }
+
     pub fn play_queue(&self, tracks: Vec<Track>, index: usize) {
         let effects = self
             .player
@@ -660,4 +668,23 @@ fn album_gradient_index(album: &AlbumGroup) -> i32 {
 /// The gradient a track's generated art wears.
 fn gradient_index(track: &Track) -> i32 {
     text::art_gradient_index(&library_view::art_seed(track)) as i32
+}
+
+/// The place in a list a row index from the window stands for. A negative
+/// index stands for no row; one past the end is refused where it is used.
+fn list_place(index: i32) -> Option<usize> {
+    usize::try_from(index).ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_negative_row_stands_for_no_place() {
+        assert_eq!(list_place(-1), None);
+        assert_eq!(list_place(i32::MIN), None);
+        assert_eq!(list_place(0), Some(0));
+        assert_eq!(list_place(41), Some(41));
+    }
 }

@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use slint::{ComponentHandle, Image, ModelRc, TimerMode};
 
-use super::{album_gradient_index, gradient_index, interface_id, Application};
+use super::{album_gradient_index, gradient_index, interface_id, list_place, Application};
 use crate::audio::Mode;
 use crate::halo;
 use crate::library::Track;
@@ -93,13 +93,19 @@ impl Application {
             application.refresh_now_playing_lists();
         }));
         player.on_queue_row_clicked(self.handler(|application, index: i32| {
-            application.play_queue_row(usize::try_from(index).unwrap_or_default());
+            if let Some(place) = list_place(index) {
+                application.play_queue_row(place);
+            }
         }));
         player.on_spotlight_track_clicked(self.handler(|application, index: i32| {
-            application.play_spotlight_track(usize::try_from(index).unwrap_or_default());
+            if let Some(place) = list_place(index) {
+                application.play_spotlight_track(place);
+            }
         }));
         player.on_spotlight_album_clicked(self.handler(|application, index: i32| {
-            application.play_spotlight_album(usize::try_from(index).unwrap_or_default());
+            if let Some(place) = list_place(index) {
+                application.play_spotlight_album(place);
+            }
         }));
 
         let weak = Rc::downgrade(self);
