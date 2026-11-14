@@ -7,7 +7,7 @@ use slint::ComponentHandle;
 
 use super::{list_place, Application};
 use crate::player::Player;
-use crate::radio::{self, Station, ALL_COUNTRIES_KEY, ALL_GENRES_KEY};
+use crate::radio::{self, Chip, Filters, Station};
 use crate::text;
 use crate::user_interface::{self, RadioChip, StationRow};
 
@@ -15,10 +15,7 @@ use crate::user_interface::{self, RadioChip, StationRow};
 /// "all" — and the stations they keep, so a click finds its station.
 #[derive(Default)]
 pub(super) struct RadioScreen {
-    countries: Vec<String>,
-    genres: Vec<String>,
-    /// Only the starred stations are shown.
-    favourites_only: bool,
+    filters: Filters,
     shown: Vec<Station>,
 }
 
@@ -30,32 +27,27 @@ impl Application {
         view.set_stations(self.radio_stations.clone().into());
 
         view.on_country_toggled(self.handler(|application, key: slint::SharedString| {
-            {
-                let mut screen = application.radio_screen.borrow_mut();
-                if key == ALL_COUNTRIES_KEY {
-                    screen.countries.clear();
-                } else {
-                    radio::toggle_filter(&mut screen.countries, &key);
-                }
-            }
+            application
+                .radio_screen
+                .borrow_mut()
+                .filters
+                .toggle_country(&key);
             application.refresh_radio();
         }));
         view.on_genre_toggled(self.handler(|application, key: slint::SharedString| {
-            {
-                let mut screen = application.radio_screen.borrow_mut();
-                if key == ALL_GENRES_KEY {
-                    screen.genres.clear();
-                } else {
-                    radio::toggle_filter(&mut screen.genres, &key);
-                }
-            }
+            application
+                .radio_screen
+                .borrow_mut()
+                .filters
+                .toggle_genre(&key);
             application.refresh_radio();
         }));
         view.on_favourites_toggled(self.action(|application| {
-            {
-                let mut screen = application.radio_screen.borrow_mut();
-                screen.favourites_only = !screen.favourites_only;
-            }
+            application
+                .radio_screen
+                .borrow_mut()
+                .filters
+                .toggle_favourites();
             application.refresh_radio();
         }));
         view.on_active_station_favourite_toggled(self.action(|application| {
@@ -109,43 +101,36 @@ impl Application {
         let favourites = self.favourite_stations.borrow();
         self.window
             .global::<user_interface::Radio>()
-            .set_favourites_only(screen.favourites_only);
-
-        let mut countries = vec![RadioChip {
-            key: ALL_COUNTRIES_KEY.into(),
-            label: translations.text(ALL_COUNTRIES_KEY).into(),
-            active: screen.countries.is_empty(),
-        }];
-        countries.extend(self.catalog.countries().iter().map(|code| RadioChip {
-            key: code.as_str().into(),
-            label: translations.text(&radio::country_label_key(code)).into(),
-            active: screen.countries.contains(code),
-        }));
-        self.radio_countries.set_vec(countries);
-
-        let mut genres = vec![RadioChip {
-            key: ALL_GENRES_KEY.into(),
-            label: translations.text(ALL_GENRES_KEY).into(),
-            active: screen.genres.is_empty(),
-        }];
-        genres.extend(
+            .set_favourites_only(screen.filters.favourites_only);
+        let chip = |chip: Chip| RadioChip {
+            key: chip.key.into(),
+            label: chip.label.into(),
+            active: chip.active,
+        };
+        self.radio_countries.set_vec(
             self.catalog
-                .genres_by_label(&translations)
+                .country_chips(&screen.filters, &translations)
                 .into_iter()
-                .map(|key| RadioChip {
-                    label: translations.text(&key).into(),
-                    active: screen.genres.contains(&key),
-                    key: key.into(),
-                }),
+                .map(chip)
+                .collect::<Vec<_>>(),
         );
-        self.radio_genres.set_vec(genres);
+        self.radio_genres.set_vec(
+            self.catalog
+                .genre_chips(&screen.filters, &translations)
+                .into_iter()
+                .map(chip)
+                .collect::<Vec<_>>(),
+        );
 
         screen.shown = self
             .catalog
             .filtered(
-                &screen.countries,
-                &screen.genres,
-                screen.favourites_only.then(|| favourites.station_ids()),
+                &screen.filters.countries,
+                &screen.filters.genres,
+                screen
+                    .filters
+                    .favourites_only
+                    .then(|| favourites.station_ids()),
                 &search,
                 &translations,
             )
@@ -159,12 +144,7 @@ impl Application {
                 .map(|station| StationRow {
                     id: station.id.as_str().into(),
                     name: station.name.as_str().into(),
-                    detail: format!(
-                        "{} · {}",
-                        translations.text(&station.genre_key),
-                        translations.translate("radio.kbps", &[("kbps", station.kbps.to_string())])
-                    )
-                    .into(),
+                    detail: radio::station_detail(station, &translations).into(),
                     favourite: favourites.contains(&station.id),
                     gradient_index: (station.gradient_index % text::ART_GRADIENT_COUNT) as i32,
                 })
