@@ -116,19 +116,26 @@ const GENRE_PULLS: [GenrePull; 7] = [
     },
 ];
 
-/// Where the tool reads from and writes to.
+/// Where the tool reads from and writes to, and how long it waits between
+/// two requests.
 struct Options {
     mirrors: Vec<String>,
+    curated: PathBuf,
     output: PathBuf,
+    pause: Duration,
 }
 
 impl Options {
     /// `--mirror <url>` asks one Radio Browser mirror instead of the built-in
-    /// ones; `--output <file>` writes somewhere other than the catalog.
+    /// ones; `--curated <file>` reads another seed; `--output <file>` writes
+    /// somewhere other than the catalog; `--pause <milliseconds>` waits that
+    /// long between two requests instead of the polite default.
     fn from_arguments(arguments: impl Iterator<Item = String>) -> Result<Self, String> {
         let mut options = Self {
             mirrors: MIRRORS.map(str::to_owned).to_vec(),
+            curated: package_directory().join("curated.json"),
             output: package_directory().join("../../data/stations.json"),
+            pause: PAUSE_BETWEEN_REQUESTS,
         };
         let mut arguments = arguments;
         while let Some(argument) = arguments.next() {
@@ -139,7 +146,15 @@ impl Options {
             };
             match argument.as_str() {
                 "--mirror" => options.mirrors = vec![value()?.trim_end_matches('/').to_owned()],
+                "--curated" => options.curated = PathBuf::from(value()?),
                 "--output" => options.output = PathBuf::from(value()?),
+                "--pause" => {
+                    let milliseconds = value()?;
+                    let milliseconds = milliseconds
+                        .parse()
+                        .map_err(|_| format!("--pause takes milliseconds, not {milliseconds}"))?;
+                    options.pause = Duration::from_millis(milliseconds);
+                }
                 other => return Err(format!("unknown argument: {other}")),
             }
         }
@@ -162,14 +177,18 @@ fn main() -> std::process::ExitCode {
 }
 
 fn run() -> Result<(), String> {
-    let options = Options::from_arguments(std::env::args().skip(1))?;
+    build(&Options::from_arguments(std::env::args().skip(1))?)
+}
+
+/// Builds the catalog as `options` say and writes it.
+fn build(options: &Options) -> Result<(), String> {
     let agent = ureq::AgentBuilder::new()
         .timeout(REQUEST_TIMEOUT)
         .user_agent(USER_AGENT)
         .build();
 
-    let curated_path = package_directory().join("curated.json");
-    let curated = std::fs::read_to_string(&curated_path)
+    let curated_path = &options.curated;
+    let curated = std::fs::read_to_string(curated_path)
         .map_err(|error| format!("read {}: {error}", curated_path.display()))?;
     let curated: Vec<Value> = serde_json::from_str(&curated)
         .map_err(|error| format!("parse {}: {error}", curated_path.display()))?;
@@ -192,7 +211,7 @@ fn run() -> Result<(), String> {
             },
         );
         eprint!("{country}:{added} ");
-        std::thread::sleep(PAUSE_BETWEEN_REQUESTS);
+        std::thread::sleep(options.pause);
     }
 
     // Then the tag-targeted pulls. Most results of a tag fall outside the
@@ -212,7 +231,7 @@ fn run() -> Result<(), String> {
             },
         );
         eprint!("{}:{added} ", pull.tag);
-        std::thread::sleep(PAUSE_BETWEEN_REQUESTS);
+        std::thread::sleep(options.pause);
     }
     eprintln!();
 
@@ -358,5 +377,105 @@ mod tests {
                 pull.genre
             );
         }
+    }
+
+    /// A stand-in mirror on a local port: every request gets `answer(path)`.
+    fn mirror(answer: impl Fn(&str) -> (&'static str, String) + Send + 'static) -> String {
+        use std::io::{BufRead, BufReader, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind a local port");
+        let address = format!("http://{}", listener.local_addr().expect("local address"));
+        std::thread::spawn(move || {
+            for connection in listener.incoming() {
+                let Ok(mut connection) = connection else {
+                    continue;
+                };
+                let mut reader = BufReader::new(connection.try_clone().expect("clone"));
+                let mut request_line = String::new();
+                if reader.read_line(&mut request_line).is_err() {
+                    continue;
+                }
+                loop {
+                    let mut line = String::new();
+                    if reader.read_line(&mut line).unwrap_or(0) == 0 || line == "\r\n" {
+                        break;
+                    }
+                }
+                let path = request_line.split_whitespace().nth(1).unwrap_or_default();
+                let (status, body) = answer(path);
+                let _ = connection.write_all(
+                    format!(
+                        "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                        body.len()
+                    )
+                    .as_bytes(),
+                );
+            }
+        });
+        address
+    }
+
+    #[test]
+    fn a_mirror_that_fails_hands_over_to_the_next_and_the_last_failure_is_told() {
+        let broken = mirror(|_| ("500 Internal Server Error", String::new()));
+        let working = mirror(|_| ("200 OK", r#"[{"name": "A"}]"#.to_owned()));
+        let agent = ureq::agent();
+
+        let stations =
+            fetch(&agent, &[broken.clone(), working], "/json/x", "x").expect("an answer");
+        assert_eq!(stations.len(), 1);
+
+        let garbled = mirror(|_| ("200 OK", "not json".to_owned()));
+        let failure = fetch(&agent, &[broken, garbled], "/json/x", "x").expect_err("no answer");
+        assert!(failure.starts_with("fetch x failed"), "{failure}");
+    }
+
+    #[test]
+    fn a_catalog_is_built_from_the_seed_and_the_mirrors_answers() {
+        let directory = std::env::temp_dir().join(format!("janis-stations-{}", std::process::id()));
+        std::fs::create_dir_all(&directory).expect("a temporary directory");
+        let curated = directory.join("curated.json");
+        std::fs::write(
+            &curated,
+            r#"[{"id": "seed", "name": "Seed", "url": "https://seed.example/stream", "country": "FR", "genreKey": "radio.genre.jazz", "kbps": 128, "gradIndex": 0}]"#,
+        )
+        .expect("write the seed");
+        let address = mirror(|path| {
+            let body = if path.contains("bycountrycodeexact/FR") {
+                r#"[{"stationuuid": "fresh", "name": "Fresh FM", "url_resolved": "https://fresh.example/stream", "bitrate": 192, "tags": "jazz"}]"#
+            } else {
+                "[]"
+            };
+            ("200 OK", body.to_owned())
+        });
+        let output = directory.join("stations.json");
+
+        build(&Options {
+            mirrors: vec![address],
+            curated,
+            output: output.clone(),
+            pause: Duration::ZERO,
+        })
+        .expect("the catalog is built");
+
+        let written: Vec<Value> =
+            serde_json::from_str(&std::fs::read_to_string(&output).expect("written"))
+                .expect("JSON");
+        let ids: Vec<&str> = written
+            .iter()
+            .map(|station| station["id"].as_str().unwrap_or_default())
+            .collect();
+        assert_eq!(ids, ["seed", "fresh"]);
+        assert_eq!(written[1]["country"], "FR");
+        let _ = std::fs::remove_dir_all(&directory);
+    }
+
+    #[test]
+    fn a_pause_and_a_seed_can_be_given() {
+        let chosen =
+            Options::from_arguments(arguments(&["--pause", "0", "--curated", "/tmp/seed.json"]))
+                .expect("both options are known");
+        assert_eq!(chosen.pause, Duration::ZERO);
+        assert_eq!(chosen.curated, PathBuf::from("/tmp/seed.json"));
+        assert!(Options::from_arguments(arguments(&["--pause", "soon"])).is_err());
     }
 }

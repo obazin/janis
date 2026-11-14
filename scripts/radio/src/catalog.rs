@@ -330,4 +330,44 @@ mod tests {
         assert_eq!(stations[0]["genreKey"], "radio.genre.blues");
         assert_eq!(stations[0]["kbps"], 128);
     }
+
+    #[test]
+    fn a_station_without_a_resolved_address_uses_its_plain_one() {
+        let mut catalog = Catalog::seeded(Vec::new());
+        let added = catalog.absorb(
+            &[json!({
+                "stationuuid": "plain",
+                "name": "Plain FM",
+                "url_resolved": "",
+                "url": "https://plain.example/stream",
+                "bitrate": 128,
+                "tags": "jazz",
+            })],
+            &country_pull(5),
+        );
+        assert_eq!(added, 1);
+        assert_eq!(
+            catalog.into_stations()[0]["url"],
+            "https://plain.example/stream"
+        );
+    }
+
+    #[test]
+    fn the_tags_of_a_stations_variants_are_classified_together() {
+        let mut catalog = Catalog::seeded(Vec::new());
+        let mut untagged = station("low", "Blue Note", "https://blue.example/64", 64);
+        untagged["tags"] = json!("");
+        let mut tagged = station("high", "Blue Note", "https://blue.example/128", 128);
+        tagged["tags"] = json!("jazz");
+
+        catalog.absorb(&[untagged, tagged], &country_pull(5));
+
+        let stations = catalog.into_stations();
+        assert_eq!(stations.len(), 1, "one station for its two variants");
+        assert_eq!(stations[0]["genreKey"], "radio.genre.jazz");
+        assert_eq!(
+            stations[0]["url"], "https://blue.example/128",
+            "the best bitrate is kept"
+        );
+    }
 }
