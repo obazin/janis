@@ -1705,4 +1705,66 @@ mod tests {
             "an unknown track needs nothing"
         );
     }
+
+    /// The checked-in album: two tiny FLAC files with the same album tags,
+    /// the first embedding a 1×1 picture, the second none.
+    fn fixture_album() -> std::path::PathBuf {
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/album")
+    }
+
+    #[test]
+    fn a_scanned_file_brings_its_tags_into_its_row() {
+        let (_directory, database) = fresh_database();
+        let report = watch(&database, &fixture_album()).expect("the fixture album is watched");
+        assert_eq!((report.added, report.skipped), (2, 0));
+
+        let tracks = list_tracks(&database).expect("tracks");
+        let with_cover = tracks
+            .iter()
+            .find(|track| track.title == "With Cover")
+            .expect("the first file's title");
+        assert_eq!(with_cover.artist.as_deref(), Some("Fixture Artist"));
+        assert_eq!(with_cover.album.as_deref(), Some("Fixture Album"));
+        assert_eq!(with_cover.album_artist.as_deref(), Some("Fixture Artist"));
+        assert_eq!(with_cover.track_number, Some(1));
+        assert_eq!(with_cover.year, Some(1999));
+        assert_eq!(with_cover.genre.as_deref(), Some("Jazz"));
+        assert_eq!(with_cover.format, "FLAC");
+        assert!(with_cover.lossless);
+    }
+
+    #[test]
+    fn a_file_without_art_shows_the_picture_its_album_sibling_embeds() {
+        let (_directory, database) = fresh_database();
+        watch(&database, &fixture_album()).expect("the fixture album is watched");
+        let tracks = list_tracks(&database).expect("tracks");
+        let id_of = |title: &str| {
+            tracks
+                .iter()
+                .find(|track| track.title == title)
+                .map(|track| track.id)
+                .expect("a fixture track")
+        };
+
+        let own = track_cover(&database, id_of("With Cover")).expect("its own picture");
+        let borrowed = track_cover(&database, id_of("Without Cover")).expect("its sibling's");
+        assert_eq!(own.data_base64, borrowed.data_base64);
+        assert!(!own.data_base64.is_empty());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_file_whose_path_is_not_unicode_is_skipped_and_counted() {
+        use std::os::unix::ffi::OsStrExt;
+        let directory = tempfile::tempdir().expect("a temporary directory");
+        let music = directory.path().join("music");
+        write_wav(&music.join("named.wav"));
+        let odd = music.join(std::ffi::OsStr::from_bytes(b"caf\xe9.wav"));
+        std::fs::copy(music.join("named.wav"), &odd).expect("a file with a Latin-1 name");
+        let database = crate::persistence::init(directory.path().join("data")).expect("a database");
+
+        let report = watch(&database, &music).expect("watched");
+
+        assert_eq!((report.added, report.skipped), (1, 1));
+    }
 }
