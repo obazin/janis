@@ -22,7 +22,12 @@ const CLIENT_NAME: &str = "Janis";
 /// Songs asked for per request while listing the library.
 const PAGE_SIZE: usize = 500;
 /// How long one request may take before the server counts as unreachable.
+#[cfg(not(test))]
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+/// Short in tests, so a stalled server is told apart in a moment; every test
+/// server is on this machine and answers well within it.
+#[cfg(test)]
+const REQUEST_TIMEOUT: Duration = Duration::from_millis(500);
 /// The port Jellyfin listens on out of the box.
 const DEFAULT_PORT: u16 = 8096;
 /// How a server song's library key starts; the rest is `<server>/<item>`.
@@ -555,20 +560,77 @@ pub fn sign_out(session: &Session) {
 mod tests {
     use super::*;
 
-    /// A stand-in Jellyfin server on a local port: public info, a sign-in
-    /// that takes one password, and a library of three songs it serves two at
-    /// a time, to whoever presents the token.
-    fn fake_server() -> String {
-        fake_server_listing(3, 2, Some(3))
+    /// What a route of the fake server is handed.
+    struct Request {
+        target: String,
+        body: String,
+        signed_in: bool,
     }
 
-    /// The same server with its listing shaped by the test: how many songs it
-    /// holds, how many a page carries, and the total it announces, if any.
-    fn fake_server_listing(
+    /// A route's answer: the status line and the body.
+    type Answer = (&'static str, String);
+
+    /// A path prefix and how the fake server answers what starts with it.
+    type Route = (&'static str, Box<dyn Fn(&Request) -> Answer + Send>);
+
+    fn route(prefix: &'static str, answer: impl Fn(&Request) -> Answer + Send + 'static) -> Route {
+        (prefix, Box::new(answer))
+    }
+
+    /// The routes of a working server: public info, a sign-in that takes one
+    /// password, and a listing of `song_count` songs, `page_size` at a time,
+    /// announcing `announced_total`, to whoever presents the token.
+    fn jellyfin_routes(
         song_count: usize,
         page_size: usize,
         announced_total: Option<usize>,
-    ) -> String {
+    ) -> Vec<Route> {
+        vec![
+            route("/System/Info/Public", |_| {
+                (
+                    "200 OK",
+                    r#"{"Id": "server", "ServerName": "Home"}"#.to_owned(),
+                )
+            }),
+            route("/Users/AuthenticateByName", |request| {
+                if request.body.contains(r#""Pw":"right""#) {
+                    (
+                        "200 OK",
+                        r#"{"User": {"Id": "user", "Name": "listener"}, "AccessToken": "token"}"#
+                            .to_owned(),
+                    )
+                } else {
+                    ("401 Unauthorized", String::new())
+                }
+            }),
+            route("/Items?", move |request| {
+                if !request.signed_in {
+                    return ("401 Unauthorized", String::new());
+                }
+                let start: usize = request
+                    .target
+                    .split("StartIndex=")
+                    .nth(1)
+                    .and_then(|rest| rest.split('&').next())
+                    .and_then(|number| number.parse().ok())
+                    .unwrap_or(0);
+                let items: Vec<String> = (start..song_count.min(start + page_size))
+                    .map(|index| format!(r#"{{"Id": "song{index}", "Name": "Song {index}"}}"#))
+                    .collect();
+                let total = announced_total
+                    .map(|total| format!(r#", "TotalRecordCount": {total}"#))
+                    .unwrap_or_default();
+                (
+                    "200 OK",
+                    format!(r#"{{"Items": [{}]{total}}}"#, items.join(",")),
+                )
+            }),
+        ]
+    }
+
+    /// A stand-in server on a local port, answering each request with the
+    /// first route whose prefix starts its path, and 404 when none does.
+    fn serve(routes: Vec<Route>) -> String {
         use std::io::{BufRead, BufReader, Read, Write};
         let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind a local port");
         let address = format!("http://{}", listener.local_addr().expect("local address"));
@@ -599,44 +661,20 @@ mod tests {
                 }
                 let mut body = vec![0; content_length];
                 let _ = reader.read_exact(&mut body);
-                let body = String::from_utf8_lossy(&body);
-                let target = request_line.split_whitespace().nth(1).unwrap_or_default();
-                let signed_in = authorization.contains("Token=\"token\"");
-                let (status, answer) = if target == "/System/Info/Public" {
-                    (
-                        "200 OK",
-                        r#"{"Id": "server", "ServerName": "Home"}"#.to_owned(),
-                    )
-                } else if target == "/Users/AuthenticateByName" {
-                    if body.contains(r#""Pw":"right""#) {
-                        (
-                            "200 OK",
-                            r#"{"User": {"Id": "user", "Name": "listener"}, "AccessToken": "token"}"#
-                                .to_owned(),
-                        )
-                    } else {
-                        ("401 Unauthorized", String::new())
-                    }
-                } else if target.starts_with("/Items?") && signed_in {
-                    let start: usize = target
-                        .split("StartIndex=")
+                let request = Request {
+                    target: request_line
+                        .split_whitespace()
                         .nth(1)
-                        .and_then(|rest| rest.split('&').next())
-                        .and_then(|number| number.parse().ok())
-                        .unwrap_or(0);
-                    let items: Vec<String> = (start..song_count.min(start + page_size))
-                        .map(|index| format!(r#"{{"Id": "song{index}", "Name": "Song {index}"}}"#))
-                        .collect();
-                    let total = announced_total
-                        .map(|total| format!(r#", "TotalRecordCount": {total}"#))
-                        .unwrap_or_default();
-                    (
-                        "200 OK",
-                        format!(r#"{{"Items": [{}]{total}}}"#, items.join(",")),
-                    )
-                } else {
-                    ("401 Unauthorized", String::new())
+                        .unwrap_or_default()
+                        .to_owned(),
+                    body: String::from_utf8_lossy(&body).into_owned(),
+                    signed_in: authorization.contains("Token=\"token\""),
                 };
+                let (status, answer) = routes
+                    .iter()
+                    .find(|(prefix, _)| request.target.starts_with(prefix))
+                    .map(|(_, answer)| answer(&request))
+                    .unwrap_or(("404 Not Found", String::new()));
                 let _ = connection.write_all(
                     format!(
                         "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{answer}",
@@ -647,6 +685,27 @@ mod tests {
             }
         });
         address
+    }
+
+    /// A working server whose library holds three songs, served two at a time.
+    fn fake_server() -> String {
+        fake_server_listing(3, 2, Some(3))
+    }
+
+    /// A working server with its listing shaped by the test.
+    fn fake_server_listing(
+        song_count: usize,
+        page_size: usize,
+        announced_total: Option<usize>,
+    ) -> String {
+        serve(jellyfin_routes(song_count, page_size, announced_total))
+    }
+
+    /// A working server, but for the routes the test puts ahead of its own.
+    fn fake_server_with(overrides: Vec<Route>) -> String {
+        let mut routes = overrides;
+        routes.extend(jellyfin_routes(3, 2, Some(3)));
+        serve(routes)
     }
 
     fn signed_in_session(server: NewMediaServer) -> Session {
@@ -962,5 +1021,153 @@ mod tests {
             Some("alac"),
             "its own picture when its album has none"
         );
+    }
+
+    fn signed_in_to(address: &str) -> Session {
+        signed_in_session(sign_in(address, "listener", "right", "device").expect("signed in"))
+    }
+
+    #[test]
+    fn an_address_answering_an_error_or_no_json_is_not_jellyfin() {
+        for answer in [
+            ("500 Internal Server Error", String::new()),
+            ("200 OK", "<html>a router</html>".to_owned()),
+        ] {
+            let address =
+                fake_server_with(vec![route("/System/Info/Public", move |_| answer.clone())]);
+            assert!(matches!(
+                sign_in(&address, "listener", "right", "device"),
+                Err(Failure::NotJellyfin(_))
+            ));
+        }
+    }
+
+    #[test]
+    fn a_forbidden_sign_in_is_a_rejected_password() {
+        let address = fake_server_with(vec![route("/Users/AuthenticateByName", |_| {
+            ("403 Forbidden", String::new())
+        })]);
+        assert_eq!(
+            sign_in(&address, "listener", "right", "device"),
+            Err(Failure::CredentialsRejected)
+        );
+    }
+
+    #[test]
+    fn a_malformed_sign_in_answer_is_another_failure() {
+        let address = fake_server_with(vec![route("/Users/AuthenticateByName", |_| {
+            ("200 OK", "{".to_owned())
+        })]);
+        assert!(matches!(
+            sign_in(&address, "listener", "right", "device"),
+            Err(Failure::Other(_))
+        ));
+    }
+
+    #[test]
+    fn a_server_error_or_a_malformed_page_while_listing_is_another_failure() {
+        for answer in [
+            ("500 Internal Server Error", String::new()),
+            ("200 OK", r#"{"Items": "#.to_owned()),
+        ] {
+            let address = fake_server_with(vec![route("/Items?", move |_| answer.clone())]);
+            assert!(matches!(
+                songs(&signed_in_to(&address), "server"),
+                Err(Failure::Other(_))
+            ));
+        }
+    }
+
+    #[test]
+    fn an_empty_library_lists_no_songs() {
+        let address = fake_server_listing(0, 2, Some(0));
+        assert_eq!(
+            songs(&signed_in_to(&address), "server").map(|songs| songs.len()),
+            Ok(0)
+        );
+    }
+
+    #[test]
+    fn a_picture_comes_back_as_the_servers_bytes_to_whoever_holds_the_token() {
+        let address = fake_server_with(vec![route("/Items/album/Images/Primary", |request| {
+            if request.signed_in {
+                ("200 OK", "picture".to_owned())
+            } else {
+                ("401 Unauthorized", String::new())
+            }
+        })]);
+        let session = signed_in_to(&address);
+        assert_eq!(artwork(&session, "album", 300), Ok(b"picture".to_vec()));
+
+        let mut server = sign_in(&address, "listener", "right", "device").expect("signed in");
+        server.access_token = "revoked".to_owned();
+        assert_eq!(
+            artwork(&signed_in_session(server), "album", 300),
+            Err(Failure::TokenRejected)
+        );
+    }
+
+    #[test]
+    fn a_server_that_does_not_answer_in_time_is_unreachable() {
+        let address = fake_server_with(vec![route("/System/Info/Public", |_| {
+            std::thread::sleep(REQUEST_TIMEOUT * 3);
+            ("200 OK", String::new())
+        })]);
+        assert!(matches!(
+            sign_in(&address, "listener", "right", "device"),
+            Err(Failure::Unreachable(_))
+        ));
+    }
+
+    #[test]
+    fn signing_out_ends_the_session_on_the_server_and_shrugs_off_an_absent_one() {
+        let (ended, was_ended) = std::sync::mpsc::channel();
+        let ended = std::sync::Mutex::new(ended);
+        let address = fake_server_with(vec![route("/Sessions/Logout", move |request| {
+            let _ = ended.lock().expect("the sender").send(request.signed_in);
+            ("204 No Content", String::new())
+        })]);
+        sign_out(&signed_in_to(&address));
+        assert_eq!(
+            was_ended.recv_timeout(Duration::from_secs(5)),
+            Ok(true),
+            "the server is told, with the token"
+        );
+
+        // Nothing listens there any more: signing out goes ahead all the same.
+        let gone = fake_server();
+        let closed = std::net::TcpListener::bind("127.0.0.1:0")
+            .and_then(|listener| listener.local_addr())
+            .expect("a free port");
+        let mut server = sign_in(&gone, "listener", "right", "device").expect("signed in");
+        server.address = format!("http://{closed}");
+        sign_out(&signed_in_session(server));
+    }
+
+    #[test]
+    fn a_song_without_artists_is_credited_to_its_album_artist() {
+        let item: Item =
+            serde_json::from_str(r#"{"Id": "song", "Name": "Alive", "AlbumArtist": "Daft Punk"}"#)
+                .expect("an item parses");
+        assert_eq!(
+            item_song(&item, "server").metadata.artist.as_deref(),
+            Some("Daft Punk")
+        );
+    }
+
+    #[test]
+    fn a_blank_name_gives_way_to_the_item() {
+        let item: Item =
+            serde_json::from_str(r#"{"Id": "song", "Name": "   "}"#).expect("an item parses");
+        assert_eq!(item_song(&item, "server").metadata.title, "song");
+    }
+
+    #[test]
+    fn pcm_audio_is_lossless_whatever_its_container() {
+        let item: Item = serde_json::from_str(
+            r#"{"Id": "song", "Container": "mov", "MediaSources": [{"MediaStreams": [{"Type": "Audio", "Codec": "pcm_s16le"}]}]}"#,
+        )
+        .expect("an item parses");
+        assert!(item_song(&item, "server").metadata.lossless);
     }
 }
