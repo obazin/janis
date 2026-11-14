@@ -25,9 +25,14 @@ pub fn label_key(label: &str) -> (String, String) {
 fn collation_key(label: &str) -> String {
     let start = label.trim_start_matches(|character: char| !character.is_alphanumeric());
     // A label of punctuation only keeps it all, rather than sorting as blank.
-    let start = if start.is_empty() { label } else { start };
-    let mut key = String::with_capacity(start.len());
-    for character in start.chars().flat_map(char::to_lowercase) {
+    fold(if start.is_empty() { label } else { start })
+}
+
+/// `text` in lower case, without the accents of the languages Janis ships
+/// in: what sorting and searching compare, so "beyonce" finds "Beyoncé".
+pub fn fold(text: &str) -> String {
+    let mut key = String::with_capacity(text.len());
+    for character in text.chars().flat_map(char::to_lowercase) {
         match character {
             'à'..='å' => key.push('a'),
             'ç' => key.push('c'),

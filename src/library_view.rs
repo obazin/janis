@@ -7,7 +7,7 @@ use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 
 use crate::library::Track;
-use crate::text::{compare_labels, format_time, label_key};
+use crate::text::{compare_labels, fold, format_time, label_key};
 use crate::translations::Translations;
 
 /// Rows in the Library screen's "Recently added" list.
@@ -166,7 +166,7 @@ pub fn artist_row_title(track: &Track) -> String {
 
 /// The search field's text as the filters compare it.
 pub fn normalized_query(search: &str) -> String {
-    search.trim().to_lowercase()
+    fold(search.trim())
 }
 
 /// The tracks the Library screen's search keeps, in the order given: any of
@@ -194,7 +194,7 @@ fn library_match(track: &Track, query: &str) -> bool {
         ]
         .into_iter()
         .flatten()
-        .any(|field| field.to_lowercase().contains(query))
+        .any(|field| fold(field).contains(query))
 }
 
 /// The order of the Library tabs: songs by artist, album and title, albums by
@@ -283,11 +283,11 @@ pub fn search_local_files(tracks: &[Track], search: &str) -> Vec<Track> {
         .filter(|track| track.server_id.is_none())
         .filter(|track| {
             query.is_empty()
-                || track.title.to_lowercase().contains(&query)
+                || fold(&track.title).contains(&query)
                 || track
                     .artist
                     .as_ref()
-                    .is_some_and(|artist| artist.to_lowercase().contains(&query))
+                    .is_some_and(|artist| fold(artist).contains(&query))
         })
         .cloned()
         .collect()
@@ -1260,5 +1260,19 @@ mod tests {
 
         assert_eq!(shelf.len(), SHELF_TILE_COUNT);
         assert_eq!(shelf[0].album.as_deref(), Some("Album 0"));
+    }
+
+    #[test]
+    fn the_library_and_local_files_searches_ignore_accents() {
+        let tracks = [
+            track(1, "Halo").artist("Beyoncé"),
+            track(2, "Élan").artist("Nightwish"),
+            track(3, "Other").artist("Someone"),
+        ];
+        assert_eq!(titles(&search_library(&tracks, "beyonce")), ["Halo"]);
+        assert_eq!(titles(&search_library(&tracks, "ELAN")), ["Élan"]);
+        assert_eq!(titles(&search_library(&tracks, "Beyoncé")), ["Halo"]);
+        assert_eq!(titles(&search_local_files(&tracks, "beyonce")), ["Halo"]);
+        assert_eq!(titles(&search_local_files(&tracks, "elan")), ["Élan"]);
     }
 }

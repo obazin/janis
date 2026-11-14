@@ -10,7 +10,7 @@ use std::collections::{HashMap, HashSet};
 use serde::Deserialize;
 
 use crate::audio::Source;
-use crate::text::compare_labels;
+use crate::text::{compare_labels, fold};
 use crate::translations::Translations;
 
 const STATIONS: &str = include_str!("../data/stations.json");
@@ -119,7 +119,7 @@ impl Catalog {
         search: &str,
         translations: &Translations,
     ) -> Vec<&Station> {
-        let query = search.trim().to_lowercase();
+        let query = fold(search.trim());
         self.stations
             .iter()
             .filter(|station| {
@@ -127,11 +127,8 @@ impl Catalog {
                     && (genres.is_empty() || genres.contains(&station.genre_key))
                     && only.is_none_or(|station_ids| station_ids.contains(&station.id))
                     && (query.is_empty()
-                        || station.name.to_lowercase().contains(&query)
-                        || translations
-                            .text(&station.genre_key)
-                            .to_lowercase()
-                            .contains(&query))
+                        || fold(&station.name).contains(&query)
+                        || fold(&translations.text(&station.genre_key)).contains(&query))
             })
             .collect()
     }
@@ -277,5 +274,23 @@ mod tests {
         assert_eq!(selected, ["FR", "US"]);
         toggle_filter(&mut selected, "FR");
         assert_eq!(selected, ["US"]);
+    }
+
+    #[test]
+    fn the_radio_search_ignores_accents_in_names_and_genre_labels() {
+        let catalog = Catalog::new(vec![
+            station("a", "Radio Néo", "FR", "jazz"),
+            station("b", "Other", "FR", "electronic"),
+        ]);
+        let translations = Translations::new(Language::French);
+        let ids = |search: &str| -> Vec<String> {
+            catalog
+                .filtered(&[], &[], None, search, &translations)
+                .iter()
+                .map(|station| station.id.clone())
+                .collect()
+        };
+        assert_eq!(ids("neo"), ["a"]);
+        assert_eq!(ids("electro"), ["b"], "the label reads « Électronique »");
     }
 }
