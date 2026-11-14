@@ -10,6 +10,7 @@
 mod application;
 mod audio;
 mod background;
+mod cover_requests;
 mod covers;
 mod effects;
 mod equalizer;

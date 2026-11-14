@@ -533,6 +533,7 @@ impl Application {
         // A rescan may have changed any file's art.
         self.thumbnail_epoch.set(self.thumbnail_epoch.get() + 1);
         self.thumbnails.borrow_mut().clear();
+        self.cover_requests.borrow_mut().clear();
         self.bump_cover_revision();
     }
 }

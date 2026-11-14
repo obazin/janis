@@ -1,5 +1,6 @@
 import { Tokens, Metrics } from "../../tokens.slint";
 import { LibraryTrack } from "library.slint";
+import { Covers, CoverList } from "covers.slint";
 import { TrackRow } from "track_row.slint";
 
 // A bordered list of track rows that draws only the rows in view. The screen
@@ -9,6 +10,9 @@ export component TrackList inherits Rectangle {
     in property <[LibraryTrack]> tracks;
     in property <length> view-top;
     in property <length> view-height;
+    // Which list the rows are, as told to `Covers.in-view`; `none` reports
+    // nothing.
+    in property <CoverList> cover-list;
     // Leaves the top of the box to something else, like a header.
     in property <length> rows-top;
     callback clicked(index: int);
@@ -16,6 +20,17 @@ export component TrackList inherits Rectangle {
     out property <length> row-height: 60px;
     property <int> first: max(0, floor((root.view-top - root.rows-top) / root.row-height));
     property <int> count: ceil(root.view-height / root.row-height) + 1;
+
+    // The rows drawn, told to the controller so it loads the covers beyond.
+    function report-shown() {
+        if root.cover-list != CoverList.none {
+            Covers.in-view(root.cover-list, root.first, root.count);
+        }
+    }
+    init => { root.report-shown(); }
+    changed first => { root.report-shown(); }
+    changed count => { root.report-shown(); }
+    changed cover-list => { root.report-shown(); }
 
     height: root.rows-top + root.tracks.length * root.row-height;
     border-radius: Metrics.radius-card;
