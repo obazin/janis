@@ -110,8 +110,22 @@ pub const GENRE_RULES: &[(&str, &[&str])] = &[
         &["soundtrack", "film score", "game music", "anime"],
     ),
     (
+        "radio.genre.arabic",
+        &[
+            "arabic", "arabe", "tarab", "oriental", "raï", "chaabi", "andalou", "malhoun",
+            "al-ala", "gnawa", "khaleeji",
+        ],
+    ),
+    (
         "radio.genre.world",
-        &["world", "world music", "ethnic", "afrobeat"],
+        &[
+            "world",
+            "world music",
+            "ethnic",
+            "afrobeat",
+            "amazigh",
+            "berber",
+        ],
     ),
     (
         "radio.genre.electronic",
@@ -155,6 +169,10 @@ pub const GENRE_RULES: &[(&str, &[&str])] = &[
             "catholic",
             "christ",
         ],
+    ),
+    (
+        "radio.genre.quran",
+        &["quran", "coran", "koran", "islam", "sunnah", "sonnah"],
     ),
     (
         "radio.genre.pop",
@@ -336,6 +354,32 @@ mod tests {
         // One tag each for techno and house: techno comes first in the rules.
         assert_eq!(classify_genre("House, Techno", ""), "radio.genre.techno");
         assert_eq!(classify_genre(" , ,", ""), "radio.genre.variety");
+    }
+
+    #[test]
+    fn maghreb_tags_name_arabic_music_amazigh_music_and_quran_stations() {
+        assert_eq!(
+            classify_genre("arabic,moroccan,oriental,tarab", ""),
+            "radio.genre.arabic"
+        );
+        // One tag each for Arabic music and oldies: Arabic music comes first.
+        assert_eq!(classify_genre("oldies,tarab", ""), "radio.genre.arabic");
+        assert_eq!(
+            classify_genre("al-ala,malhoun,morocco", ""),
+            "radio.genre.arabic"
+        );
+        assert_eq!(
+            classify_genre("al amazighia en direct,radio amazigh", ""),
+            "radio.genre.world"
+        );
+        assert_eq!(
+            classify_genre("coran,religion,sonnah", ""),
+            "radio.genre.quran"
+        );
+        assert_eq!(
+            classify_genre("coran,news,religion", ""),
+            "radio.genre.quran"
+        );
     }
 
     #[test]

@@ -36,9 +36,12 @@ const PAUSE_BETWEEN_REQUESTS: Duration = Duration::from_millis(400);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// How many freshly pulled stations to keep per country (the curated seed adds
-/// on top), in the order the countries are pulled. Sums to about 880; with
+/// on top), in the order the countries are pulled. Sums to about 945; with
 /// the hundred or so curated ones that lands the catalog near a thousand.
-pub const COUNTRY_CAPS: [(&str, usize); 22] = [
+/// The Maghreb caps sit near what Radio Browser holds there once the
+/// stations named only in Arabic script (which names cannot compare) and
+/// the variants of one station are left out.
+pub const COUNTRY_CAPS: [(&str, usize); 25] = [
     ("US", 130),
     ("GB", 80),
     ("DE", 80),
@@ -61,6 +64,9 @@ pub const COUNTRY_CAPS: [(&str, usize); 22] = [
     ("CZ", 25),
     ("RO", 25),
     ("HU", 20),
+    ("MA", 25),
+    ("DZ", 20),
+    ("TN", 20),
 ];
 
 /// A tag-targeted top-up for a genre the per-country lists leave thin (a

@@ -9499,6 +9499,582 @@
     "gradIndex": 1
   },
   {
+    "id": "96414555-0601-11e8-ae97-52543be04c81",
+    "name": "Radio Aswat",
+    "country": "MA",
+    "genreKey": "radio.genre.variety",
+    "kbps": 128,
+    "url": "http://broadcast.ice.infomaniak.ch/aswat-high.mp3?.mp3",
+    "gradIndex": 5
+  },
+  {
+    "id": "f437a938-2f30-4109-8f52-cbb599e11b03",
+    "name": "Radio Mars",
+    "country": "MA",
+    "genreKey": "radio.genre.variety",
+    "kbps": 128,
+    "url": "https://radiomars.ice.infomaniak.ch/radiomars-128.mp3",
+    "gradIndex": 5
+  },
+  {
+    "id": "701b70e7-2126-4b4b-b1db-ea5295b43bfe",
+    "name": "Radio Plus Agadir FM 92.4",
+    "country": "MA",
+    "genreKey": "radio.genre.variety",
+    "kbps": 128,
+    "url": "https://stream-158.zeno.fm/bqdbb6hd0neuv",
+    "gradIndex": 4
+  },
+  {
+    "id": "6a11c952-ea0c-4887-99a3-96b0139ee3fc",
+    "name": "Rap Lbeldi Maroc - Hip Hop Music from Morocco FR AR",
+    "country": "MA",
+    "genreKey": "radio.genre.hiphop",
+    "kbps": 128,
+    "url": "https://stream.zeno.fm/ivdufrl7q0quv",
+    "gradIndex": 0
+  },
+  {
+    "id": "5a23e61f-3313-469d-9346-b07b63ca5b2b",
+    "name": "HIT RADIO",
+    "country": "MA",
+    "genreKey": "radio.genre.variety",
+    "kbps": 128,
+    "url": "https://hitradio-maroc.ice.infomaniak.ch/hitradio-maroc-128.mp3",
+    "gradIndex": 1
+  },
+  {
+    "id": "a5acbf43-ebe5-41b9-aba0-a21388484e39",
+    "name": "Med Radio",
+    "country": "MA",
+    "genreKey": "radio.genre.variety",
+    "kbps": 96,
+    "url": "http://medradio.ice.infomaniak.ch/medradio-128.mp3",
+    "gradIndex": 4
+  },
+  {
+    "id": "26c23dc4-1b31-473c-a9c4-746d9c7ae77b",
+    "name": "Tarab Radio",
+    "country": "MA",
+    "genreKey": "radio.genre.arabic",
+    "kbps": 128,
+    "url": "https://stream.zeno.fm/fy8achbq97zuv",
+    "gradIndex": 2
+  },
+  {
+    "id": "125ec344-a2a1-4e36-8f66-77401f457d20",
+    "name": "Aswat FM",
+    "country": "MA",
+    "genreKey": "radio.genre.hits",
+    "kbps": 128,
+    "url": "https://broadcast.ice.infomaniak.ch/aswat-high.mp3",
+    "gradIndex": 1
+  },
+  {
+    "id": "948f53ca-9253-4383-8339-83aea217ec17",
+    "name": "MFM RADIO",
+    "country": "MA",
+    "genreKey": "radio.genre.variety",
+    "kbps": 128,
+    "url": "https://a5.asurahosting.com:7980/radio.mp3",
+    "gradIndex": 1
+  },
+  {
+    "id": "2c260d07-110c-473c-8a7f-df4b937b31a8",
+    "name": "Radio Manarat",
+    "country": "MA",
+    "genreKey": "radio.genre.talk",
+    "kbps": 192,
+    "url": "https://listen.radioking.com/radio/252934/stream/297385",
+    "gradIndex": 2
+  },
+  {
+    "id": "b019fb4e-adfd-43a9-a00d-68e086e0b06f",
+    "name": "MA:-Hit Radio Maroc",
+    "country": "MA",
+    "genreKey": "radio.genre.classical",
+    "kbps": 128,
+    "url": "https://stream.zeno.fm/une3a02mb",
+    "gradIndex": 4
+  },
+  {
+    "id": "688986ac-3229-4adc-a96c-fcfe079328fe",
+    "name": "Adwaafm",
+    "country": "MA",
+    "genreKey": "radio.genre.variety",
+    "kbps": 128,
+    "url": "http://stream.zeno.fm/5bxh2nh0x1zuv?1681882617017",
+    "gradIndex": 4
+  },
+  {
+    "id": "e8d4a75f-f345-4bc7-a837-ce2adc3a2579",
+    "name": "Fayroz",
+    "country": "MA",
+    "genreKey": "radio.genre.classical",
+    "kbps": 128,
+    "url": "https://stream.zeno.fm/zv3e5wykprhvv.mp3",
+    "gradIndex": 4
+  },
+  {
+    "id": "a182e5ba-a840-40bf-9e51-01bef3ad9e24",
+    "name": "Aziz Mustaphi",
+    "country": "MA",
+    "genreKey": "radio.genre.quran",
+    "kbps": 128,
+    "url": "https://d3ctxlq1ktw2nl.cloudfront.net/production/2022-0-3/240607172-44100-2-afb2485b0c30e.mp3",
+    "gradIndex": 2
+  },
+  {
+    "id": "9d874da9-550c-4176-a595-8ee83e0c72bc",
+    "name": "Yabiladi Chaabi Maroc",
+    "country": "MA",
+    "genreKey": "radio.genre.world",
+    "kbps": 128,
+    "url": "https://radio.yabiladi.com:8102/;stream.mp3",
+    "gradIndex": 4
+  },
+  {
+    "id": "66c753bc-f48c-4ad9-bdea-b272c7125fa8",
+    "name": "Skyrock Casablanca",
+    "country": "MA",
+    "genreKey": "radio.genre.hiphop",
+    "kbps": 128,
+    "url": "https://icecast.skyrock.net/s/casa_aac_64k",
+    "gradIndex": 0
+  },
+  {
+    "id": "9e88f54e-7a06-4225-a01e-9644a48d8499",
+    "name": "Medina FM Tarab (128 kbps)",
+    "country": "MA",
+    "genreKey": "radio.genre.arabic",
+    "kbps": 128,
+    "url": "https://medinatarab.ice.infomaniak.ch/medinatarab-128.mp3",
+    "gradIndex": 2
+  },
+  {
+    "id": "ee24e505-e4e1-4a52-b036-544358008808",
+    "name": "CAP RADIO",
+    "country": "MA",
+    "genreKey": "radio.genre.news",
+    "kbps": 192,
+    "url": "https://listen.radioking.com/radio/710810/stream/776366",
+    "gradIndex": 2
+  },
+  {
+    "id": "b8807476-2ada-4600-9dc0-7b501691afc1",
+    "name": "bldi",
+    "country": "MA",
+    "genreKey": "radio.genre.classical",
+    "kbps": 64,
+    "url": "http://beldifm.hf.ma/radio/8000/radio.mp3",
+    "gradIndex": 0
+  },
+  {
+    "id": "5769fe09-56d6-11e8-b0ce-52543be04c81",
+    "name": "Only rai",
+    "country": "MA",
+    "genreKey": "radio.genre.variety",
+    "kbps": 128,
+    "url": "http://onlyrai.ice.infomaniak.ch/onlyrai-high.mp3",
+    "gradIndex": 3
+  },
+  {
+    "id": "0502df2d-a93e-4d8a-8547-ae9d341a1128",
+    "name": "MEDINA FM",
+    "country": "MA",
+    "genreKey": "radio.genre.variety",
+    "kbps": 64,
+    "url": "https://medinafm.ice.infomaniak.ch/medinafm-64.mp3",
+    "gradIndex": 2
+  },
+  {
+    "id": "a0357a8d-b426-4e35-8d34-3fdd1f17115b",
+    "name": "radio yan plus",
+    "country": "MA",
+    "genreKey": "radio.genre.world",
+    "kbps": 128,
+    "url": "https://stream.zeno.fm/7nqu31p6xg0uv",
+    "gradIndex": 2
+  },
+  {
+    "id": "0bb1d938-2f1e-4ff5-8c43-2fa25ae65f68",
+    "name": "U RADIO",
+    "country": "MA",
+    "genreKey": "radio.genre.nineties",
+    "kbps": 128,
+    "url": "https://uradio-aac.ice.infomaniak.ch/uradio.aac",
+    "gradIndex": 1
+  },
+  {
+    "id": "3537590f-8d22-40b9-82d8-cd7dd1a5de44",
+    "name": "Radio Star Maroc FM",
+    "country": "MA",
+    "genreKey": "radio.genre.variety",
+    "kbps": 320,
+    "url": "https://a2.asurahosting.com:6100/radio.mp3",
+    "gradIndex": 1
+  },
+  {
+    "id": "f2d01650-b84f-4d85-aa3f-4c085bf211ff",
+    "name": "Hits 1 Algérie",
+    "country": "DZ",
+    "genreKey": "radio.genre.pop",
+    "kbps": 192,
+    "url": "https://radio12.pro-fhi.net/listen/whmnrlow/stream",
+    "gradIndex": 2
+  },
+  {
+    "id": "05fb8b90-3826-4719-b309-0ea5112a4921",
+    "name": "El Bahdja - الجزائر العاصمة",
+    "country": "DZ",
+    "genreKey": "radio.genre.news",
+    "kbps": 64,
+    "url": "https://webradio3.tda.dz:8001/ElBahdja_64K.mp3",
+    "gradIndex": 4
+  },
+  {
+    "id": "22f064ab-be27-4e6e-8f34-8d6509c97007",
+    "name": "Chaine 1 القناة الأولى",
+    "country": "DZ",
+    "genreKey": "radio.genre.news",
+    "kbps": 64,
+    "url": "https://webradio1.tda.dz:8001/Chaine1_64K.mp3",
+    "gradIndex": 4
+  },
+  {
+    "id": "ed186ea7-ac3e-47f5-bf33-99fbb15ffc86",
+    "name": "Jil FM",
+    "country": "DZ",
+    "genreKey": "radio.genre.variety",
+    "kbps": 64,
+    "url": "https://webradio1.tda.dz:8001/Jeunesse_64K.mp3",
+    "gradIndex": 2
+  },
+  {
+    "id": "06d8af5e-3f5a-4473-8f71-8343140a938f",
+    "name": "Algérie Internationale الجزائر الدولية",
+    "country": "DZ",
+    "genreKey": "radio.genre.news",
+    "kbps": 64,
+    "url": "https://webradio3.tda.dz:8001/Internationale_64K.mp3",
+    "gradIndex": 2
+  },
+  {
+    "id": "49b2c8f9-c7ed-4df5-afc3-93b8f6028121",
+    "name": "109.0 FM Christmas Kids",
+    "country": "DZ",
+    "genreKey": "radio.genre.classical",
+    "kbps": 128,
+    "url": "http://stream.dar.fm/97821",
+    "gradIndex": 2
+  },
+  {
+    "id": "8cd4aff2-15af-454f-84b7-a8904548f704",
+    "name": "Beur FM",
+    "country": "DZ",
+    "genreKey": "radio.genre.variety",
+    "kbps": 128,
+    "url": "https://beurfm.ice.infomaniak.ch/beurfm-high.mp3",
+    "gradIndex": 5
+  },
+  {
+    "id": "f07420b2-244c-45fd-aa5a-321f4dbf8df6",
+    "name": "Coran القرآن الكريم",
+    "country": "DZ",
+    "genreKey": "radio.genre.quran",
+    "kbps": 64,
+    "url": "https://webradio1.tda.dz:8001/Coran_64K.mp3",
+    "gradIndex": 1
+  },
+  {
+    "id": "6bfb7a7c-b811-472b-b091-5e27cb098bac",
+    "name": "A ntinea Radio",
+    "country": "DZ",
+    "genreKey": "radio.genre.variety",
+    "kbps": 128,
+    "url": "https://listen.radioking.com/radio/6640/stream/347",
+    "gradIndex": 4
+  },
+  {
+    "id": "97ed8391-6abe-4b91-b59e-fd29c1866d36",
+    "name": "France Maghreb 2",
+    "country": "DZ",
+    "genreKey": "radio.genre.variety",
+    "kbps": 128,
+    "url": "https://francemaghreb2.ice.infomaniak.ch/francemaghreb2-high.mp3",
+    "gradIndex": 5
+  },
+  {
+    "id": "38ba2533-565e-4ebf-a76b-4498d6ce1203",
+    "name": "Oran وهران",
+    "country": "DZ",
+    "genreKey": "radio.genre.news",
+    "kbps": 64,
+    "url": "https://webradio2.tda.dz:8001/Oran_64K.mp3",
+    "gradIndex": 2
+  },
+  {
+    "id": "5f344328-0823-42fa-b2c5-39375543bbee",
+    "name": "Zaman FM زمان",
+    "country": "DZ",
+    "genreKey": "radio.genre.news",
+    "kbps": 64,
+    "url": "https://webradio2.tda.dz:8001/Zamen_64K.mp3",
+    "gradIndex": 2
+  },
+  {
+    "id": "4caa43a0-ed29-44f4-bb5d-47042a46c6c4",
+    "name": "Annaba عنابة",
+    "country": "DZ",
+    "genreKey": "radio.genre.news",
+    "kbps": 64,
+    "url": "https://webradio1.tda.dz:8001/Annaba_64K.mp3",
+    "gradIndex": 2
+  },
+  {
+    "id": "ac734bf8-3abd-4edd-be9f-507a58274b68",
+    "name": "Illizi اليزي",
+    "country": "DZ",
+    "genreKey": "radio.genre.news",
+    "kbps": 64,
+    "url": "https://webradio2.tda.dz:8001/Illizi_64K.mp3",
+    "gradIndex": 0
+  },
+  {
+    "id": "29e75334-77df-4a21-bce3-258197bfbb18",
+    "name": "Chaine 3 القناة الثالثة",
+    "country": "DZ",
+    "genreKey": "radio.genre.news",
+    "kbps": 64,
+    "url": "https://webradio1.tda.dz:8001/Chaine3_64K.mp3",
+    "gradIndex": 2
+  },
+  {
+    "id": "2bff5955-3a88-46cd-92e9-57033683a7f0",
+    "name": "Setif سطيف",
+    "country": "DZ",
+    "genreKey": "radio.genre.news",
+    "kbps": 64,
+    "url": "https://webradio3.tda.dz:8001/Setif_64K.mp3",
+    "gradIndex": 5
+  },
+  {
+    "id": "dd6f040c-77fe-4b15-8801-6fce689ebc20",
+    "name": "Tamanrasset تمنراست",
+    "country": "DZ",
+    "genreKey": "radio.genre.news",
+    "kbps": 64,
+    "url": "https://webradio1.tda.dz:8001/Tamanrasset_64K.mp3",
+    "gradIndex": 4
+  },
+  {
+    "id": "3a2be197-6831-4db2-9e4e-0208b714e738",
+    "name": "Chaine 2 القناة الثانية",
+    "country": "DZ",
+    "genreKey": "radio.genre.news",
+    "kbps": 64,
+    "url": "https://webradio2.tda.dz:8001/Chaine2_64K.mp3",
+    "gradIndex": 2
+  },
+  {
+    "id": "c6c77aaf-e899-463d-a9f5-a556180a4f82",
+    "name": "Tizi Ouzou  تيزي وزو",
+    "country": "DZ",
+    "genreKey": "radio.genre.news",
+    "kbps": 64,
+    "url": "https://webradio2.tda.dz:8001/TiziOuzou_64K.mp3",
+    "gradIndex": 4
+  },
+  {
+    "id": "8efd6d38-d14b-4a09-853c-10df4d012de7",
+    "name": "Ghardaïa غرداية",
+    "country": "DZ",
+    "genreKey": "radio.genre.news",
+    "kbps": 64,
+    "url": "https://webradio1.tda.dz:8001/Ghardaia_64K.mp3",
+    "gradIndex": 2
+  },
+  {
+    "id": "9616a843-0601-11e8-ae97-52543be04c81",
+    "name": "Mosaique FM",
+    "country": "TN",
+    "genreKey": "radio.genre.variety",
+    "kbps": 90,
+    "url": "http://radio.mosaiquefm.net:8000/mosalive",
+    "gradIndex": 2
+  },
+  {
+    "id": "961ee9aa-0601-11e8-ae97-52543be04c81",
+    "name": "Jawhara FM",
+    "country": "TN",
+    "genreKey": "radio.genre.variety",
+    "kbps": 128,
+    "url": "http://streaming2.toutech.net:8000/jawharafm",
+    "gradIndex": 1
+  },
+  {
+    "id": "2e7c26a3-3796-42cc-acee-1ef607088246",
+    "name": "Radio Tunisie Nationale",
+    "country": "TN",
+    "genreKey": "radio.genre.variety",
+    "kbps": 128,
+    "url": "http://rtstream.tanitweb.com/nationale",
+    "gradIndex": 1
+  },
+  {
+    "id": "500bc504-c47f-46bc-9c9a-16e15bee2353",
+    "name": "KnOOz FM",
+    "country": "TN",
+    "genreKey": "radio.genre.variety",
+    "kbps": 128,
+    "url": "http://streaming.knoozfm.net:8000/knoozfm",
+    "gradIndex": 1
+  },
+  {
+    "id": "064734c4-5ca8-4b17-b1ad-587e1c2896d6",
+    "name": "Mosaique FM Tarab",
+    "country": "TN",
+    "genreKey": "radio.genre.arabic",
+    "kbps": 128,
+    "url": "https://radio.mosaiquefm.net/mosatarab",
+    "gradIndex": 4
+  },
+  {
+    "id": "d706e494-cd28-46ad-ac79-ca49aa0f1a9f",
+    "name": "راديو فن    Fenn Radio",
+    "country": "TN",
+    "genreKey": "radio.genre.variety",
+    "kbps": 128,
+    "url": "https://stream.zeno.fm/76e9f1gsduhvv",
+    "gradIndex": 1
+  },
+  {
+    "id": "935f5161-7201-4e08-8d2a-ddb826e8ba28",
+    "name": "Diwan FM",
+    "country": "TN",
+    "genreKey": "radio.genre.variety",
+    "kbps": 128,
+    "url": "https://streaming.diwanfm.net/stream",
+    "gradIndex": 2
+  },
+  {
+    "id": "5bdf14c4-12dd-49c0-a931-53fc5898b3bc",
+    "name": "Radio Tunisie Jeunes",
+    "country": "TN",
+    "genreKey": "radio.genre.variety",
+    "kbps": 128,
+    "url": "http://rtstream.tanitweb.com/jeunes",
+    "gradIndex": 3
+  },
+  {
+    "id": "a6c8c797-e8b5-4a82-b5eb-756062a17c90",
+    "name": "Zitouna Zitouna FM",
+    "country": "TN",
+    "genreKey": "radio.genre.quran",
+    "kbps": 192,
+    "url": "https://radio.radiotunisienne.tn/radiozaitouna",
+    "gradIndex": 0
+  },
+  {
+    "id": "050966be-de77-49f0-bad9-6ef200d219f3",
+    "name": "Ambiance FM",
+    "country": "TN",
+    "genreKey": "radio.genre.variety",
+    "kbps": 192,
+    "url": "https://stream.zeno.fm/0rehsamc9xxtv",
+    "gradIndex": 3
+  },
+  {
+    "id": "5b4e5f2a-6069-4562-9e0a-945bde91a83f",
+    "name": "Radio Tunisie Monastir",
+    "country": "TN",
+    "genreKey": "radio.genre.variety",
+    "kbps": 128,
+    "url": "http://rtstream.tanitweb.com/monastir",
+    "gradIndex": 0
+  },
+  {
+    "id": "8fd71912-47d5-49ec-b587-067cdd656218",
+    "name": "Radio Tunisie Tataouine",
+    "country": "TN",
+    "genreKey": "radio.genre.variety",
+    "kbps": 64,
+    "url": "http://rtstream.tanitweb.com/tataouine",
+    "gradIndex": 3
+  },
+  {
+    "id": "ace86edd-549b-496b-97bf-fb21813888b0",
+    "name": "Sabra FM",
+    "country": "TN",
+    "genreKey": "radio.genre.variety",
+    "kbps": 192,
+    "url": "https://manager5.streamradio.fr:1905/stream",
+    "gradIndex": 4
+  },
+  {
+    "id": "763cd182-7216-4830-b39a-3258e2422a78",
+    "name": "Mosaique FM Tounsi",
+    "country": "TN",
+    "genreKey": "radio.genre.variety",
+    "kbps": 128,
+    "url": "https://radio.mosaiquefm.net/mosatounsi",
+    "gradIndex": 1
+  },
+  {
+    "id": "89a65395-9af4-4c9d-9300-d765029785e8",
+    "name": "Radio Misk",
+    "country": "TN",
+    "genreKey": "radio.genre.variety",
+    "kbps": 192,
+    "url": "https://live.misk.art/stream",
+    "gradIndex": 2
+  },
+  {
+    "id": "fe13a886-3269-4b61-9c9b-4a7d346e02cb",
+    "name": "RTCI",
+    "country": "TN",
+    "genreKey": "radio.genre.variety",
+    "kbps": 128,
+    "url": "http://rtstream.tanitweb.com/rtci",
+    "gradIndex": 5
+  },
+  {
+    "id": "5ec5f732-cb9c-408b-8391-b583962984d8",
+    "name": "oxygene fm",
+    "country": "TN",
+    "genreKey": "radio.genre.variety",
+    "kbps": 192,
+    "url": "http://stream.radios-arra.fr:8000/oxygenefm",
+    "gradIndex": 2
+  },
+  {
+    "id": "447ea42a-ee66-4990-9f73-acb11d3e6968",
+    "name": "Sfax FM",
+    "country": "TN",
+    "genreKey": "radio.genre.variety",
+    "kbps": 128,
+    "url": "http://rtstream.tanitweb.com/sfax",
+    "gradIndex": 2
+  },
+  {
+    "id": "92722b77-b256-4b95-8e24-b264982eb9d3",
+    "name": "radio coran",
+    "country": "TN",
+    "genreKey": "radio.genre.classical",
+    "kbps": 128,
+    "url": "http://n0b.radiojar.com/0tpy1h0kxtzuv?",
+    "gradIndex": 2
+  },
+  {
+    "id": "bd4c6426-6d27-42a9-a1d1-d0084cba5138",
+    "name": "Radio Monastir",
+    "country": "TN",
+    "genreKey": "radio.genre.variety",
+    "kbps": 128,
+    "url": "https://radio.radiotunisienne.tn/monastir",
+    "gradIndex": 0
+  },
+  {
     "id": "960dd7a5-0601-11e8-ae97-52543be04c81",
     "name": "WXPN 88.5 Philadelphia, PA",
     "country": "US",
