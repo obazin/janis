@@ -55,7 +55,7 @@ pub fn compare_in_album(left: &Track, right: &Track) -> Ordering {
 
 /// A tag as the grouping reads it: a blank one is no tag.
 fn tag(text: &Option<String>) -> Option<String> {
-    text.clone().filter(|text| !text.is_empty())
+    text.clone().filter(|text| !text.trim().is_empty())
 }
 
 /// The album and artist a track is grouped under.
@@ -121,7 +121,11 @@ pub fn artists(tracks: &[Track]) -> Vec<ArtistGroup> {
     let mut groups: Vec<ArtistGroup> = Vec::new();
     let mut positions: HashMap<&str, usize> = HashMap::new();
     for track in tracks {
-        let Some(artist) = track.artist.as_deref().filter(|artist| !artist.is_empty()) else {
+        let Some(artist) = track
+            .artist
+            .as_deref()
+            .filter(|artist| !artist.trim().is_empty())
+        else {
             continue;
         };
         let position = *positions.entry(artist).or_insert_with(|| {
@@ -1494,5 +1498,252 @@ mod tests {
         );
         assert_eq!(Shelf::from_identifier("artists"), Some(Shelf::Artists));
         assert_eq!(Shelf::from_identifier("albums"), None);
+    }
+
+    #[test]
+    fn a_track_without_a_disc_plays_among_the_first_disc() {
+        let tracks = [
+            album_track(1, "Disc two", "A", "X", Some(1)).disc(2),
+            album_track(2, "Untagged disc", "A", "X", Some(2)),
+            album_track(3, "Disc one", "A", "X", Some(1)).disc(1),
+        ];
+        assert_eq!(
+            titles(&albums(&tracks)[0].tracks),
+            ["Disc one", "Untagged disc", "Disc two"]
+        );
+    }
+
+    #[test]
+    fn an_album_takes_the_first_year_and_genre_its_tracks_give_and_ties_keep_their_order() {
+        let tracks = [
+            album_track(1, "a", "First", "X", Some(1))
+                .year(1970)
+                .genre("Rock")
+                .added(5),
+            album_track(2, "b", "First", "X", Some(2))
+                .year(1999)
+                .genre("Pop")
+                .added(5),
+            album_track(3, "c", "Second", "X", Some(1)).added(5),
+        ];
+        let groups = albums(&tracks);
+        assert_eq!(
+            groups[0].album.as_deref(),
+            Some("First"),
+            "same addition, first seen first"
+        );
+        assert_eq!(groups[0].year, Some(1970));
+        assert_eq!(groups[0].genre.as_deref(), Some("Rock"));
+    }
+
+    #[test]
+    fn a_blank_artist_is_skipped_like_a_missing_one_and_case_variants_stay_apart() {
+        let tracks = [
+            track(1, "a").artist(""),
+            track(2, "b").artist("   "),
+            track(3, "c").artist("Beatles"),
+            track(4, "d").artist("beatles"),
+        ];
+        let names: Vec<String> = artists(&tracks)
+            .into_iter()
+            .map(|group| group.artist)
+            .collect();
+        assert_eq!(names.len(), 2, "{names:?}");
+        assert!(names.contains(&"Beatles".to_owned()) && names.contains(&"beatles".to_owned()));
+    }
+
+    #[test]
+    fn two_albums_of_one_name_list_apart_by_album_artist_in_the_artist_panel() {
+        let tracks = [
+            track(1, "z2")
+                .album("Greatest Hits")
+                .artist("Joni")
+                .album_artist("Zed")
+                .number(1),
+            track(2, "a1")
+                .album("Greatest Hits")
+                .artist("Joni")
+                .album_artist("Abel")
+                .number(1),
+            track(3, "a2")
+                .album("Greatest Hits")
+                .artist("Joni")
+                .album_artist("Abel")
+                .number(2),
+        ];
+        assert_eq!(
+            titles(&artist_tracks(&artists(&tracks)[0])),
+            ["a1", "a2", "z2"]
+        );
+    }
+
+    #[test]
+    fn the_library_search_reads_the_album_and_the_album_artist() {
+        let tracks = [
+            track(1, "One").album("Kind of Blue"),
+            track(2, "Two").album_artist("Various Artists"),
+            track(3, "Three"),
+        ];
+        assert_eq!(titles(&search_library(&tracks, "kind of")), ["One"]);
+        assert_eq!(titles(&search_library(&tracks, "various")), ["Two"]);
+    }
+
+    #[test]
+    fn the_albums_tab_orders_albums_of_one_name_by_artist() {
+        let tracks = [
+            track(1, "a").album("Hits").artist("Zed"),
+            track(2, "b").album("Hits").artist("Abel"),
+        ];
+        let groups = albums(&tracks);
+        let people = artists(&tracks);
+        let order = LibraryOrder::new(&tracks, &groups, &people);
+        let shown: Vec<&str> = albums_matching(&groups, &order, &tracks)
+            .iter()
+            .map(|album| album.artist.as_deref().unwrap_or(""))
+            .collect();
+        assert_eq!(shown, ["Abel", "Zed"]);
+    }
+
+    #[test]
+    fn an_album_detail_leaves_out_a_year_of_zero_or_none() {
+        let english = Translations::new(Language::English);
+        let zero = albums(&[album_track(1, "a", "A", "X", Some(1))
+            .year(0)
+            .duration(60.0)]);
+        assert_eq!(album_detail(&zero[0], &english), "1 track · 1:00");
+        let none = albums(&[album_track(1, "a", "A", "X", Some(1)).duration(60.0)]);
+        assert_eq!(album_detail(&none[0], &english), "1 track · 1:00");
+    }
+
+    #[test]
+    fn the_disc_shows_only_when_both_its_number_and_a_total_above_one_are_known() {
+        let english = Translations::new(Language::English);
+        let total_only = Track {
+            disc_total: Some(2),
+            ..track(1, "a")
+        };
+        assert_eq!(album_line(&total_only, &english), None);
+        let single_disc = Track {
+            disc_total: Some(1),
+            ..track(1, "a").disc(1)
+        };
+        assert_eq!(album_line(&single_disc, &english), None);
+        assert_eq!(
+            album_line(&track(1, "a").year(1971), &english).as_deref(),
+            Some("1971")
+        );
+    }
+
+    #[test]
+    fn a_compilation_track_has_no_spotlight_albums_of_its_own_artist() {
+        let tracks = [track(1, "a")
+            .album("Hits")
+            .artist("Joni")
+            .album_artist("Various")];
+        assert!(spotlight_albums(&albums(&tracks), &tracks[0]).is_empty());
+    }
+
+    #[test]
+    fn a_spotlight_track_whose_artist_left_the_library_plays_alone() {
+        let chosen = track(9, "Gone").artist("Nobody");
+        assert_eq!(artist_queue_from(&[], &chosen), (vec![chosen.clone()], 0));
+    }
+
+    #[test]
+    fn a_renewed_artist_selection_closes_when_the_artist_is_gone() {
+        let tracks = [track(1, "a").artist("Joni")];
+        let selection = artist_selection(&artists(&tracks)[0]);
+        assert_eq!(renewed_selection(selection, &[], &[]), None);
+    }
+
+    #[test]
+    fn up_next_with_a_stale_current_place_lists_the_whole_queue() {
+        let queue = [track(1, "a"), track(2, "b")];
+        let rows = queue_rows(QueueView::UpNext, &queue, Some(7), &[], false);
+        let places: Vec<usize> = rows.iter().map(|row| row.list_index).collect();
+        assert_eq!(places, [0, 1]);
+        assert!(queue_rows(QueueView::UpNext, &queue[..1], Some(0), &[], false).is_empty());
+        assert!(queue_rows(QueueView::Album, &queue, None, &queue, false)
+            .iter()
+            .all(|row| !row.is_current));
+    }
+
+    #[test]
+    fn the_album_heading_without_a_current_track_reads_unknown_album() {
+        assert_eq!(
+            queue_heading(
+                QueueView::Album,
+                0,
+                0,
+                None,
+                false,
+                &Translations::new(Language::English)
+            ),
+            "Unknown album"
+        );
+    }
+
+    fn any_track() -> impl proptest::strategy::Strategy<Value = Track> {
+        use proptest::prelude::*;
+        let tag = proptest::option::of(prop_oneof![Just("A"), Just("B"), Just(""), Just("a::b")]);
+        (
+            0i64..1000,
+            tag.clone(),
+            tag.clone(),
+            tag,
+            proptest::option::of(1u32..4),
+        )
+            .prop_map(|(id, album, artist, album_artist, number)| Track {
+                album: album.map(str::to_owned),
+                artist: artist.map(str::to_owned),
+                album_artist: album_artist.map(str::to_owned),
+                track_number: number,
+                ..track(id, "t")
+            })
+    }
+
+    proptest::proptest! {
+        #[test]
+        fn every_track_lands_in_exactly_one_album(
+            tracks in proptest::collection::vec(any_track(), 0..30),
+        ) {
+            let groups = albums(&tracks);
+            let grouped: usize = groups.iter().map(|group| group.tracks.len()).sum();
+            proptest::prop_assert_eq!(grouped, tracks.len());
+            let mut keys: Vec<&str> = groups.iter().map(|group| group.key.as_str()).collect();
+            keys.sort_unstable();
+            keys.dedup();
+            proptest::prop_assert_eq!(keys.len(), groups.len());
+        }
+
+        #[test]
+        fn a_search_keeps_a_subset_in_the_order_given(
+            tracks in proptest::collection::vec(any_track(), 0..30),
+            query in "[aAb: ]{0,3}",
+        ) {
+            let kept = search_library(&tracks, &query);
+            let mut remaining = tracks.iter();
+            for track in &kept {
+                proptest::prop_assert!(remaining.any(|candidate| candidate == track));
+            }
+            if query.trim().is_empty() {
+                proptest::prop_assert_eq!(kept.len(), tracks.len());
+            }
+        }
+
+        #[test]
+        fn up_next_lists_every_place_but_the_current_one(
+            length in 0usize..12,
+            current in proptest::option::of(0usize..16),
+        ) {
+            let queue: Vec<Track> = (0..length as i64).map(|id| track(id, "t")).collect();
+            let rows = queue_rows(QueueView::UpNext, &queue, current, &[], false);
+            let mut places: Vec<usize> = rows.iter().map(|row| row.list_index).collect();
+            places.sort_unstable();
+            let expected: Vec<usize> = (0..length)
+                .filter(|place| current.filter(|current| *current < length) != Some(*place))
+                .collect();
+            proptest::prop_assert_eq!(places, expected);
+        }
     }
 }
