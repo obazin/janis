@@ -96,8 +96,15 @@ impl Translations {
     /// The wording of `count` things: `key.one` or `key.other`, whichever the
     /// current language uses for that number, with `{count}` replaced.
     pub fn count(&self, key: &str, count: usize) -> String {
+        self.count_with(key, count, &[])
+    }
+
+    /// `count`, for a wording with other placeholders besides `{count}`.
+    pub fn count_with(&self, key: &str, count: usize, parameters: &[(&str, String)]) -> String {
         let form = self.current.plural_form(count);
-        self.translate(&format!("{key}.{form}"), &[("count", count.to_string())])
+        let mut all = vec![("count", count.to_string())];
+        all.extend_from_slice(parameters);
+        self.translate(&format!("{key}.{form}"), &all)
     }
 
     /// Every key of the reference catalog.
