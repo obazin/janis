@@ -225,6 +225,20 @@ pub enum PlaybackOption {
 }
 
 impl PlaybackOption {
+    pub const ALL: [PlaybackOption; 4] = [
+        PlaybackOption::Gapless,
+        PlaybackOption::Crossfade,
+        PlaybackOption::Normalize,
+        PlaybackOption::Exclusive,
+    ];
+
+    /// The switch the Settings screen names; its column's name, too.
+    pub fn from_identifier(identifier: &str) -> Option<PlaybackOption> {
+        Self::ALL
+            .into_iter()
+            .find(|option| option.column() == identifier)
+    }
+
     fn column(self) -> &'static str {
         match self {
             PlaybackOption::Gapless => "gapless",
@@ -894,5 +908,16 @@ mod tests {
             .expect("read version");
         assert_eq!(version, SCHEMA_VERSION);
         drop(conn);
+    }
+
+    #[test]
+    fn a_playback_switch_is_found_by_the_name_the_settings_screen_gives_it() {
+        for option in PlaybackOption::ALL {
+            assert_eq!(
+                PlaybackOption::from_identifier(option.column()),
+                Some(option)
+            );
+        }
+        assert_eq!(PlaybackOption::from_identifier("loudness"), None);
     }
 }

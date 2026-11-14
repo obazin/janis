@@ -70,14 +70,12 @@ impl Application {
         view.set_preset(equalizer.preset().into());
         view.set_linear_phase(equalizer.linear_phase());
         view.set_linear_phase_description(
-            if equalizer.linear_phase() && equalizer.latency_seconds() > 0.0 {
-                let milliseconds = (equalizer.latency_seconds() * 1000.0).round();
-                translations.translate(
+            match equalizer.latency_milliseconds() {
+                Some(milliseconds) => translations.translate(
                     "eq.linearPhase.latency",
-                    &[("ms", format!("{milliseconds:.0}"))],
-                )
-            } else {
-                translations.text("eq.linearPhase.desc")
+                    &[("ms", milliseconds.to_string())],
+                ),
+                None => translations.text("eq.linearPhase.desc"),
             }
             .into(),
         );

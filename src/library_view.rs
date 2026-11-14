@@ -476,6 +476,41 @@ pub enum SelectionKind {
     Artist,
 }
 
+/// The last scan's report, as the Local Files screen shows it.
+pub fn scan_report_line(
+    report: &crate::library::ScanReport,
+    translations: &Translations,
+) -> String {
+    translations.translate(
+        "local.scanReport",
+        &[
+            ("added", report.added.to_string()),
+            ("updated", report.updated.to_string()),
+            ("skipped", report.skipped.to_string()),
+        ],
+    )
+}
+
+/// The shelves of the Discover screen.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Shelf {
+    RecentAlbums,
+    Rediscover,
+    Artists,
+}
+
+impl Shelf {
+    /// The shelf the Discover screen names.
+    pub fn from_identifier(identifier: &str) -> Option<Shelf> {
+        match identifier {
+            "recent" => Some(Shelf::RecentAlbums),
+            "rediscover" => Some(Shelf::Rediscover),
+            "artists" => Some(Shelf::Artists),
+            _ => None,
+        }
+    }
+}
+
 /// The album or artist browsed in the Library grid instead of played.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Selection {
@@ -1434,5 +1469,30 @@ mod tests {
             selection_place(LibraryTab::Albums, None, &groups, &people),
             None
         );
+    }
+
+    #[test]
+    fn the_scan_report_reads_what_was_added_updated_and_skipped() {
+        let report = crate::library::ScanReport {
+            added: 3,
+            updated: 1,
+            skipped: 2,
+            removed: 0,
+        };
+        assert_eq!(
+            scan_report_line(&report, &Translations::new(Language::English)),
+            "3 added · 1 updated · 2 skipped"
+        );
+    }
+
+    #[test]
+    fn a_shelf_is_found_by_the_name_the_discover_screen_gives_it() {
+        assert_eq!(Shelf::from_identifier("recent"), Some(Shelf::RecentAlbums));
+        assert_eq!(
+            Shelf::from_identifier("rediscover"),
+            Some(Shelf::Rediscover)
+        );
+        assert_eq!(Shelf::from_identifier("artists"), Some(Shelf::Artists));
+        assert_eq!(Shelf::from_identifier("albums"), None);
     }
 }

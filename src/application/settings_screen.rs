@@ -8,6 +8,7 @@ use slint::ComponentHandle;
 use super::Application;
 use crate::persistence::{self, PlaybackOption};
 use crate::player::Player;
+use crate::text;
 use crate::translations::Language;
 use crate::user_interface;
 
@@ -15,12 +16,8 @@ impl Application {
     pub(super) fn connect_settings(self: &Rc<Self>) {
         let view = self.window.global::<user_interface::Settings>();
         view.on_option_toggled(self.handler(|application, option: slint::SharedString| {
-            let option = match option.as_str() {
-                "gapless" => PlaybackOption::Gapless,
-                "crossfade" => PlaybackOption::Crossfade,
-                "normalize" => PlaybackOption::Normalize,
-                "exclusive" => PlaybackOption::Exclusive,
-                _ => return,
+            let Some(option) = PlaybackOption::from_identifier(&option) else {
+                return;
             };
             let effects = application.playback_options.borrow_mut().toggle(option);
             application.run(effects);
@@ -47,13 +44,7 @@ impl Application {
     pub(super) fn refresh_output_readout(&self, player: &Player) {
         let settings = self.window.global::<user_interface::Settings>();
         settings.set_device(player.device_name().unwrap_or_default().into());
-        settings.set_sample_rate(
-            player
-                .sample_rate()
-                .map(|rate| format!("{:.1} kHz", f64::from(rate) / 1000.0))
-                .unwrap_or_else(|| "—".to_owned())
-                .into(),
-        );
+        settings.set_sample_rate(text::sample_rate_label(player.sample_rate()).into());
     }
 
     pub(super) fn refresh_settings(&self) {

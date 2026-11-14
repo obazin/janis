@@ -98,8 +98,16 @@ impl Equalizer {
         self.linear_phase
     }
 
+    #[cfg(test)]
     pub fn latency_seconds(&self) -> f32 {
         self.latency_seconds
+    }
+
+    /// The delay the linear-phase mode adds, in whole milliseconds, once the
+    /// engine reported it; none while the mode is off.
+    pub fn latency_milliseconds(&self) -> Option<u32> {
+        (self.linear_phase && self.latency_seconds > 0.0)
+            .then(|| (self.latency_seconds * 1000.0).round() as u32)
     }
 
     /// Boot hydration from the preferences row.
@@ -319,5 +327,17 @@ mod tests {
             proptest::prop_assert!((-GAIN_RANGE..=GAIN_RANGE).contains(&gain));
             proptest::prop_assert_eq!((gain * 2.0).fract(), 0.0);
         }
+    }
+
+    #[test]
+    fn the_linear_phase_delay_shows_only_once_the_engine_reports_it() {
+        let mut equalizer = Equalizer::default();
+        assert_eq!(equalizer.latency_milliseconds(), None);
+        equalizer.apply_engine_report(true, 0.0);
+        assert_eq!(equalizer.latency_milliseconds(), None);
+        equalizer.apply_engine_report(true, 0.0426);
+        assert_eq!(equalizer.latency_milliseconds(), Some(43));
+        equalizer.apply_engine_report(false, 0.0426);
+        assert_eq!(equalizer.latency_milliseconds(), None);
     }
 }
