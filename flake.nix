@@ -125,11 +125,11 @@
 
           janis = rustPlatform.buildRustPackage (finalAttrs: {
             pname = "janis";
-            version = "0.2.0";
+            version = "0.3.0";
 
             src = ./.;
 
-            cargoHash = "sha256-04LVlQD8UWkhkDoBqHVtIUfkRaY7W6Pzeu7eguKSIQw=";
+            cargoHash = "sha256-0HUQ1DlcbF+EGhXF1XApzF+SiU/k2SjSHoYgLUBCXYA=";
 
             nativeBuildInputs = [
               pkgs.cmake
