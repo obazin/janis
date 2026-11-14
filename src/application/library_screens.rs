@@ -369,10 +369,7 @@ impl Application {
             .set_vec(track_rows(&screen.local_tracks, None, &translations));
         view.set_scanned_heading(
             translations
-                .translate(
-                    "local.scanned",
-                    &[("count", screen.local_tracks.len().to_string())],
-                )
+                .count("local.scanned", screen.local_tracks.len())
                 .into(),
         );
         view.set_scan_report(

@@ -8,8 +8,30 @@
 
 use crate::effects::{Effect, Secret};
 use crate::jellyfin::Failure;
-use crate::library::ScanReport;
+use crate::library::{ScanReport, Track};
 use crate::persistence::MediaServer;
+
+/// The Settings card, as the state has it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Card {
+    pub signed_in: bool,
+    pub busy: bool,
+    /// The translation key of the line under the card.
+    pub status_key: Option<&'static str>,
+    pub status_failed: bool,
+    pub summary: Option<Summary>,
+    /// The address and user name the form starts from.
+    pub prefill: Option<(String, String)>,
+}
+
+/// The server signed in to, as the card sums it up.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Summary {
+    pub server_name: String,
+    pub user_name: String,
+    /// That server's songs in the library.
+    pub song_count: usize,
+}
 
 /// Where the connection stands.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -53,6 +75,7 @@ impl MediaServerState {
         self.sync()
     }
 
+    #[cfg(test)]
     pub fn phase(&self) -> Phase {
         self.phase
     }
@@ -61,8 +84,40 @@ impl MediaServerState {
         self.server.as_ref()
     }
 
+    #[cfg(test)]
     pub fn message_key(&self) -> Option<&'static str> {
         self.message_key
+    }
+
+    /// What the Settings card shows, given the library's tracks.
+    pub fn card(&self, tracks: &[Track]) -> Card {
+        let summary = self.server.as_ref().map(|server| Summary {
+            // A server that gave no name is known by its address.
+            server_name: if server.server_name.is_empty() {
+                server.address.clone()
+            } else {
+                server.server_name.clone()
+            },
+            user_name: server.user_name.clone(),
+            song_count: tracks
+                .iter()
+                .filter(|track| track.server_id == Some(server.id))
+                .count(),
+        });
+        Card {
+            signed_in: matches!(self.phase, Phase::SignedIn | Phase::Syncing),
+            busy: self.busy(),
+            status_key: self.message_key,
+            // A line that stays once nothing is in flight says what went wrong.
+            status_failed: self.message_key.is_some() && !self.busy(),
+            summary,
+            // Asked to sign in again, the form starts from what was kept.
+            prefill: self
+                .server
+                .as_ref()
+                .filter(|_| self.phase == Phase::SignInAgain)
+                .map(|server| (server.address.clone(), server.user_name.clone())),
+        }
     }
 
     /// Whether a request is in flight, which holds the card's buttons.
@@ -445,5 +500,68 @@ mod tests {
                 epoch: epoch + 1,
             }]
         );
+    }
+
+    #[test]
+    fn the_card_sums_up_the_server_by_name_or_address_with_its_own_songs() {
+        let state = signed_in();
+        let songs = [
+            crate::library::test_support::track(1, "a").server(1, "item"),
+            crate::library::test_support::track(2, "b").server(9, "item"),
+            crate::library::test_support::track(3, "c"),
+        ];
+        let card = state.card(&songs);
+        assert!(card.signed_in && !card.busy && !card.status_failed);
+        assert_eq!(
+            card.summary,
+            Some(Summary {
+                server_name: "Home".to_owned(),
+                user_name: "listener".to_owned(),
+                song_count: 1,
+            })
+        );
+        assert_eq!(card.prefill, None);
+
+        let mut nameless = MediaServerState::default();
+        nameless.restore(Some(MediaServer {
+            server_name: String::new(),
+            ..server()
+        }));
+        assert_eq!(
+            nameless
+                .card(&[])
+                .summary
+                .map(|summary| summary.server_name),
+            Some("http://jellyfin.local:8096".to_owned())
+        );
+        assert!(nameless.card(&[]).busy, "a sync runs at boot");
+        assert!(!nameless.card(&[]).status_failed, "its line is progress");
+    }
+
+    #[test]
+    fn a_refused_token_shows_a_failed_line_and_the_form_starts_from_what_was_kept() {
+        let mut state = signed_in();
+        let epoch = sync_epoch(&state.sync());
+        state.sync_finished(epoch, Err(Failure::TokenRejected), 200);
+
+        let card = state.card(&[]);
+
+        assert!(!card.signed_in);
+        assert!(card.status_failed);
+        assert_eq!(
+            card.prefill,
+            Some((
+                "http://jellyfin.local:8096".to_owned(),
+                "listener".to_owned()
+            ))
+        );
+    }
+
+    #[test]
+    fn signed_out_the_card_has_no_summary() {
+        let card = MediaServerState::default().card(&[]);
+        assert_eq!(card.summary, None);
+        assert!(!card.signed_in);
+        assert_eq!(card.status_key, None);
     }
 }

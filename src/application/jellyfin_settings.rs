@@ -17,7 +17,6 @@ use crate::audio::Location;
 use crate::effects::Secret;
 use crate::jellyfin::{self, Failure, Session};
 use crate::library::{self, ScanReport, Track};
-use crate::media_server::Phase;
 use crate::persistence::{self, MediaServer};
 use crate::user_interface;
 
@@ -181,56 +180,38 @@ impl Application {
 
     /// Pushes the Jellyfin card's state to the window.
     pub(super) fn refresh_jellyfin(&self) {
-        let state = self.media_server.borrow();
+        let card = self.media_server.borrow().card(&self.tracks.borrow());
         let translations = self.translations.borrow();
         let view = self.window.global::<user_interface::Jellyfin>();
-        let phase = state.phase();
 
-        view.set_signed_in(matches!(phase, Phase::SignedIn | Phase::Syncing));
-        view.set_busy(state.busy());
+        view.set_signed_in(card.signed_in);
+        view.set_busy(card.busy);
         view.set_status(
-            state
-                .message_key()
+            card.status_key
                 .map(|key| translations.text(key))
                 .unwrap_or_default()
                 .into(),
         );
-        view.set_status_failed(state.message_key().is_some() && !state.busy());
-
-        let Some(server) = state.server() else {
-            view.set_summary(Default::default());
-            return;
-        };
-        let song_count = self
-            .tracks
-            .borrow()
-            .iter()
-            .filter(|track| track.server_id == Some(server.id))
-            .count();
-        let server_name = if server.server_name.is_empty() {
-            server.address.as_str()
-        } else {
-            server.server_name.as_str()
-        };
+        view.set_status_failed(card.status_failed);
         view.set_summary(
-            translations
-                .translate(
-                    "jellyfin.summary",
-                    &[
-                        ("server", server_name.to_owned()),
-                        ("user", server.user_name.clone()),
-                        ("count", song_count.to_string()),
-                    ],
-                )
+            card.summary
+                .map(|summary| {
+                    translations.count_with(
+                        "jellyfin.summary",
+                        summary.song_count,
+                        &[("server", summary.server_name), ("user", summary.user_name)],
+                    )
+                })
+                .unwrap_or_default()
                 .into(),
         );
-        // Asked to sign in again, the form starts from what was kept.
-        if phase == Phase::SignInAgain {
+        // What the listener already typed is kept.
+        if let Some((address, user_name)) = card.prefill {
             if view.get_address().is_empty() {
-                view.set_address(server.address.as_str().into());
+                view.set_address(address.into());
             }
             if view.get_user_name().is_empty() {
-                view.set_user_name(server.user_name.as_str().into());
+                view.set_user_name(user_name.into());
             }
         }
     }
