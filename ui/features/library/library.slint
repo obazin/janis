@@ -51,6 +51,14 @@ export global Library {
     in property <bool> selection-present;
     in property <string> selection-heading;
     in property <[LibraryTrack]> selection-tracks;
+    // The panel the listener's last click put away, so it can fold with its
+    // tracks still in it: its card's place, or -1 when none shows.
+    in property <int> folding-index: -1;
+    in property <string> folding-heading;
+    in property <[LibraryTrack]> folding-tracks;
+    // Counts the times the listener opened, switched or closed a selection:
+    // the grid animates on these, and only these.
+    in property <int> selection-changes;
 
     // ── Local Files ───────────────────────────────────────────────────────
     // The files the search kept there: it reads titles and artists only.

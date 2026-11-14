@@ -1,3 +1,4 @@
+import { Motion } from "../../tokens.slint";
 import { Library, LibraryCard } from "library.slint";
 import { AlbumCard } from "album_card.slint";
 import { LibraryTrackAccordion } from "library_track_accordion.slint";
@@ -6,6 +7,10 @@ import { LibraryTrackAccordion } from "library_track_accordion.slint";
 // of the selected card — its tracks, in place. Only the lines in view are
 // drawn, so a library of thousands of albums asks for no more covers than
 // the screen shows.
+//
+// Opening a card under the line of an open one takes two movements: the open
+// panel folds while the page brings the card's line to the top, then the
+// card's panel unfolds beneath it. Anywhere else, it is one movement.
 export component CardGrid inherits Rectangle {
     in property <[LibraryCard]> cards;
     in property <bool> shows-detail;
@@ -13,6 +18,10 @@ export component CardGrid inherits Rectangle {
     in property <length> view-top;
     in property <length> view-height;
     callback card-clicked(index: int);
+    // A card was opened: the page brings `line-top`, where its line starts
+    // once the panel open before has folded, to the top. `settled-height` is
+    // the grid's height once every panel has finished moving.
+    callback opened(line-top: length, settled-height: length);
 
     property <length> gap: 20px;
     property <length> narrowest-card: 180px;
@@ -26,27 +35,67 @@ export component CardGrid inherits Rectangle {
     property <int> line-count: ceil(root.cards.length / root.columns);
 
     // The line holding the selected card, or -1 when none of these is selected.
-    out property <int> selected-line: Library.selection-index >= 0 ? floor(Library.selection-index / root.columns) : -1;
-    // Where that line starts. Lines above the selected one are never pushed
-    // down by the accordion, so this holds as soon as the selection changes.
-    out property <length> selected-line-top: root.selected-line * root.line-height;
-    property <length> accordion-top: root.selected-line-top + root.line-height;
-    property <length> accordion-room: root.selected-line >= 0 ? accordion.height + root.gap : 0px;
+    property <int> selected-line: Library.selection-index >= 0 ? floor(Library.selection-index / root.columns) : -1;
 
-    // The first line in view. Below the open accordion, lines sit lower by
-    // its height, so a window starting under it counts from there; a window
-    // starting inside it may draw a line above, which costs nothing.
-    property <length> lines-top: root.view-top > root.accordion-top ? root.view-top - root.accordion-room : root.view-top;
+    // How far each panel is open, from 0 to 1. A panel opened by a click
+    // starts closed; one found open when the screen is built is open.
+    property <float> unfolded: 1;
+    property <float> folded-open: 0;
+    property <bool> moving-instantly;
+    property <bool> unfolds-after-folding;
+    animate unfolded {
+        duration: root.moving-instantly ? 0ms : Motion.glide;
+        delay: root.moving-instantly || !root.unfolds-after-folding ? 0ms : Motion.glide;
+        easing: ease-out;
+    }
+    animate folded-open {
+        duration: root.moving-instantly ? 0ms : Motion.glide;
+        easing: ease-out;
+    }
+
+    // The line whose panel the last click put away, or -1.
+    property <int> folding-line: Library.folding-index >= 0 ? floor(Library.folding-index / root.columns) : -1;
+
+    property <length> accordion-room: root.selected-line >= 0 ? (accordion.height + root.gap) * root.unfolded : 0px;
+    property <length> folding-room: root.folding-line >= 0 ? (folding.height + root.gap) * root.folded-open : 0px;
+
+    // Where each panel starts, counting the other when it lies above. Two
+    // panels under the same line stack, the folding one first.
+    property <length> accordion-top: (root.selected-line + 1) * root.line-height + (root.folding-line >= 0 && root.folding-line <= root.selected-line ? root.folding-room : 0px);
+    property <length> folding-top: (root.folding-line + 1) * root.line-height + (root.selected-line >= 0 && root.selected-line < root.folding-line ? root.accordion-room : 0px);
+
+    // The first line in view: the window's top with the panels above it
+    // taken out. A window starting inside a panel draws the line above it,
+    // which costs nothing.
+    property <length> lines-top: root.view-top - max(0px, min(root.accordion-room, root.view-top - root.accordion-top)) - max(0px, min(root.folding-room, root.view-top - root.folding-top));
     property <int> first-line: max(0, floor(root.lines-top / root.line-height));
     property <int> line-span: ceil(root.view-height / root.line-height) + 1;
 
-    height: root.line-count * root.line-height + root.accordion-room;
+    // Only a panel folding above the opened card's line moves that line, so
+    // only then does the new panel wait for the fold; under the same line or
+    // further down, both move at once.
+    property <int> selection-changes: Library.selection-changes;
+    changed selection-changes => {
+        let folds = root.folding-line >= 0;
+        root.moving-instantly = true;
+        root.folded-open = folds ? 1 : 0;
+        root.unfolded = 0;
+        root.moving-instantly = false;
+        root.unfolds-after-folding = folds && root.selected-line >= 0 && root.folding-line < root.selected-line;
+        root.folded-open = 0;
+        if root.selected-line >= 0 {
+            root.unfolded = 1;
+            root.opened(root.selected-line * root.line-height, root.line-count * root.line-height + accordion.height + root.gap);
+        }
+    }
+
+    height: root.line-count * root.line-height + root.accordion-room + root.folding-room;
 
     for offset in root.line-span * root.columns: AlbumCard {
         property <int> index: root.first-line * root.columns + offset;
         property <int> line: floor(self.index / root.columns);
         x: mod(self.index, root.columns) * (root.card-width + root.gap);
-        y: self.line * root.line-height + (root.selected-line >= 0 && self.line > root.selected-line ? root.accordion-room : 0px);
+        y: self.line * root.line-height + (root.selected-line >= 0 && self.line > root.selected-line ? root.accordion-room : 0px) + (root.folding-line >= 0 && self.line > root.folding-line ? root.folding-room : 0px);
         width: root.card-width;
         height: root.card-height;
         visible: self.index < root.cards.length;
@@ -56,14 +105,34 @@ export component CardGrid inherits Rectangle {
         clicked => { root.card-clicked(self.index); }
     }
 
-    accordion := LibraryTrackAccordion {
+    // The panel put away, still showing what it held while it folds.
+    Rectangle {
+        y: root.folding-top;
+        height: folding.height * root.folded-open;
+        visible: root.folding-line >= 0 && root.folded-open > 0;
+        clip: true;
+        folding := LibraryTrackAccordion {
+            y: 0;
+            heading: Library.folding-heading;
+            tracks: Library.folding-tracks;
+            view-top: root.view-top - root.folding-top;
+            view-height: root.view-height;
+        }
+    }
+
+    Rectangle {
         y: root.accordion-top;
-        visible: root.selected-line >= 0;
-        heading: Library.selection-heading;
-        tracks: Library.selection-tracks;
-        view-top: root.view-top - root.accordion-top;
-        view-height: root.view-height;
-        track-clicked(index) => { Library.selection-track-clicked(index); }
-        closed => { Library.selection-closed(); }
+        height: accordion.height * root.unfolded;
+        visible: root.selected-line >= 0 && root.unfolded > 0;
+        clip: true;
+        accordion := LibraryTrackAccordion {
+            y: 0;
+            heading: Library.selection-heading;
+            tracks: Library.selection-tracks;
+            view-top: root.view-top - root.accordion-top;
+            view-height: root.view-height;
+            track-clicked(index) => { Library.selection-track-clicked(index); }
+            closed => { Library.selection-closed(); }
+        }
     }
 }

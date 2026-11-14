@@ -1,4 +1,4 @@
-import { Tokens } from "../tokens.slint";
+import { Tokens, Motion } from "../tokens.slint";
 
 // A vertically scrolling box with the thin accent scroll bar.
 //
@@ -12,6 +12,9 @@ export component ScrollArea inherits Rectangle {
 
     property <length> furthest: max(0px, root.content-height - root.height);
     property <bool> scrollable: root.furthest > 0;
+    // Whether the last move asked for was a glide. The wheel moves the page
+    // itself and is never animated.
+    property <bool> gliding;
 
     public pure function first-row(row-height: length) -> int {
         max(0, floor(root.scroll-offset / row-height))
@@ -21,8 +24,19 @@ export component ScrollArea inherits Rectangle {
         ceil(root.height / row-height) + 1
     }
 
+    // Jumps to `offset`, as the scroll bar does under the pointer.
     public function scroll-to(offset: length) {
+        root.gliding = false;
         flickable.content-y = -max(0px, min(root.furthest, offset));
+    }
+
+    // Eases to `offset`: for a move the page makes on its own, so the eye can
+    // follow where the content went. The page may be shorter than `offset`
+    // while it glides, when what will fill it is still opening: the caller
+    // keeps `offset` within where the content will end.
+    public function glide-to(offset: length) {
+        root.gliding = true;
+        flickable.content-y = -max(0px, offset);
     }
 
     flickable := Flickable {
@@ -33,6 +47,10 @@ export component ScrollArea inherits Rectangle {
         interactive: false;
         content-width: self.width;
         content-height: max(root.content-height, self.height);
+        animate content-y {
+            duration: root.gliding ? Motion.glide : 0ms;
+            easing: ease-out;
+        }
         @children
     }
 

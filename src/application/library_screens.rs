@@ -27,6 +27,11 @@ use crate::user_interface::{self, LibraryCard, LibraryTrack};
 pub(super) struct LibraryScreen {
     pub tab: LibraryTab,
     pub selection: Option<Selection>,
+    /// Where the selection's card sits among the cards of the open tab, when
+    /// it shows there.
+    shown_selection: Option<usize>,
+    /// How many times the listener opened, switched or closed a selection.
+    selection_changes: i32,
     shown_tracks: Vec<Track>,
     /// The "Recently added" rows, newest first.
     recent_tracks: Vec<Track>,
@@ -62,6 +67,7 @@ impl Application {
         view.set_songs(self.library_songs.clone().into());
         view.set_recent(self.library_recent.clone().into());
         view.set_selection_tracks(self.library_selection_tracks.clone().into());
+        view.set_folding_tracks(self.library_folding_tracks.clone().into());
 
         view.on_tab_selected(
             self.handler(|application, identifier: slint::SharedString| {
@@ -135,8 +141,7 @@ impl Application {
             }
         }));
         view.on_selection_closed(self.action(|application| {
-            application.library_screen.borrow_mut().selection = None;
-            application.refresh_library();
+            application.change_selection(|selection| *selection = None);
         }));
         view.on_add_music(self.action(Application::add_files));
         view.on_add_folder(self.action(Application::add_folder));
@@ -199,8 +204,40 @@ impl Application {
     }
 
     fn toggle_selection(&self, selection: Selection) {
-        library_view::toggle_selection(&mut self.library_screen.borrow_mut().selection, selection);
+        self.change_selection(|current| library_view::toggle_selection(current, selection));
+    }
+
+    /// Changes the selection as the listener asked and hands the grid the
+    /// panel it puts away, tracks included, so that panel folds while the
+    /// next one opens.
+    fn change_selection(&self, change: impl FnOnce(&mut Option<Selection>)) {
+        let (folding, folding_index, changes) = {
+            let mut screen = self.library_screen.borrow_mut();
+            let folding = screen.selection.clone();
+            let folding_index = screen.shown_selection;
+            change(&mut screen.selection);
+            screen.selection_changes = screen.selection_changes.wrapping_add(1);
+            (folding, folding_index, screen.selection_changes)
+        };
         self.refresh_library();
+
+        let view = self.window.global::<user_interface::Library>();
+        match (folding, folding_index) {
+            (Some(folding), Some(index)) => {
+                view.set_folding_index(index as i32);
+                view.set_folding_heading(folding.label.as_str().into());
+                self.library_folding_tracks.set_vec(track_rows(
+                    &folding.tracks,
+                    Some(folding.kind),
+                    &self.translations.borrow(),
+                ));
+            }
+            _ => {
+                view.set_folding_index(-1);
+                self.library_folding_tracks.set_vec(Vec::new());
+            }
+        }
+        view.set_selection_changes(changes);
     }
 
     /// Rebuilds what the Library screen shows from the library, the search
@@ -248,7 +285,7 @@ impl Application {
         self.library_recent
             .set_vec(track_rows(&screen.recent_tracks, None, &translations));
 
-        Self::show_selection(
+        screen.shown_selection = Self::show_selection(
             &screen,
             &view,
             &self.library_selection_tracks,
@@ -257,13 +294,13 @@ impl Application {
     }
 
     /// Pushes the album or artist browsed in place, and where its tile sits
-    /// in the grid of the open tab.
+    /// in the grid of the open tab, which it returns.
     fn show_selection(
         screen: &LibraryScreen,
         view: &user_interface::Library<'_>,
         rows: &slint::VecModel<LibraryTrack>,
         translations: &Translations,
-    ) {
+    ) -> Option<usize> {
         let selection_index =
             screen
                 .selection
@@ -295,6 +332,7 @@ impl Application {
                 rows.set_vec(Vec::new());
             }
         }
+        selection_index
     }
 
     /// Rebuilds the Discover shelves. They are built from the whole library,
