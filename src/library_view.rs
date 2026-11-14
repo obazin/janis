@@ -53,6 +53,26 @@ pub fn compare_in_album(left: &Track, right: &Track) -> Ordering {
         .then_with(|| compare_labels(&left.title, &right.title))
 }
 
+/// A tag as the grouping reads it: a blank one is no tag.
+fn tag(text: &Option<String>) -> Option<String> {
+    text.clone().filter(|text| !text.is_empty())
+}
+
+/// The album and artist a track is grouped under.
+fn album_and_artist(track: &Track) -> (Option<String>, Option<String>) {
+    (
+        tag(&track.album),
+        tag(&track.album_artist).or_else(|| tag(&track.artist)),
+    )
+}
+
+/// What tells an album apart: its title and artist, the title's length first
+/// so that no pair of them reads as another ("a::b" by "c", "a" by "b::c").
+fn album_key(album: Option<&str>, artist: Option<&str>) -> String {
+    let album = album.unwrap_or("");
+    format!("{}:{album}{}", album.len(), artist.unwrap_or(""))
+}
+
 /// Albums, newest addition first, each in its own running order.
 ///
 /// Grouped by album + album artist so a compilation stays one album instead
@@ -61,16 +81,12 @@ pub fn albums(tracks: &[Track]) -> Vec<AlbumGroup> {
     let mut groups: Vec<AlbumGroup> = Vec::new();
     let mut positions: HashMap<String, usize> = HashMap::new();
     for track in tracks {
-        let artist = track.album_artist.clone().or_else(|| track.artist.clone());
-        let key = format!(
-            "{}::{}",
-            track.album.as_deref().unwrap_or(""),
-            artist.as_deref().unwrap_or("")
-        );
+        let (album, artist) = album_and_artist(track);
+        let key = album_key(album.as_deref(), artist.as_deref());
         let position = *positions.entry(key.clone()).or_insert_with(|| {
             groups.push(AlbumGroup {
                 key,
-                album: track.album.clone(),
+                album,
                 artist,
                 tracks: Vec::new(),
                 newest_added_at: 0,
@@ -328,10 +344,11 @@ pub fn rediscover(groups: &[AlbumGroup]) -> Vec<&AlbumGroup> {
 /// albums are keyed — on a compilation the track's own artist is not the
 /// album's.
 pub fn album_tracks_of(groups: &[AlbumGroup], track: &Track) -> Vec<Track> {
-    let artist = track.album_artist.as_ref().or(track.artist.as_ref());
+    let (album, artist) = album_and_artist(track);
+    let key = album_key(album.as_deref(), artist.as_deref());
     groups
         .iter()
-        .find(|group| group.album == track.album && group.artist.as_ref() == artist)
+        .find(|group| group.key == key)
         .map(|group| group.tracks.clone())
         .unwrap_or_else(|| vec![track.clone()])
 }
@@ -983,6 +1000,37 @@ mod tests {
             queue_heading(QueueView::Album, 4, 1, Some(&current), false, &translations),
             "Blue"
         );
+    }
+
+    #[test]
+    fn albums_whose_names_contain_the_separator_stay_apart() {
+        let groups = albums(&[
+            track(1, "One").album("a::b").artist("c"),
+            track(2, "Two").album("a").artist("b::c"),
+        ]);
+        assert_eq!(groups.len(), 2);
+        assert_ne!(groups[0].key, groups[1].key);
+    }
+
+    #[test]
+    fn an_untagged_and_an_empty_album_title_group_alike() {
+        let groups = albums(&[
+            track(1, "One").artist("X"),
+            track(2, "Two").album("").artist("X"),
+            track(3, "Three").album("Blue").artist(""),
+            track(4, "Four").album("Blue"),
+        ]);
+        assert_eq!(groups.len(), 2, "{groups:?}");
+        let untitled = groups
+            .iter()
+            .find(|group| group.album.is_none())
+            .expect("an untitled album");
+        assert_eq!(untitled.tracks.len(), 2);
+        let blue = groups
+            .iter()
+            .find(|group| group.album.as_deref() == Some("Blue"))
+            .expect("Blue");
+        assert_eq!(blue.artist, None, "a blank artist reads as none");
     }
 
     #[test]
