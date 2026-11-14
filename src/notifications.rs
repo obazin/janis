@@ -102,4 +102,70 @@ mod tests {
         assert_eq!(notifications.items().len(), 1);
         assert_eq!(notifications.items()[0].parameters, parameters("b"));
     }
+
+    #[test]
+    fn dismissing_an_unknown_notification_changes_nothing() {
+        let mut notifications = Notifications::default();
+        notifications.error("error.cover", Vec::new(), Some("cover"));
+        notifications.dismiss(42);
+        assert_eq!(notifications.items().len(), 1);
+        assert_eq!(
+            notifications.error("error.cover", Vec::new(), Some("cover")),
+            None
+        );
+    }
+
+    #[test]
+    fn dismissing_an_unkeyed_notification_keeps_another_key_held() {
+        let mut notifications = Notifications::default();
+        notifications.error("error.cover", Vec::new(), Some("cover"));
+        let unkeyed = notifications
+            .error("error.radio", Vec::new(), None)
+            .expect("shown");
+        notifications.dismiss(unkeyed);
+        assert_eq!(
+            notifications.error("error.cover", Vec::new(), Some("cover")),
+            None
+        );
+    }
+
+    #[test]
+    fn different_keys_show_side_by_side_and_ids_are_never_reused() {
+        let mut notifications = Notifications::default();
+        let cover = notifications
+            .error("error.cover", Vec::new(), Some("cover"))
+            .expect("shown");
+        let playback = notifications
+            .error("error.playback", Vec::new(), Some("playback"))
+            .expect("shown");
+        assert_ne!(cover, playback);
+        assert_eq!(notifications.items().len(), 2);
+        notifications.dismiss(playback);
+        let again = notifications
+            .error("error.playback", Vec::new(), Some("playback"))
+            .expect("shown again");
+        assert!(
+            again > playback,
+            "an id freed by a dismissal is not given again"
+        );
+    }
+
+    #[test]
+    fn a_suppressed_duplicate_keeps_the_first_message() {
+        let mut notifications = Notifications::default();
+        notifications.error(
+            "error.playback",
+            vec![("message", "first".to_owned())],
+            Some("playback"),
+        );
+        notifications.error(
+            "error.playback",
+            vec![("message", "second".to_owned())],
+            Some("playback"),
+        );
+        assert_eq!(
+            notifications.items()[0].parameters,
+            [("message", "first".to_owned())]
+        );
+    }
 }
