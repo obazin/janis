@@ -432,9 +432,7 @@ mod tests {
     }
 
     fn timed_track(id: i64, seconds: f64) -> Track {
-        let mut track = track(id, "t");
-        track.duration_secs = seconds;
-        track
+        track(id, "t").duration(seconds)
     }
 
     #[test]
