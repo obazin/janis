@@ -10,6 +10,9 @@ use std::sync::{Mutex, MutexGuard};
 
 use crate::audio::EQ_BAND_COUNT;
 
+/// The file `init` opens in the data directory.
+const DATABASE_FILE: &str = "janis.db";
+
 pub struct DbState(Mutex<Connection>);
 
 impl DbState {
@@ -128,7 +131,7 @@ const MIGRATIONS: &[&str] = &[
 pub fn init(app_data_dir: PathBuf) -> Result<DbState, String> {
     std::fs::create_dir_all(&app_data_dir)
         .map_err(|e| format!("create app data dir {}: {}", app_data_dir.display(), e))?;
-    let db_path = app_data_dir.join("janis.db");
+    let db_path = app_data_dir.join(DATABASE_FILE);
     let conn =
         Connection::open(&db_path).map_err(|e| format!("open {}: {}", db_path.display(), e))?;
     conn.execute_batch("PRAGMA foreign_keys = ON;")
@@ -593,7 +596,7 @@ mod tests {
         let dir = temp_dir("upgrade");
         std::fs::create_dir_all(&dir).expect("temp dir");
         {
-            let conn = Connection::open(dir.join("janis.db")).expect("open");
+            let conn = Connection::open(dir.join(DATABASE_FILE)).expect("open");
             conn.execute_batch(SCHEMA).expect("v1 schema");
             conn.execute(
                 "INSERT INTO tracks (path, title, format) VALUES ('/a.flac', 'A', 'FLAC')",
@@ -648,7 +651,7 @@ mod tests {
         let dir = temp_dir("wounded");
         std::fs::create_dir_all(&dir).expect("temp dir");
         {
-            let conn = Connection::open(dir.join("janis.db")).expect("open");
+            let conn = Connection::open(dir.join(DATABASE_FILE)).expect("open");
             conn.execute_batch(SCHEMA).expect("v1 schema");
             // Migration to v2 fully applied…
             conn.execute_batch(MIGRATIONS[0]).expect("v2 ddl");
@@ -686,31 +689,72 @@ mod tests {
         let _ = std::fs::remove_dir_all(&directory);
     }
 
-    #[test]
-    fn an_existing_v4_database_gains_the_favourite_stations() {
-        let directory = temp_dir("upgrade-favourites");
-        std::fs::create_dir_all(&directory).expect("temp dir");
-        {
-            let connection = Connection::open(directory.join("janis.database")).expect("open");
-            connection.execute_batch(SCHEMA).expect("v1 schema");
-            for migration in &MIGRATIONS[..3] {
-                connection
-                    .execute_batch(migration)
-                    .expect("migrations to v4");
-            }
+    /// A database as an earlier Janis left it: the frozen schema, the
+    /// migrations up to `version`, a preference changed and one track.
+    fn database_at_version(directory: &std::path::Path, version: i64) {
+        std::fs::create_dir_all(directory).expect("temp dir");
+        let connection = Connection::open(directory.join(DATABASE_FILE)).expect("open");
+        connection.execute_batch(SCHEMA).expect("v1 schema");
+        for migration in &MIGRATIONS[..(version.max(1) - 1) as usize] {
             connection
-                .pragma_update(None, "user_version", 4)
-                .expect("stamp");
+                .execute_batch(migration)
+                .expect("earlier migrations");
         }
+        connection
+            .execute(
+                "INSERT INTO user_preferences (id, volume) VALUES (1, 0.3)",
+                [],
+            )
+            .expect("seed the preferences");
+        connection
+            .execute(
+                "INSERT INTO tracks (path, title, format) VALUES ('/a.flac', 'A', 'FLAC')",
+                [],
+            )
+            .expect("seed a track");
+        connection
+            .pragma_update(None, "user_version", version)
+            .expect("stamp");
+    }
 
-        let database = init(directory.clone()).expect("init over a v4 database");
-        assert_eq!(favourite_station_ids(&database), Ok(Vec::new()));
-        let version: i64 = database
-            .lock()
-            .query_row("PRAGMA user_version", [], |row| row.get(0))
-            .expect("read version");
-        assert_eq!(version, SCHEMA_VERSION);
-        let _ = std::fs::remove_dir_all(&directory);
+    #[test]
+    fn a_database_from_every_earlier_version_upgrades_and_keeps_what_it_held() {
+        // Version 0 is a file from before migrations; 1 to 5 are each release
+        // since. Every one must land on the current shape with nothing lost.
+        for version in 0..SCHEMA_VERSION {
+            let directory = temp_dir(&format!("upgrade-from-v{version}"));
+            database_at_version(&directory, version);
+
+            let database = init(directory.clone())
+                .unwrap_or_else(|error| panic!("init over a v{version} database: {error}"));
+            let preferences = get_preferences(&database).expect("the preferences read");
+            assert_eq!(preferences.volume, 0.3, "v{version}: the volume survives");
+            assert!(
+                !preferences.eq_linear_phase,
+                "v{version}: linear phase is off"
+            );
+            assert_eq!(favourite_station_ids(&database), Ok(Vec::new()));
+            assert_eq!(media_server(&database), Ok(None));
+            let connection = database.lock();
+            let (title, server_id): (String, Option<i64>) = connection
+                .query_row(
+                    "SELECT title, server_id FROM tracks WHERE path = '/a.flac'",
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .unwrap_or_else(|error| panic!("v{version}: the track survives: {error}"));
+            assert_eq!(title, "A");
+            assert_eq!(
+                server_id, None,
+                "v{version}: an existing track is a local one"
+            );
+            let schema_version: i64 = connection
+                .query_row("PRAGMA user_version", [], |row| row.get(0))
+                .expect("read version");
+            assert_eq!(schema_version, SCHEMA_VERSION);
+            drop(connection);
+            let _ = std::fs::remove_dir_all(&directory);
+        }
     }
 
     fn new_server(server_identifier: &str, user_identifier: &str, token: &str) -> NewMediaServer {
@@ -791,47 +835,6 @@ mod tests {
         let second = device_identifier(&database).expect("read back");
         assert_eq!(first.len(), 32);
         assert_eq!(first, second);
-        let _ = std::fs::remove_dir_all(&directory);
-    }
-
-    #[test]
-    fn an_existing_v5_database_gains_the_media_server() {
-        let directory = temp_dir("upgrade-media-server");
-        std::fs::create_dir_all(&directory).expect("temp dir");
-        {
-            let connection = Connection::open(directory.join("janis.db")).expect("open");
-            connection.execute_batch(SCHEMA).expect("v1 schema");
-            for migration in &MIGRATIONS[..4] {
-                connection
-                    .execute_batch(migration)
-                    .expect("migrations to v5");
-            }
-            connection
-                .execute(
-                    "INSERT INTO tracks (path, title, format) VALUES ('/a.flac', 'A', 'FLAC')",
-                    [],
-                )
-                .expect("seed a track");
-            connection
-                .pragma_update(None, "user_version", 5)
-                .expect("stamp");
-        }
-
-        let database = init(directory.clone()).expect("init over a v5 database");
-        assert_eq!(media_server(&database), Ok(None));
-        let connection = database.lock();
-        let columns = columns(&connection, "tracks");
-        assert!(columns.contains(&"server_id".to_string()));
-        assert!(columns.contains(&"artwork_item".to_string()));
-        let server_id: Option<i64> = connection
-            .query_row(
-                "SELECT server_id FROM tracks WHERE path = '/a.flac'",
-                [],
-                |row| row.get(0),
-            )
-            .expect("the existing track is still there");
-        assert_eq!(server_id, None, "an existing track is a local one");
-        drop(connection);
         let _ = std::fs::remove_dir_all(&directory);
     }
 
