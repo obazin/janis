@@ -1,6 +1,6 @@
 [package]
 name = "janis"
-version = "0.2.0"
+version = "0.3.0"
 description = "Janis — open-source desktop audio player: local library, web radio, 10-band EQ and live visualisation."
 authors = ["Olivier Bazin"]
 license = "GPL-3.0-only"
