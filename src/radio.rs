@@ -135,13 +135,103 @@ impl Catalog {
 }
 
 /// Flips one value of a multi-select filter.
-pub fn toggle_filter(selected: &mut Vec<String>, value: &str) {
+fn toggle_filter(selected: &mut Vec<String>, value: &str) {
     match selected.iter().position(|candidate| candidate == value) {
         Some(position) => {
             selected.remove(position);
         }
         None => selected.push(value.to_owned()),
     }
+}
+
+/// The Radio screen's filters: the countries and genres chosen, both
+/// multi-select with an empty one meaning "all", and whether only the starred
+/// stations show.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Filters {
+    pub countries: Vec<String>,
+    pub genres: Vec<String>,
+    pub favourites_only: bool,
+}
+
+impl Filters {
+    /// A country chip was clicked: "All" clears the row, another flips.
+    pub fn toggle_country(&mut self, key: &str) {
+        if key == ALL_COUNTRIES_KEY {
+            self.countries.clear();
+        } else {
+            toggle_filter(&mut self.countries, key);
+        }
+    }
+
+    /// A genre chip was clicked: "All" clears the row, another flips.
+    pub fn toggle_genre(&mut self, key: &str) {
+        if key == ALL_GENRES_KEY {
+            self.genres.clear();
+        } else {
+            toggle_filter(&mut self.genres, key);
+        }
+    }
+
+    pub fn toggle_favourites(&mut self) {
+        self.favourites_only = !self.favourites_only;
+    }
+}
+
+/// A filter chip as the screen shows it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Chip {
+    pub key: String,
+    pub label: String,
+    pub active: bool,
+}
+
+impl Catalog {
+    /// "All", active with nothing chosen, then every country, most
+    /// populated first.
+    pub fn country_chips(&self, filters: &Filters, translations: &Translations) -> Vec<Chip> {
+        let all = Chip {
+            key: ALL_COUNTRIES_KEY.to_owned(),
+            label: translations.text(ALL_COUNTRIES_KEY),
+            active: filters.countries.is_empty(),
+        };
+        std::iter::once(all)
+            .chain(self.countries().iter().map(|code| Chip {
+                key: code.clone(),
+                label: translations.text(&country_label_key(code)),
+                active: filters.countries.contains(code),
+            }))
+            .collect()
+    }
+
+    /// "All", active with nothing chosen, then every genre by its label.
+    pub fn genre_chips(&self, filters: &Filters, translations: &Translations) -> Vec<Chip> {
+        let all = Chip {
+            key: ALL_GENRES_KEY.to_owned(),
+            label: translations.text(ALL_GENRES_KEY),
+            active: filters.genres.is_empty(),
+        };
+        std::iter::once(all)
+            .chain(
+                self.genres_by_label(translations)
+                    .into_iter()
+                    .map(|key| Chip {
+                        label: translations.text(&key),
+                        active: filters.genres.contains(&key),
+                        key,
+                    }),
+            )
+            .collect()
+    }
+}
+
+/// The line under a station's name: its genre and bitrate.
+pub fn station_detail(station: &Station, translations: &Translations) -> String {
+    format!(
+        "{} · {}",
+        translations.text(&station.genre_key),
+        translations.translate("radio.kbps", &[("kbps", station.kbps.to_string())])
+    )
 }
 
 #[cfg(test)]
@@ -292,5 +382,62 @@ mod tests {
         };
         assert_eq!(ids("neo"), ["a"]);
         assert_eq!(ids("electro"), ["b"], "the label reads « Électronique »");
+    }
+
+    #[test]
+    fn choosing_all_clears_its_row_and_a_chip_flips() {
+        let mut filters = Filters::default();
+        filters.toggle_country("FR");
+        filters.toggle_country("DE");
+        filters.toggle_genre("radio.genre.jazz");
+        assert_eq!(filters.countries, ["FR", "DE"]);
+        filters.toggle_country("FR");
+        assert_eq!(filters.countries, ["DE"]);
+        filters.toggle_country(ALL_COUNTRIES_KEY);
+        assert!(filters.countries.is_empty());
+        assert_eq!(filters.genres, ["radio.genre.jazz"], "the other row stays");
+        filters.toggle_genre(ALL_GENRES_KEY);
+        assert!(filters.genres.is_empty());
+        filters.toggle_favourites();
+        assert!(filters.favourites_only);
+    }
+
+    #[test]
+    fn the_all_chip_is_active_only_with_nothing_chosen() {
+        let catalog = small_catalog();
+        let translations = Translations::new(Language::English);
+        let mut filters = Filters::default();
+        let active = |chips: Vec<Chip>| -> Vec<String> {
+            chips
+                .into_iter()
+                .filter(|chip| chip.active)
+                .map(|chip| chip.key)
+                .collect()
+        };
+        assert_eq!(
+            active(catalog.country_chips(&filters, &translations)),
+            [ALL_COUNTRIES_KEY]
+        );
+        filters.toggle_country("FR");
+        assert_eq!(
+            active(catalog.country_chips(&filters, &translations)),
+            ["FR"]
+        );
+        let genres = catalog.genre_chips(&filters, &translations);
+        assert_eq!(genres[0].key, ALL_GENRES_KEY);
+        assert_eq!(
+            genres.len(),
+            catalog.genres_by_label(&translations).len() + 1
+        );
+        assert_eq!(genres[1].label, translations.text(&genres[1].key));
+    }
+
+    #[test]
+    fn a_station_is_described_by_its_genre_and_bitrate() {
+        let translations = Translations::new(Language::English);
+        assert_eq!(
+            station_detail(&station("a", "A", "FR", "jazz"), &translations),
+            format!("{} · 128 kbps", translations.text("radio.genre.jazz"))
+        );
     }
 }
