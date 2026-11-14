@@ -103,6 +103,11 @@ export component LibraryScreen inherits Rectangle {
                         Library.artist-clicked(index);
                     }
                 }
+                // The opened card's line glides to the top of the page, as
+                // far as the page will reach once its panel has unfolded.
+                opened(line-top, settled-height) => {
+                    page.glide-to(min(body.y + line-top, page.content-height - self.height + settled-height - page.height));
+                }
             }
 
             songs := TrackList {
@@ -132,16 +137,6 @@ export component LibraryScreen inherits Rectangle {
                 view-height: self.height;
                 clicked(index) => { Library.recent-clicked(index); }
             }
-        }
-    }
-
-    // Opening an album or artist always lands the same way: the panel of the
-    // one open before has already closed, and the row of the opened tile is
-    // scrolled to the top of the page, its tracks unfolding beneath it.
-    property <int> selection: Library.selection-index;
-    changed selection => {
-        if root.selection >= 0 {
-            page.scroll-to(body.y + grid.selected-line-top);
         }
     }
 }
