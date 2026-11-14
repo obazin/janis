@@ -9,24 +9,39 @@
 //! the instance that wrote it is gone — fails to connect, or reaches some
 //! other program that does not answer as Janis would, and the launch carries
 //! on as the one instance.
+//!
+//! Two launches at the same moment would both find no file and both carry
+//! on, so the instance also holds an exclusive lock on a file beside it. A
+//! launch that cannot take the lock is the later one: it waits for the holder
+//! to answer. The system releases the lock with the process, so an instance
+//! that crashed leaves nothing that blocks the next launch.
 
+use std::fs::{File, OpenOptions, TryLockError};
 use std::io::{Read, Write};
 use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 const PORT_FILE: &str = "instance.port";
+const LOCK_FILE: &str = "instance.lock";
 /// What a second launch says, so that a stray connection is not mistaken for one.
 const GREETING: &[u8] = b"janis:show";
 /// What the running instance answers, so that another program listening on a
 /// port a stale file names is not mistaken for it.
 const ANSWER: &[u8] = b"janis:here";
 const PATIENCE: Duration = Duration::from_millis(500);
+/// How long a launch that lost the lock waits for the winner to answer: the
+/// winner only has to bind a port and write it down.
+const STARTUP_PATIENCE: Duration = Duration::from_secs(3);
+const STARTUP_POLL: Duration = Duration::from_millis(50);
 
 /// Held by the one running instance for as long as it runs.
+#[derive(Debug)]
 pub struct Instance {
     port_file: PathBuf,
     port: u16,
+    /// Holds the exclusive lock until the instance ends.
+    _lock: File,
 }
 
 impl Drop for Instance {
@@ -59,6 +74,21 @@ pub fn claim(
 
     std::fs::create_dir_all(data_directory)
         .map_err(|error| format!("create {}: {error}", data_directory.display()))?;
+    let lock_path = data_directory.join(LOCK_FILE);
+    let lock = OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(&lock_path)
+        .map_err(|error| format!("open {}: {error}", lock_path.display()))?;
+    match lock.try_lock() {
+        Ok(()) => {}
+        Err(TryLockError::WouldBlock) => return wait_for_winner(&port_file),
+        Err(TryLockError::Error(error)) => {
+            return Err(format!("lock {}: {error}", lock_path.display()))
+        }
+    }
+
     let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
         .map_err(|error| format!("listen for later launches: {error}"))?;
     let port = listener
@@ -82,7 +112,24 @@ pub fn claim(
         })
         .map_err(|error| format!("start the instance thread: {error}"))?;
 
-    Ok(Some(Instance { port_file, port }))
+    Ok(Some(Instance {
+        port_file,
+        port,
+        _lock: lock,
+    }))
+}
+
+/// Another launch holds the lock and is starting: once it has written its
+/// port, it is greeted like any running instance.
+fn wait_for_winner(port_file: &Path) -> Result<Option<Instance>, String> {
+    let deadline = Instant::now() + STARTUP_PATIENCE;
+    while Instant::now() < deadline {
+        if greet_running_instance(port_file) {
+            return Ok(None);
+        }
+        std::thread::sleep(STARTUP_POLL);
+    }
+    Err("another Janis holds the instance lock but does not answer".to_owned())
 }
 
 /// True when a running instance was reached, asked to come forward, and
@@ -171,5 +218,32 @@ mod tests {
             !directory.path().join(PORT_FILE).exists(),
             "the instance takes its port file with it"
         );
+    }
+
+    #[test]
+    fn launches_at_the_same_moment_make_exactly_one_instance() {
+        let directory = tempfile::tempdir().expect("a temporary directory");
+        let launches = 8;
+        let start = std::sync::Arc::new(std::sync::Barrier::new(launches));
+        let outcomes: Vec<_> = (0..launches)
+            .map(|_| {
+                let directory = directory.path().to_path_buf();
+                let start = std::sync::Arc::clone(&start);
+                std::thread::spawn(move || {
+                    start.wait();
+                    claim(&directory, || {})
+                })
+            })
+            .collect::<Vec<_>>()
+            .into_iter()
+            .map(|launch| launch.join().expect("the launch does not panic"))
+            .collect();
+
+        let instances = outcomes
+            .iter()
+            .filter(|outcome| matches!(outcome, Ok(Some(_))))
+            .count();
+        assert_eq!(instances, 1, "{outcomes:?}");
+        assert!(outcomes.iter().all(Result::is_ok), "{outcomes:?}");
     }
 }
