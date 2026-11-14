@@ -920,4 +920,104 @@ mod tests {
         }
         assert_eq!(PlaybackOption::from_identifier("loudness"), None);
     }
+
+    fn fresh_database() -> (tempfile::TempDir, DbState) {
+        let directory = tempfile::tempdir().expect("a temporary directory");
+        let database = init(directory.path().to_path_buf()).expect("init a new database");
+        (directory, database)
+    }
+
+    #[test]
+    fn every_preference_reads_back_what_was_written() {
+        let (_directory, database) = fresh_database();
+        let mut gains = vec![0.0; EQ_BAND_COUNT];
+        gains[0] = 4.5;
+        gains[9] = -2.0;
+
+        set_volume(&database, 0.42).expect("the volume is saved");
+        set_eq(&database, &gains, "custom").expect("the equalizer is saved");
+        set_eq_linear_phase(&database, true).expect("the mode is saved");
+        set_language(&database, "fr").expect("the language is saved");
+        for option in PlaybackOption::ALL {
+            set_playback_option(&database, option, option != PlaybackOption::Gapless)
+                .expect("the switch is saved");
+        }
+
+        assert_eq!(
+            get_preferences(&database),
+            Ok(Preferences {
+                volume: 0.42,
+                eq_gains: gains,
+                eq_preset: "custom".to_owned(),
+                eq_linear_phase: true,
+                gapless: false,
+                crossfade: true,
+                normalize: true,
+                exclusive: true,
+                language: "fr".to_owned(),
+            })
+        );
+    }
+
+    #[test]
+    fn a_volume_outside_the_range_is_saved_at_its_edge() {
+        let (_directory, database) = fresh_database();
+        set_volume(&database, 1.7).expect("saved");
+        assert_eq!(
+            get_preferences(&database).map(|saved| saved.volume),
+            Ok(1.0)
+        );
+        set_volume(&database, -1.0).expect("saved");
+        assert_eq!(
+            get_preferences(&database).map(|saved| saved.volume),
+            Ok(0.0)
+        );
+    }
+
+    #[test]
+    fn equalizer_gains_of_the_wrong_count_are_refused_and_change_nothing() {
+        let (_directory, database) = fresh_database();
+        assert!(set_eq(&database, &[1.0, 2.0], "custom").is_err());
+        assert_eq!(
+            get_preferences(&database).map(|saved| (saved.eq_gains, saved.eq_preset)),
+            Ok((vec![0.0; EQ_BAND_COUNT], "flat".to_owned()))
+        );
+    }
+
+    #[test]
+    fn unreadable_saved_gains_read_back_flat() {
+        let (_directory, database) = fresh_database();
+        database
+            .lock()
+            .execute("UPDATE user_preferences SET eq_gains = 'not json'", [])
+            .expect("corrupt the gains");
+        assert_eq!(
+            get_preferences(&database).map(|saved| saved.eq_gains),
+            Ok(vec![0.0; EQ_BAND_COUNT])
+        );
+    }
+
+    #[test]
+    fn a_sync_records_when_it_happened() {
+        let (_directory, database) = fresh_database();
+        let saved =
+            save_media_server(&database, &new_server("server", "user", "token")).expect("saved");
+        assert_eq!(saved.last_sync_at, None);
+
+        set_last_sync(&database, saved.id).expect("the sync is recorded");
+
+        let synced = media_server(&database)
+            .expect("read")
+            .expect("the server is kept");
+        assert!(synced.last_sync_at.is_some_and(|time| time > 0));
+    }
+
+    #[test]
+    fn a_kept_server_never_shows_its_token_when_debugged() {
+        let new = new_server("server", "user", "secret-token");
+        assert!(!format!("{new:?}").contains("secret-token"));
+        let (_directory, database) = fresh_database();
+        let saved = save_media_server(&database, &new).expect("saved");
+        assert!(!format!("{saved:?}").contains("secret-token"));
+    }
 }
