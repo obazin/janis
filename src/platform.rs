@@ -121,3 +121,14 @@ pub fn drag_window(component: &(impl slint::ComponentHandle + 'static)) {
         }
     });
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_data_directory_is_named_after_the_application_where_libraries_already_live() {
+        let directory = data_directory().expect("a per-user data directory");
+        assert!(directory.ends_with("com.olivierbazin.janis"));
+    }
+}

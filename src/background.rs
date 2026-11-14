@@ -165,4 +165,27 @@ mod tests {
                 .expect("both threads still run jobs");
         }
     }
+
+    #[test]
+    fn a_dropped_worker_finishes_the_jobs_already_handed_over() {
+        let (results, received) = channel();
+        {
+            let worker = Worker::new("test worker").expect("the thread starts");
+            for number in 0..3 {
+                let results = results.clone();
+                worker.run(move || {
+                    std::thread::sleep(Duration::from_millis(10));
+                    results.send(number).expect("the test is listening");
+                });
+            }
+        }
+        let finished: Vec<i32> = (0..3)
+            .map(|_| {
+                received
+                    .recv_timeout(Duration::from_secs(5))
+                    .expect("every queued job runs")
+            })
+            .collect();
+        assert_eq!(finished, [0, 1, 2]);
+    }
 }
