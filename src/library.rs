@@ -192,12 +192,23 @@ const SCAN_BATCH: usize = 64;
 fn scan_folder(db: &DbState, folder_id: i64, folder: &Path) -> ScanReport {
     let mut report = ScanReport::default();
     let mut batch: Vec<(String, Metadata)> = Vec::with_capacity(SCAN_BATCH);
-    for entry in WalkDir::new(folder)
-        .follow_links(false)
-        .into_iter()
-        .filter_map(|e| e.ok())
-        .filter(|e| e.file_type().is_file())
-    {
+    // Links are followed, to a file or a folder on another disk alike; the
+    // walk notices a link back up the folder and reports it as an error.
+    for entry in WalkDir::new(folder).follow_links(true) {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(error) => {
+                // A folder that cannot be read, a link back up the tree or a
+                // link to nothing: what lies beyond it is not scanned, and the
+                // report counts it.
+                log::warn!("skipped while scanning: {error}");
+                report.skipped += 1;
+                continue;
+            }
+        };
+        if !entry.file_type().is_file() {
+            continue;
+        }
         let path = entry.path();
         if audio_extension(path).is_none() {
             continue;
@@ -1170,5 +1181,61 @@ mod tests {
             !needs_loudness(&database, tracks[0].id),
             "a song with a gain is not measured as it plays"
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_linked_file_and_a_linked_folder_are_scanned() {
+        use std::os::unix::fs::symlink;
+        let directory = tempfile::tempdir().expect("a temporary directory");
+        let elsewhere = directory.path().join("elsewhere");
+        write_wav(&elsewhere.join("single.wav"));
+        write_wav(&elsewhere.join("album").join("track.wav"));
+        let watched = directory.path().join("watched");
+        std::fs::create_dir_all(&watched).expect("the watched folder");
+        symlink(elsewhere.join("single.wav"), watched.join("single.wav")).expect("link a file");
+        symlink(elsewhere.join("album"), watched.join("album")).expect("link a folder");
+        let database = crate::persistence::init(directory.path().join("data")).expect("a database");
+
+        let report = add_watched_folder(&database, watched.to_str().expect("a Unicode path"))
+            .expect("the folder is watched");
+
+        assert_eq!((report.added, report.skipped), (2, 0));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_link_back_up_the_folder_ends_the_walk_and_is_counted() {
+        let directory = tempfile::tempdir().expect("a temporary directory");
+        let watched = directory.path().join("watched");
+        write_wav(&watched.join("song.wav"));
+        std::os::unix::fs::symlink(&watched, watched.join("loop")).expect("link the folder");
+        let database = crate::persistence::init(directory.path().join("data")).expect("a database");
+
+        let report = add_watched_folder(&database, watched.to_str().expect("a Unicode path"))
+            .expect("the folder is watched");
+
+        assert_eq!((report.added, report.skipped), (1, 1));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_unreadable_folder_is_counted_as_skipped() {
+        use std::os::unix::fs::PermissionsExt;
+        let directory = tempfile::tempdir().expect("a temporary directory");
+        let watched = directory.path().join("watched");
+        write_wav(&watched.join("song.wav"));
+        let locked = watched.join("locked");
+        write_wav(&locked.join("hidden.wav"));
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000))
+            .expect("lock the folder");
+        let database = crate::persistence::init(directory.path().join("data")).expect("a database");
+
+        let report = add_watched_folder(&database, watched.to_str().expect("a Unicode path"));
+
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755))
+            .expect("unlock the folder for clean-up");
+        let report = report.expect("the folder is watched");
+        assert_eq!((report.added, report.skipped), (1, 1));
     }
 }
