@@ -344,6 +344,14 @@ impl Player {
         if self.mode == Mode::Idle {
             return Vec::new();
         }
+        if self.playing && self.mode == Mode::Local {
+            // The playhead stays where it was last drawn, not at the last
+            // position the engine reported, up to a tenth of a second back.
+            let elapsed = now
+                .saturating_duration_since(self.position_at)
+                .as_secs_f64();
+            self.position_seconds = (self.position_seconds + elapsed).min(self.duration_seconds);
+        }
         self.playing = !self.playing;
         self.position_at = now;
         vec![Effect::Toggle]
@@ -515,7 +523,68 @@ mod tests {
         assert_eq!(player.live_progress(start + Duration::from_secs(500)), 1.0);
 
         player.toggle(later);
-        assert!((player.live_progress(later + Duration::from_secs(5)) - 0.10).abs() < 1e-9);
+        assert!((player.live_progress(later + Duration::from_secs(5)) - 0.15).abs() < 1e-9);
+    }
+
+    #[test]
+    fn pausing_freezes_the_playhead_where_it_was_drawn_and_resuming_goes_on_from_there() {
+        let start = Instant::now();
+        let mut player = Player::new(start);
+        player.play_queue(vec![timed_track(1, 100.0)], 0, start);
+        player.apply(
+            EngineEvent::Position {
+                position_secs: 10.0,
+                duration_secs: 100.0,
+            },
+            start,
+            &no_stations,
+        );
+
+        // 80 ms after the last report, between two of them.
+        let paused_at = start + Duration::from_millis(80);
+        let drawn = player.live_progress(paused_at);
+        player.toggle(paused_at);
+        assert_eq!(player.live_progress(paused_at), drawn);
+        assert_eq!(
+            player.live_progress(paused_at + Duration::from_secs(9)),
+            drawn
+        );
+
+        let resumed_at = paused_at + Duration::from_secs(10);
+        player.toggle(resumed_at);
+        let one_second_on = player.live_progress(resumed_at + Duration::from_secs(1));
+        assert!((one_second_on - (drawn + 0.01)).abs() < 1e-9);
+    }
+
+    proptest::proptest! {
+        #[test]
+        fn the_playhead_never_moves_backwards_between_position_reports(
+            position in 0.0f64..100.0,
+            steps in proptest::collection::vec((0u64..3_000, proptest::bool::ANY), 1..40),
+        ) {
+            let start = Instant::now();
+            let mut player = Player::new(start);
+            player.play_queue(vec![timed_track(1, 100.0)], 0, start);
+            player.apply(
+                EngineEvent::Position {
+                    position_secs: position,
+                    duration_secs: 100.0,
+                },
+                start,
+                &no_stations,
+            );
+            let mut now = start;
+            let mut last = player.live_progress(now);
+            for (milliseconds, toggles) in steps {
+                now += Duration::from_millis(milliseconds);
+                if toggles {
+                    player.toggle(now);
+                }
+                let progress = player.live_progress(now);
+                proptest::prop_assert!(progress >= last && progress <= 1.0);
+                last = progress;
+            }
+        }
     }
 
     #[test]
