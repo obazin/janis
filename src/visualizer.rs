@@ -43,7 +43,12 @@ impl Visualizer {
     /// Advances the trace by `elapsed_seconds`, from the engine's frame while
     /// something plays and from the synthetic fallback otherwise.
     pub fn tick(&mut self, elapsed_seconds: f32, frame: Option<&[u8]>, playing: bool) {
-        let step = elapsed_seconds.clamp(0.0, LONGEST_STEP_SECONDS);
+        // A step that is not a number would stay in the trace for good.
+        let step = if elapsed_seconds.is_nan() {
+            0.0
+        } else {
+            elapsed_seconds.clamp(0.0, LONGEST_STEP_SECONDS)
+        };
         self.seconds += step;
         let target_energy = if playing { 1.0 } else { IDLE_ENERGY };
         self.energy += (target_energy - self.energy) * (step * 4.0).min(1.0);
@@ -163,5 +168,16 @@ mod tests {
             visualizer.height_at(7.0, 100.0),
             visualizer.height_at(1.0, 100.0)
         );
+    }
+
+    #[test]
+    fn a_time_step_that_is_not_a_number_leaves_the_trace_drawable() {
+        let mut visualizer = Visualizer::default();
+        visualizer.tick(f32::NAN, None, true);
+        for _ in 0..10 {
+            visualizer.tick(0.016, None, true);
+        }
+        let commands = visualizer.path_commands(318.0, 100.0);
+        assert!(!commands.contains("NaN"), "{commands}");
     }
 }

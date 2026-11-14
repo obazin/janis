@@ -104,7 +104,17 @@ impl Equalizer {
 
     /// Boot hydration from the preferences row.
     pub fn restore(&mut self, gains: &[f64], preset: &str, linear_phase: bool) -> Vec<Effect> {
-        self.gains = <[f64; EQ_BAND_COUNT]>::try_from(gains).unwrap_or([0.0; EQ_BAND_COUNT]);
+        // A saved curve of the wrong length is flat; a gain the sliders could
+        // not have set is brought back within their range.
+        self.gains = <[f64; EQ_BAND_COUNT]>::try_from(gains)
+            .unwrap_or([0.0; EQ_BAND_COUNT])
+            .map(|gain| {
+                if gain.is_nan() {
+                    0.0
+                } else {
+                    gain.clamp(-GAIN_RANGE, GAIN_RANGE)
+                }
+            });
         self.preset = preset.to_owned();
         self.linear_phase = linear_phase;
         vec![
@@ -116,7 +126,7 @@ impl Equalizer {
     /// One band moved by hand — value in dB, snapped to half a decibel; the
     /// preset becomes `custom`.
     pub fn set_band(&mut self, index: usize, value: f64) -> Vec<Effect> {
-        let Some(gain) = self.gains.get_mut(index) else {
+        let Some(gain) = self.gains.get_mut(index).filter(|_| !value.is_nan()) else {
             return Vec::new();
         };
         // Halves round up.
@@ -275,5 +285,39 @@ mod tests {
         assert_eq!(equalizer.latency_seconds(), 0.043);
         equalizer.apply_engine_report(false, 0.0);
         assert!(!equalizer.linear_phase());
+    }
+
+    #[test]
+    fn a_band_value_that_is_not_a_number_is_refused() {
+        let mut equalizer = Equalizer::default();
+        assert!(equalizer.set_band(0, f64::NAN).is_empty());
+        assert_eq!(equalizer.gains()[0], 0.0);
+    }
+
+    #[test]
+    fn restored_gains_are_held_within_the_gain_range() {
+        let mut equalizer = Equalizer::default();
+        let mut saved = [0.0; EQ_BAND_COUNT];
+        saved[0] = 40.0;
+        saved[1] = -40.0;
+        saved[2] = f64::NAN;
+        saved[3] = 3.5;
+        equalizer.restore(&saved, "custom", false);
+        assert_eq!(equalizer.gains()[..4], [GAIN_RANGE, -GAIN_RANGE, 0.0, 3.5]);
+    }
+
+    proptest::proptest! {
+        #[test]
+        fn a_band_lands_within_the_range_on_a_half_decibel(
+            band in 0..EQ_BAND_COUNT,
+            value in proptest::num::f64::ANY,
+        ) {
+            let mut equalizer = Equalizer::default();
+            equalizer.set_band(band, value);
+            let gain = equalizer.gains()[band];
+            proptest::prop_assert!(gain.is_finite());
+            proptest::prop_assert!((-GAIN_RANGE..=GAIN_RANGE).contains(&gain));
+            proptest::prop_assert_eq!((gain * 2.0).fract(), 0.0);
+        }
     }
 }
