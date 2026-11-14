@@ -538,6 +538,31 @@ pub enum QueueView {
     Album,
 }
 
+/// What a click on a row of the queue card does.
+#[derive(Clone, Debug, PartialEq)]
+pub enum QueueClick {
+    /// Jump to that place of the live queue, rather than reload it, which
+    /// would reshuffle the order the listener was reading.
+    Jump(usize),
+    /// Play these tracks from that place: the album card can list tracks the
+    /// queue does not hold.
+    Replace(Vec<Track>, usize),
+}
+
+/// What a click on the queue card's row `index` does, given the view it shows.
+pub fn queue_click(
+    view: QueueView,
+    rows: &[QueueRow],
+    album_tracks: &[Track],
+    index: usize,
+) -> Option<QueueClick> {
+    let row = rows.get(index)?;
+    Some(match view {
+        QueueView::Album => QueueClick::Replace(album_tracks.to_vec(), row.list_index),
+        QueueView::UpNext | QueueView::Playlist => QueueClick::Jump(row.list_index),
+    })
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct QueueRow {
     pub track: Track,
@@ -1274,5 +1299,28 @@ mod tests {
         assert_eq!(titles(&search_library(&tracks, "Beyoncé")), ["Halo"]);
         assert_eq!(titles(&search_local_files(&tracks, "beyonce")), ["Halo"]);
         assert_eq!(titles(&search_local_files(&tracks, "elan")), ["Élan"]);
+    }
+
+    #[test]
+    fn a_click_on_the_queue_jumps_within_it_and_one_on_the_album_replaces_it() {
+        let queue = [track(1, "a"), track(2, "b"), track(3, "c")];
+        let album = [track(1, "a"), track(9, "not queued")];
+        let up_next = queue_rows(QueueView::UpNext, &queue, Some(0), &album, false);
+        assert_eq!(
+            queue_click(QueueView::UpNext, &up_next, &album, 1),
+            Some(QueueClick::Jump(2)),
+            "the second row of Up Next is the third track of the queue"
+        );
+        let playlist = queue_rows(QueueView::Playlist, &queue, Some(0), &album, false);
+        assert_eq!(
+            queue_click(QueueView::Playlist, &playlist, &album, 0),
+            Some(QueueClick::Jump(0))
+        );
+        let album_rows = queue_rows(QueueView::Album, &queue, Some(0), &album, false);
+        assert_eq!(
+            queue_click(QueueView::Album, &album_rows, &album, 1),
+            Some(QueueClick::Replace(album.to_vec(), 1))
+        );
+        assert_eq!(queue_click(QueueView::Album, &album_rows, &album, 2), None);
     }
 }
