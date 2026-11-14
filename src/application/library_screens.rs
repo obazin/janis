@@ -13,7 +13,7 @@ use super::{
 };
 use crate::audio;
 use crate::covers;
-use crate::library::{self, ScanReport, Track, WatchedFolder};
+use crate::library::{self, ScanError, ScanReport, Track, WatchedFolder};
 use crate::library_view::{
     self, AlbumGroup, ArtistGroup, LibraryTab, Selection, SelectionKind, SHELF_TILE_COUNT,
 };
@@ -466,12 +466,13 @@ impl Application {
     }
 
     pub(super) fn rescan(&self) {
-        self.scan(library::rescan_library);
+        self.scan(|database| Ok(library::rescan_library(database)?));
     }
 
     pub(super) fn remove_folder(&self, folder_id: i64) {
         self.scan(move |database| {
-            library::remove_watched_folder(database, folder_id).map(|()| ScanReport::default())
+            library::remove_watched_folder(database, folder_id)?;
+            Ok(ScanReport::default())
         });
     }
 
@@ -489,7 +490,10 @@ impl Application {
 
     /// Runs a change to the library off the interface thread, then takes the
     /// library as the database now has it.
-    fn scan(&self, change: impl FnOnce(&DbState) -> Result<ScanReport, String> + Send + 'static) {
+    fn scan(
+        &self,
+        change: impl FnOnce(&DbState) -> Result<ScanReport, ScanError> + Send + 'static,
+    ) {
         let database = Arc::clone(&self.database);
         self.library_worker.run(move || {
             let outcome = change(&database)
@@ -498,13 +502,16 @@ impl Application {
         });
     }
 
-    fn scan_finished(&self, outcome: Result<(ScanReport, LibrarySnapshot), String>) {
+    fn scan_finished(&self, outcome: Result<(ScanReport, LibrarySnapshot), ScanError>) {
         match outcome {
             Ok((report, snapshot)) => {
                 self.last_report.set(Some(report));
                 self.take_library(snapshot);
             }
-            Err(error) => {
+            Err(ScanError::InsideWatched(parent)) => {
+                self.notify_error("error.folderInsideWatched", vec![("folder", parent)], None);
+            }
+            Err(ScanError::Failed(error)) => {
                 log::error!("library scan: {error}");
                 self.notify_error("error.library", vec![("message", error)], None);
             }

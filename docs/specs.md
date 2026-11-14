@@ -81,7 +81,7 @@ The canonical description of user-facing behavior. Every new feature lands here 
 - Lists the files on disk only; a Jellyfin server's songs are in the Library, not here.
 - "Scanned library · N files" header with the last scan report (added/updated/skipped), "Add folder" and "Rescan" ghost buttons.
 - Table: title, artist, lime format chip, duration. Click plays from the filtered list.
-- Watched folders list: path, track count, per-folder Remove (cascade-deletes its tracks). A scan follows links, to a file or a folder on another disk alike; a folder it cannot read, a link back up the tree or a link to nothing counts among the skipped files. Rescan re-walks all folders and prunes files that vanished — but only under roots that are still reachable, so rescanning with an external drive ejected leaves that drive's library (and its accumulated loudness measurements) intact.
+- Watched folders list: path, track count, per-folder Remove (cascade-deletes its tracks). A folder inside one already watched is refused with a toast naming the folder that holds it; adding a folder that holds watched folders takes them over, their tracks and loudness measurements with them, and lists only the outer one. A scan follows links, to a file or a folder on another disk alike; a folder it cannot read, a link back up the tree or a link to nothing counts among the skipped files. Rescan re-walks all folders and prunes files that vanished — but only under roots that are still reachable, so rescanning with an external drive ejected leaves that drive's library (and its accumulated loudness measurements) intact.
 
 ## Settings
 

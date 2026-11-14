@@ -421,29 +421,95 @@ pub fn list_watched_folders(db: &DbState) -> Result<Vec<WatchedFolder>, String> 
     Ok(folders)
 }
 
+/// Why a change to the library did not happen.
+#[derive(Debug, PartialEq)]
+pub enum ScanError {
+    /// The folder lies inside one already watched, whose path this is.
+    InsideWatched(String),
+    /// Anything else, with its detail for the log.
+    Failed(String),
+}
+
+impl From<String> for ScanError {
+    fn from(detail: String) -> Self {
+        ScanError::Failed(detail)
+    }
+}
+
 /// Registers a folder and scans it. The scan is a long walk + tag reads.
-pub fn add_watched_folder(db: &DbState, path: &str) -> Result<ScanReport, String> {
+pub fn add_watched_folder(db: &DbState, path: &str) -> Result<ScanReport, ScanError> {
     let folder = PathBuf::from(path);
     if !folder.is_dir() {
-        return Err(format!("not a directory: {}", path));
+        return Err(ScanError::Failed(format!("not a directory: {}", path)));
     }
     // The lock covers only the registration; the walk itself runs unlocked
     // (see `scan_folder`).
     let folder_id: i64 = {
-        let conn = db.lock();
-        conn.execute(
-            "INSERT OR IGNORE INTO watched_folders (path) VALUES (?1)",
-            [path],
-        )
-        .map_err(|e| format!("register folder: {}", e))?;
-        conn.query_row(
-            "SELECT id FROM watched_folders WHERE path = ?1",
-            [path],
-            |r| r.get(0),
-        )
-        .map_err(|e| format!("resolve folder id: {}", e))?
+        let connection = db.lock();
+        let watched: Vec<(i64, String)> = connection
+            .prepare("SELECT id, path FROM watched_folders")
+            .and_then(|mut statement| {
+                statement
+                    .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+                    .collect()
+            })
+            .map_err(|error| format!("list folders: {error}"))?;
+        // A track belongs to one folder: one inside a watched folder would
+        // take its tracks from it, and removing it would remove them.
+        if let Some((_, parent)) = watched
+            .iter()
+            .find(|(_, watched)| strictly_inside(Path::new(watched), &folder))
+        {
+            return Err(ScanError::InsideWatched(parent.clone()));
+        }
+        let transaction = connection
+            .unchecked_transaction()
+            .map_err(|error| format!("register folder: {error}"))?;
+        transaction
+            .execute(
+                "INSERT OR IGNORE INTO watched_folders (path) VALUES (?1)",
+                [path],
+            )
+            .map_err(|error| format!("register folder: {error}"))?;
+        let folder_id: i64 = transaction
+            .query_row(
+                "SELECT id FROM watched_folders WHERE path = ?1",
+                [path],
+                |row| row.get(0),
+            )
+            .map_err(|error| format!("resolve folder id: {error}"))?;
+        // The watched folders inside this one are taken over: their tracks
+        // move to it, and their rows go.
+        for (inner_id, _) in watched
+            .iter()
+            .filter(|(_, watched)| strictly_inside(&folder, Path::new(watched)))
+        {
+            transaction
+                .execute(
+                    "UPDATE tracks SET folder_id = ?1 WHERE folder_id = ?2",
+                    [folder_id, *inner_id],
+                )
+                .and_then(|_| {
+                    transaction.execute("DELETE FROM watched_folders WHERE id = ?1", [inner_id])
+                })
+                .map_err(|error| format!("take over a watched folder: {error}"))?;
+        }
+        transaction
+            .commit()
+            .map_err(|error| format!("register folder: {error}"))?;
+        folder_id
     };
     Ok(scan_folder(db, folder_id, &folder))
+}
+
+/// Whether `inner` lies inside `outer` and is not `outer` itself, compared
+/// whole component by whole component on the paths with links resolved, so
+/// `/music/a` holds `/music/a/b` but not `/music/ab`. A folder that cannot be
+/// resolved (an ejected drive) is compared as written.
+fn strictly_inside(outer: &Path, inner: &Path) -> bool {
+    let resolved = |path: &Path| std::fs::canonicalize(path).unwrap_or_else(|_| path.to_owned());
+    let (outer, inner) = (resolved(outer), resolved(inner));
+    inner != outer && inner.starts_with(&outer)
 }
 
 pub fn remove_watched_folder(db: &DbState, folder_id: i64) -> Result<(), String> {
@@ -1237,5 +1303,59 @@ mod tests {
             .expect("unlock the folder for clean-up");
         let report = report.expect("the folder is watched");
         assert_eq!((report.added, report.skipped), (1, 1));
+    }
+
+    fn watch(database: &DbState, folder: &Path) -> Result<ScanReport, ScanError> {
+        add_watched_folder(database, folder.to_str().expect("a Unicode path"))
+    }
+
+    #[test]
+    fn a_folder_inside_a_watched_one_is_refused() {
+        let directory = tempfile::tempdir().expect("a temporary directory");
+        let music = directory.path().join("music");
+        write_wav(&music.join("album").join("song.wav"));
+        write_wav(&directory.path().join("music2").join("song.wav"));
+        let database = crate::persistence::init(directory.path().join("data")).expect("a database");
+        watch(&database, &music).expect("the parent is watched");
+
+        assert_eq!(
+            watch(&database, &music.join("album")),
+            Err(ScanError::InsideWatched(
+                music.to_str().expect("a Unicode path").to_owned()
+            ))
+        );
+        assert!(
+            watch(&database, &directory.path().join("music2")).is_ok(),
+            "a folder whose name only starts like a watched one is not inside it"
+        );
+        assert!(
+            watch(&database, &music).is_ok(),
+            "watching a folder again rescans it"
+        );
+    }
+
+    #[test]
+    fn watching_a_parent_takes_over_its_watched_subfolders_and_removing_it_removes_all() {
+        let directory = tempfile::tempdir().expect("a temporary directory");
+        let music = directory.path().join("music");
+        write_wav(&music.join("album").join("song.wav"));
+        write_wav(&music.join("loose.wav"));
+        let database = crate::persistence::init(directory.path().join("data")).expect("a database");
+        watch(&database, &music.join("album")).expect("the subfolder is watched");
+
+        let report = watch(&database, &music).expect("the parent is watched");
+
+        assert_eq!((report.added, report.updated), (1, 1));
+        let folders = list_watched_folders(&database).expect("the folders");
+        assert_eq!(
+            folders.len(),
+            1,
+            "the subfolder's row is merged into the parent"
+        );
+        assert_eq!(folders[0].path, music.to_str().expect("a Unicode path"));
+        assert_eq!(folders[0].track_count, 2);
+
+        remove_watched_folder(&database, folders[0].id).expect("the parent is removed");
+        assert_eq!(list_tracks(&database).map(|tracks| tracks.len()), Ok(0));
     }
 }
