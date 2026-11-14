@@ -307,12 +307,24 @@ mod tests {
     fn genres_are_listed_by_their_label_in_the_current_language() {
         let catalog = small_catalog();
         let english = Translations::new(Language::English);
-        let genres = catalog.genres_by_label(&english);
-        let mut labels: Vec<String> = genres.iter().map(|key| english.text(key)).collect();
-        let listed = labels.clone();
-        labels.sort_by(|left, right| compare_labels(left, right));
-        assert_eq!(listed, labels);
-        assert_eq!(genres.len(), 3);
+        assert_eq!(
+            catalog.genres_by_label(&english),
+            [
+                "radio.genre.ambient",
+                "radio.genre.eclectic",
+                "radio.genre.jazz"
+            ]
+        );
+        // In French « Éclectique » still sorts with the E's, after « Ambient ».
+        let french = Translations::new(Language::French);
+        assert_eq!(
+            catalog.genres_by_label(&french),
+            [
+                "radio.genre.ambient",
+                "radio.genre.eclectic",
+                "radio.genre.jazz"
+            ]
+        );
     }
 
     #[test]
@@ -439,5 +451,51 @@ mod tests {
             station_detail(&station("a", "A", "FR", "jazz"), &translations),
             format!("{} · 128 kbps", translations.text("radio.genre.jazz"))
         );
+    }
+
+    #[test]
+    fn an_unknown_station_id_finds_nothing() {
+        assert_eq!(small_catalog().station_by_id("nope"), None);
+    }
+
+    #[test]
+    fn countries_with_as_many_stations_keep_their_catalog_order() {
+        let catalog = Catalog::new(vec![
+            station("a", "A", "DE", "jazz"),
+            station("b", "B", "IT", "jazz"),
+            station("c", "C", "FR", "jazz"),
+            station("d", "D", "FR", "jazz"),
+        ]);
+        assert_eq!(catalog.countries(), ["FR", "DE", "IT"]);
+    }
+
+    #[test]
+    fn every_bundled_station_is_well_formed() {
+        for station in Catalog::bundled().stations() {
+            assert!(!station.name.trim().is_empty(), "{}", station.id);
+            assert!(
+                station.url.starts_with("http://") || station.url.starts_with("https://"),
+                "{}: {}",
+                station.id,
+                station.url
+            );
+            assert!(station.kbps > 0, "{}", station.id);
+            assert!(
+                station.country.len() == 2
+                    && station
+                        .country
+                        .chars()
+                        .all(|letter| letter.is_ascii_uppercase()),
+                "{}: {}",
+                station.id,
+                station.country
+            );
+            assert!(
+                station.gradient_index < crate::text::ART_GRADIENT_COUNT,
+                "{}: gradient {}",
+                station.id,
+                station.gradient_index
+            );
+        }
     }
 }
