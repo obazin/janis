@@ -329,13 +329,13 @@ mod tests {
     #[test]
     fn signing_in_sends_the_credentials_then_reads_the_songs() {
         let mut state = MediaServerState::default();
-        let effects = state.sign_in(" jellyfin.local ", "listener", "secret");
+        let effects = state.sign_in(" music.local ", "listener", "secret");
         assert_eq!(state.phase(), Phase::SigningIn);
         assert!(state.busy());
         assert!(matches!(
             effects.as_slice(),
             [Effect::SignInMediaServer { address, user_name, password, .. }]
-                if address == "jellyfin.local" && user_name == "listener" && password.expose() == "secret"
+                if address == "music.local" && user_name == "listener" && password.expose() == "secret"
         ));
 
         let effects = state.sign_in_finished(sign_in_epoch(&effects), Ok(server()));

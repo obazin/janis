@@ -59,9 +59,13 @@ pub struct Translations {
 
 impl Translations {
     pub fn new(current: Language) -> Self {
+        Self::from_catalogs(ENGLISH_CATALOG, FRENCH_CATALOG, current)
+    }
+
+    fn from_catalogs(english: &str, french: &str, current: Language) -> Self {
         Self {
-            english: parse(ENGLISH_CATALOG),
-            french: parse(FRENCH_CATALOG),
+            english: parse(english),
+            french: parse(french),
             current,
         }
     }
@@ -182,5 +186,130 @@ mod tests {
             assert_eq!(Language::from_code(language.code()), language);
         }
         assert_eq!(Language::from_code("de"), Language::English);
+    }
+
+    #[test]
+    fn a_key_missing_from_french_falls_back_to_english() {
+        let translations = Translations::from_catalogs(
+            r#"{"greeting": "Hello", "farewell": "Bye"}"#,
+            r#"{"greeting": "Bonjour"}"#,
+            Language::French,
+        );
+        assert_eq!(translations.text("greeting"), "Bonjour");
+        assert_eq!(translations.text("farewell"), "Bye");
+    }
+
+    #[test]
+    fn both_catalogs_use_the_same_placeholders_for_each_key() {
+        let translations = Translations::new(Language::English);
+        let placeholders = |text: &str| -> Vec<String> {
+            let mut names: Vec<String> = text
+                .split('{')
+                .skip(1)
+                .filter_map(|rest| rest.split_once('}').map(|(name, _)| name.to_owned()))
+                .collect();
+            names.sort();
+            names
+        };
+        for (key, english) in &translations.english {
+            let french = translations.french.get(key).expect("the same keys");
+            assert_eq!(placeholders(english), placeholders(french), "{key}");
+        }
+    }
+
+    /// Every file under `directory` with `extension`, read whole.
+    fn sources(directory: &std::path::Path, extension: &str) -> Vec<String> {
+        let mut found = Vec::new();
+        for entry in std::fs::read_dir(directory).expect("a source directory") {
+            let path = entry.expect("an entry").path();
+            if path.is_dir() {
+                found.extend(sources(&path, extension));
+            } else if path.extension().is_some_and(|found| found == extension) {
+                found.push(std::fs::read_to_string(&path).expect("a source file"));
+            }
+        }
+        found
+    }
+
+    /// The string literals of Rust sources that look like translation keys:
+    /// letters and dots, starting with the first part of a catalog key.
+    fn key_literals(rust: &[String], prefixes: &[&str]) -> Vec<String> {
+        rust.iter()
+            .flat_map(|source| source.split('"').skip(1).step_by(2))
+            .filter(|literal| {
+                literal.contains('.')
+                    && !literal.ends_with('.')
+                    && literal
+                        .chars()
+                        .all(|character| character.is_ascii_alphanumeric() || character == '.')
+                    && literal
+                        .split_once('.')
+                        .is_some_and(|(prefix, _)| prefixes.contains(&prefix))
+            })
+            .map(str::to_owned)
+            .collect()
+    }
+
+    fn root() -> std::path::PathBuf {
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+    }
+
+    #[test]
+    fn every_key_rust_names_is_in_the_catalog() {
+        let translations = Translations::new(Language::English);
+        let mut prefixes: Vec<&str> = translations
+            .keys()
+            .filter_map(|key| key.split_once('.').map(|(prefix, _)| prefix))
+            .collect();
+        prefixes.sort_unstable();
+        prefixes.dedup();
+        let rust = sources(&root().join("src"), "rs");
+        let known = |key: &str| {
+            translations.english.contains_key(key)
+                || (translations.english.contains_key(&format!("{key}.one"))
+                    && translations.english.contains_key(&format!("{key}.other")))
+        };
+        let missing: Vec<String> = key_literals(&rust, &prefixes)
+            .into_iter()
+            .filter(|literal| !known(literal))
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "keys missing from the catalog: {missing:?}"
+        );
+    }
+
+    #[test]
+    fn every_catalog_key_is_used_somewhere() {
+        let translations = Translations::new(Language::English);
+        let rust = sources(&root().join("src"), "rs").join("\n");
+        let slint = sources(&root().join("ui"), "slint").join("\n");
+        let stations = std::fs::read_to_string(root().join("data/stations.json"))
+            .expect("the station catalog");
+        // Keys built at run time from a prefix: `format!("eq.preset.{name}")`.
+        let built_prefixes: Vec<&str> = rust
+            .split('"')
+            .skip(1)
+            .step_by(2)
+            .filter_map(|literal| literal.split_once('{').map(|(prefix, _)| prefix))
+            .filter(|prefix| prefix.ends_with('.'))
+            .collect();
+        let used = |key: &str| {
+            let base = key
+                .strip_suffix(".one")
+                .or_else(|| key.strip_suffix(".other"))
+                .unwrap_or(key);
+            rust.contains(&format!("\"{key}\""))
+                || rust.contains(&format!("\"{base}\""))
+                || slint.contains(&format!(
+                    "Strings.{}",
+                    crate::string_names::property_name(key)
+                ))
+                || stations.contains(&format!("\"{key}\""))
+                || built_prefixes.iter().any(|prefix| key.starts_with(prefix))
+        };
+        let mut unused: Vec<&str> = translations.keys().filter(|key| !used(key)).collect();
+        unused.sort_unstable();
+        assert!(unused.is_empty(), "catalog keys nothing uses: {unused:?}");
     }
 }

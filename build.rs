@@ -9,10 +9,16 @@ use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::path::PathBuf;
 
+#[path = "src/string_names.rs"]
+mod string_names;
+
+use string_names::property_name;
+
 const REFERENCE_CATALOG: &str = "translations/en.json";
 
 fn main() {
     println!("cargo:rerun-if-changed={REFERENCE_CATALOG}");
+    println!("cargo:rerun-if-changed=src/string_names.rs");
     let output_directory =
         PathBuf::from(std::env::var("OUT_DIR").expect("cargo sets OUT_DIR for build scripts"));
 
@@ -48,20 +54,4 @@ fn main() {
         .with_include_paths(vec![output_directory]);
     slint_build::compile_with_config("ui/app.slint", configuration)
         .expect("the user interface compiles");
-}
-
-/// `now.trackOf` → `now-track-of`: the Slint spelling of a translation key.
-fn property_name(key: &str) -> String {
-    let mut name = String::with_capacity(key.len() + 4);
-    for character in key.chars() {
-        match character {
-            '.' | '_' => name.push('-'),
-            uppercase if uppercase.is_ascii_uppercase() => {
-                name.push('-');
-                name.push(uppercase.to_ascii_lowercase());
-            }
-            other => name.push(other),
-        }
-    }
-    name
 }
