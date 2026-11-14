@@ -75,6 +75,19 @@ pub fn queue_entry(track: &Track, location: Location, gain_db: f64) -> QueueEntr
     }
 }
 
+/// The queue of `tracks`, each with where its audio is and the gain it plays
+/// at, in order.
+pub fn queue_entries(
+    tracks: &[Track],
+    location_of: impl Fn(&Track) -> Location,
+    gain_of: impl Fn(&Track) -> f64,
+) -> Vec<QueueEntry> {
+    tracks
+        .iter()
+        .map(|track| queue_entry(track, location_of(track), gain_of(track)))
+        .collect()
+}
+
 /// Boots the engine thread with Janis's loudness store and event bridge. The
 /// output device opens lazily on first play, so a machine with no sound card
 /// still boots.
@@ -103,5 +116,35 @@ mod tests {
         bridge.send_frame(&[1; 3]);
 
         assert_eq!(bridge.latest_frame(), Some([9; FRAME_BYTES]));
+    }
+
+    #[test]
+    fn a_queue_carries_each_tracks_place_length_and_gain_in_order() {
+        let tracks = [
+            crate::library::test_support::track(1, "a").duration(100.0),
+            crate::library::test_support::track(2, "b").duration(200.0),
+        ];
+        let entries = queue_entries(
+            &tracks,
+            |track| Location::File(std::path::PathBuf::from(&track.path)),
+            |track| -(track.id as f64),
+        );
+        assert_eq!(
+            entries,
+            [
+                QueueEntry {
+                    track_id: 1,
+                    location: Location::File("/music/1.flac".into()),
+                    duration_secs: 100.0,
+                    gain_db: -1.0,
+                },
+                QueueEntry {
+                    track_id: 2,
+                    location: Location::File("/music/2.flac".into()),
+                    duration_secs: 200.0,
+                    gain_db: -2.0,
+                },
+            ]
+        );
     }
 }

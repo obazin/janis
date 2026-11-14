@@ -499,16 +499,11 @@ impl Application {
         for effect in effects {
             match effect {
                 Effect::LoadQueue { tracks, index } => self.engine.load_queue(
-                    tracks
-                        .iter()
-                        .map(|track| {
-                            audio::queue_entry(
-                                track,
-                                self.track_location(track),
-                                self.loudness.gain_of(track),
-                            )
-                        })
-                        .collect(),
+                    audio::queue_entries(
+                        &tracks,
+                        |track| self.track_location(track),
+                        |track| self.loudness.gain_of(track),
+                    ),
                     index,
                 ),
                 Effect::ConnectStation { station, epoch } => self.connect_station(station, epoch),
