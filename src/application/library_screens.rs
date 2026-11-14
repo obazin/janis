@@ -421,9 +421,9 @@ impl Application {
                     id: interface_id(folder.id),
                     path: folder.path.as_str().into(),
                     track_count: translations
-                        .translate(
+                        .count(
                             "library.tracks",
-                            &[("count", folder.track_count.to_string())],
+                            usize::try_from(folder.track_count).unwrap_or_default(),
                         )
                         .into(),
                 })
@@ -578,10 +578,7 @@ fn artist_card(artist: &ArtistGroup, translations: &Translations) -> LibraryCard
         key: artist.artist.as_str().into(),
         title: artist.artist.as_str().into(),
         subtitle: translations
-            .translate(
-                "library.tracks",
-                &[("count", artist.tracks.len().to_string())],
-            )
+            .count("library.tracks", artist.tracks.len())
             .into(),
         detail: Default::default(),
         track_id: artist

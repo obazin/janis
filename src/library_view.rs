@@ -313,10 +313,7 @@ pub fn album_detail(album: &AlbumGroup, translations: &Translations) -> String {
     if let Some(year) = album.year.filter(|year| *year != 0) {
         parts.push(year.to_string());
     }
-    parts.push(translations.translate(
-        "library.tracks",
-        &[("count", album.tracks.len().to_string())],
-    ));
+    parts.push(translations.count("library.tracks", album.tracks.len()));
     parts.push(format_time(album.duration_seconds));
     parts.join(" · ")
 }
@@ -595,16 +592,14 @@ pub fn queue_heading(
         QueueView::Album => current
             .and_then(|track| track.album.clone())
             .unwrap_or_else(|| translations.text("common.unknownAlbum")),
-        QueueView::Playlist => {
-            translations.translate("now.queueHeading", &[("count", queue_length.to_string())])
-        }
+        QueueView::Playlist => translations.count("now.queueHeading", queue_length),
         QueueView::UpNext => {
             let key = if shuffle {
                 "now.upNextShuffledHeading"
             } else {
                 "now.upNextHeading"
             };
-            translations.translate(key, &[("count", row_count.to_string())])
+            translations.count(key, row_count)
         }
     }
 }
@@ -987,6 +982,49 @@ mod tests {
         assert_eq!(
             queue_heading(QueueView::Album, 4, 1, Some(&current), false, &translations),
             "Blue"
+        );
+    }
+
+    #[test]
+    fn an_album_of_one_track_says_one_track() {
+        let groups = albums(&[album_track(1, "Only", "Single", "X", Some(1)).duration(180.0)]);
+        assert_eq!(
+            album_detail(&groups[0], &Translations::new(Language::English)),
+            "1 track · 3:00"
+        );
+        assert_eq!(
+            album_detail(&groups[0], &Translations::new(Language::French)),
+            "1 titre · 3:00"
+        );
+    }
+
+    #[test]
+    fn a_queue_heading_of_one_song_uses_the_singular() {
+        let current = track(1, "a");
+        let english = Translations::new(Language::English);
+        assert_eq!(
+            queue_heading(QueueView::Playlist, 1, 1, Some(&current), false, &english),
+            "Play queue · 1 song"
+        );
+        assert_eq!(
+            queue_heading(QueueView::UpNext, 2, 1, Some(&current), false, &english),
+            "Up next · 1 song"
+        );
+        assert_eq!(
+            queue_heading(QueueView::UpNext, 2, 1, Some(&current), true, &english),
+            "Up next, shuffled · 1 song"
+        );
+        assert_eq!(
+            queue_heading(
+                QueueView::UpNext,
+                1,
+                0,
+                Some(&current),
+                false,
+                &Translations::new(Language::French)
+            ),
+            "À suivre · 0 titre",
+            "French counts zero as singular"
         );
     }
 
