@@ -405,8 +405,8 @@ struct AuthenticatedUser {
 struct ItemsPage {
     #[serde(default)]
     items: Vec<Item>,
-    #[serde(default)]
-    total_record_count: usize,
+    /// Left out by a server asked not to count; `None` then.
+    total_record_count: Option<usize>,
 }
 
 /// Checks the address answers as a Jellyfin server, then signs in. Returns
@@ -493,8 +493,18 @@ pub fn songs(session: &Session, server_identifier: &str) -> Result<Vec<ServerSon
                 .iter()
                 .map(|item| item_song(item, server_identifier)),
         );
-        if received == 0 || songs.len() >= page.total_record_count {
-            return Ok(songs);
+        match (page.total_record_count, received) {
+            (Some(total), _) if songs.len() >= total => return Ok(songs),
+            (Some(total), 0) => {
+                return Err(Failure::Other(format!(
+                    "the listing ended after {} of {total} songs",
+                    songs.len()
+                )))
+            }
+            // Without a total, a page shorter than asked for may only be the
+            // server's own page size: the end is the first empty page.
+            (None, 0) => return Ok(songs),
+            _ => {}
         }
     }
 }
@@ -549,6 +559,16 @@ mod tests {
     /// that takes one password, and a library of three songs it serves two at
     /// a time, to whoever presents the token.
     fn fake_server() -> String {
+        fake_server_listing(3, 2, Some(3))
+    }
+
+    /// The same server with its listing shaped by the test: how many songs it
+    /// holds, how many a page carries, and the total it announces, if any.
+    fn fake_server_listing(
+        song_count: usize,
+        page_size: usize,
+        announced_total: Option<usize>,
+    ) -> String {
         use std::io::{BufRead, BufReader, Read, Write};
         let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind a local port");
         let address = format!("http://{}", listener.local_addr().expect("local address"));
@@ -604,15 +624,15 @@ mod tests {
                         .and_then(|rest| rest.split('&').next())
                         .and_then(|number| number.parse().ok())
                         .unwrap_or(0);
-                    let items: Vec<String> = (start..3.min(start + 2))
+                    let items: Vec<String> = (start..song_count.min(start + page_size))
                         .map(|index| format!(r#"{{"Id": "song{index}", "Name": "Song {index}"}}"#))
                         .collect();
+                    let total = announced_total
+                        .map(|total| format!(r#", "TotalRecordCount": {total}"#))
+                        .unwrap_or_default();
                     (
                         "200 OK",
-                        format!(
-                            r#"{{"Items": [{}], "TotalRecordCount": 3}}"#,
-                            items.join(",")
-                        ),
+                        format!(r#"{{"Items": [{}]{total}}}"#, items.join(",")),
                     )
                 } else {
                     ("401 Unauthorized", String::new())
@@ -665,6 +685,28 @@ mod tests {
             ],
             "the server's pages of two are all read"
         );
+    }
+
+    #[test]
+    fn a_listing_that_ends_before_its_announced_total_is_a_failure() {
+        // Five songs announced, three served: the songs never listed would
+        // read as deleted and leave the library.
+        let address = fake_server_listing(3, 2, Some(5));
+        let server = sign_in(&address, "listener", "right", "device").expect("signed in");
+        assert!(matches!(
+            songs(&signed_in_session(server), "server"),
+            Err(Failure::Other(_))
+        ));
+    }
+
+    #[test]
+    fn a_listing_without_a_total_reads_until_an_empty_page() {
+        // Pages shorter than asked for do not mean the end: a server may cap
+        // its page size. Only an empty page does.
+        let address = fake_server_listing(5, 2, None);
+        let server = sign_in(&address, "listener", "right", "device").expect("signed in");
+        let songs = songs(&signed_in_session(server), "server").expect("the listing");
+        assert_eq!(songs.len(), 5, "every page is read");
     }
 
     #[test]
