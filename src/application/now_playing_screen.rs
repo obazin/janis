@@ -11,7 +11,7 @@ use super::{album_gradient_index, gradient_index, interface_id, list_place, Appl
 use crate::audio::Mode;
 use crate::halo;
 use crate::library::Track;
-use crate::library_view::{self, AlbumGroup, QueueView};
+use crate::library_view::{self, AlbumGroup, QueueClick, QueueView};
 use crate::now_playing;
 use crate::player::Player;
 use crate::text;
@@ -118,23 +118,22 @@ impl Application {
 
     /// A click on a row of the Now Playing queue card.
     pub(super) fn play_queue_row(&self, index: usize) {
-        let (list_index, album_tracks) = {
+        let click = {
             let lists = self.now_playing_lists.borrow();
-            let Some(row) = lists.queue_rows.get(index) else {
-                return;
-            };
-            (row.list_index, lists.album_tracks.clone())
+            library_view::queue_click(
+                self.queue_view.get(),
+                &lists.queue_rows,
+                &lists.album_tracks,
+                index,
+            )
         };
-        if self.queue_view.get() == QueueView::Album {
-            // The album card can list tracks that are not in the queue at
-            // all; playing one replaces the queue with the album.
-            self.play_queue(album_tracks, list_index);
-        } else {
-            // Both queue views show the live queue itself: jump within it
-            // rather than reloading it, which would reshuffle the order the
-            // listener was just reading.
-            let effects = self.player.borrow().jump_to(list_index);
-            self.run(effects);
+        match click {
+            Some(QueueClick::Replace(tracks, place)) => self.play_queue(tracks, place),
+            Some(QueueClick::Jump(place)) => {
+                let effects = self.player.borrow().jump_to(place);
+                self.run(effects);
+            }
+            None => {}
         }
     }
 
