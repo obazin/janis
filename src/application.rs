@@ -658,11 +658,7 @@ fn interface_id(track_id: i64) -> i32 {
 
 /// The gradient an album's generated art wears.
 fn album_gradient_index(album: &AlbumGroup) -> i32 {
-    text::art_gradient_index(&format!(
-        "{}-{}",
-        album.artist.as_deref().unwrap_or(""),
-        album.album.as_deref().unwrap_or("")
-    )) as i32
+    text::art_gradient_index(&library_view::album_art_seed(album)) as i32
 }
 
 /// The gradient a track's generated art wears.

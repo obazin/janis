@@ -423,13 +423,23 @@ pub fn album_line(track: &Track, translations: &Translations) -> Option<String> 
     (!parts.is_empty()).then(|| parts.join(" · "))
 }
 
-/// The seed the generated art of whatever is playing derives its colors from.
-pub fn art_seed(track: &Track) -> String {
+/// The seed of an album card's generated art, which its songs share.
+pub fn album_art_seed(album: &AlbumGroup) -> String {
     format!(
         "{}-{}",
-        track.artist.as_deref().unwrap_or(""),
-        track.album.as_deref().unwrap_or(&track.title)
+        album.artist.as_deref().unwrap_or(""),
+        album.album.as_deref().unwrap_or("")
     )
+}
+
+/// The seed a song's generated art derives its colors from: its album's, so
+/// the songs of a compilation wear their album card's gradient, or, for a song
+/// on no album, its artist and title.
+pub fn art_seed(track: &Track) -> String {
+    match album_and_artist(track) {
+        (Some(album), artist) => format!("{}-{album}", artist.as_deref().unwrap_or("")),
+        (None, _) => format!("{}-{}", track.artist.as_deref().unwrap_or(""), track.title),
+    }
 }
 
 /// The tabs of the Library screen.
@@ -999,6 +1009,31 @@ mod tests {
         assert_eq!(
             queue_heading(QueueView::Album, 4, 1, Some(&current), false, &translations),
             "Blue"
+        );
+    }
+
+    #[test]
+    fn a_song_without_art_wears_its_album_cards_gradient() {
+        let tracks = [
+            track(1, "One")
+                .album("Hits")
+                .artist("Artist A")
+                .album_artist("Various"),
+            track(2, "Two")
+                .album("Hits")
+                .artist("Artist B")
+                .album_artist("Various"),
+            track(3, "Three").album("Blue").artist("Joni"),
+        ];
+        for group in albums(&tracks) {
+            for track in &group.tracks {
+                assert_eq!(art_seed(track), album_art_seed(&group), "{}", track.title);
+            }
+        }
+        assert_ne!(
+            art_seed(&track(4, "Loose").artist("Joni")),
+            art_seed(&track(5, "Other").artist("Joni")),
+            "songs with no album keep a gradient of their own"
         );
     }
 
