@@ -78,7 +78,13 @@ impl Catalog {
                 Some(country) => country.to_owned(),
                 None => text(station, "countrycode").to_uppercase(),
             };
-            if name.is_empty() || !is_web_address(url) || self.seen_urls.contains(url) {
+            // What the catalog already holds is left out before the cap is
+            // counted, so it does not take the place of a new station.
+            if name.is_empty()
+                || !is_web_address(url)
+                || self.seen_urls.contains(url)
+                || self.seen_ids.contains(text(station, "stationuuid"))
+            {
                 continue;
             }
             // The catalog stays within the countries it has labels for.
@@ -208,6 +214,28 @@ mod tests {
             serde_json::to_string(&stations[0]).expect("a station is JSON"),
             r#"{"id":"abc","name":"Jazz FM","country":"FR","genreKey":"radio.genre.jazz","kbps":192,"url":"https://jazz.example/stream","gradIndex":0}"#
         );
+    }
+
+    #[test]
+    fn a_station_the_catalog_already_has_does_not_use_up_a_place_in_the_cap() {
+        let curated = json!({
+            "id": "seed",
+            "name": "Curated",
+            "url": "https://curated.example/stream",
+        });
+        let mut catalog = Catalog::seeded(vec![curated]);
+
+        let added = catalog.absorb(
+            &[
+                station("seed", "Same id", "https://elsewhere.example/stream", 128),
+                station("one", "One", "https://one.example/stream", 128),
+                station("two", "Two", "https://two.example/stream", 128),
+            ],
+            &country_pull(2),
+        );
+
+        assert_eq!(added, 2);
+        assert_eq!(names(catalog), ["Curated", "One", "Two"]);
     }
 
     #[test]
