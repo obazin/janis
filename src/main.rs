@@ -134,13 +134,12 @@ mod development {
         // the card at that place.
         if let Ok(request) = std::env::var("JANIS_LIBRARY") {
             let library = window.global::<crate::user_interface::Library>();
-            let (tab, card) = request.split_once(':').unwrap_or((&request, ""));
+            let (tab, card) = library_request(&request);
             library.invoke_tab_selected(tab.into());
-            if let Ok(card) = card.parse() {
-                match tab {
-                    "artists" => library.invoke_artist_clicked(card),
-                    _ => library.invoke_album_clicked(card),
-                }
+            match (tab, card) {
+                ("artists", Some(card)) => library.invoke_artist_clicked(card),
+                (_, Some(card)) => library.invoke_album_clicked(card),
+                (_, None) => {}
             }
         }
         // `JANIS_FAVOURITES` turns the Radio screen's favourites filter on.
@@ -201,5 +200,23 @@ mod development {
             },
         );
         Some(timer)
+    }
+
+    /// `<tab>[:<card>]`: the Library tab, and the place of the card to open.
+    fn library_request(request: &str) -> (&str, Option<i32>) {
+        let (tab, card) = request.split_once(':').unwrap_or((request, ""));
+        (tab, card.parse().ok())
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn a_library_request_names_a_tab_and_perhaps_a_card() {
+            assert_eq!(library_request("albums"), ("albums", None));
+            assert_eq!(library_request("artists:3"), ("artists", Some(3)));
+            assert_eq!(library_request("albums:x"), ("albums", None));
+        }
     }
 }
