@@ -238,4 +238,39 @@ mod tests {
         assert_eq!(pixel_progress(f64::NAN, 100), 0.0);
         assert_eq!(pixel_progress(f64::NAN, 0), 0.0);
     }
+
+    #[test]
+    fn a_length_that_is_not_a_number_or_negative_spans_what_was_read() {
+        let slices = second(LOUD);
+        let reference = mask(&slices, seconds_of(&slices), 20, 8);
+        for duration in [f64::NAN, f64::INFINITY, -3.0] {
+            assert_eq!(
+                mask(&slices, duration, 20, 8).as_slice(),
+                reference.as_slice(),
+                "{duration}"
+            );
+        }
+    }
+
+    #[test]
+    fn slices_beyond_the_announced_length_are_not_drawn_past_the_edge() {
+        let mut slices = second(LOUD);
+        slices.extend(second(LOUD));
+        let pixels = mask(&slices, 1.0, 10, 6);
+        assert_eq!((pixels.width(), pixels.height()), (10, 6));
+    }
+
+    proptest::proptest! {
+        #[test]
+        fn the_mask_always_has_a_pixel_for_every_column_and_row(
+            slice_count in 0usize..400,
+            duration in proptest::num::f64::ANY,
+            width in 0usize..64,
+            height in 0usize..16,
+        ) {
+            let slices = vec![LOUD; slice_count];
+            let pixels = mask(&slices, duration, width, height);
+            proptest::prop_assert_eq!(pixels.as_slice().len(), width * height);
+        }
+    }
 }

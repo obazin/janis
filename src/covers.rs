@@ -352,4 +352,55 @@ mod tests {
         assert!(!requests.stream_is_current(first));
         assert!(requests.stream_is_current(second));
     }
+
+    #[test]
+    fn a_tall_cover_is_scaled_down_keeping_its_shape_and_one_too_tall_is_refused() {
+        let url = format!("data:image/png;base64,{}", encoded_png(100, 400));
+        let pixels = data_url_cover(&url, 100).expect("a valid picture decodes");
+        assert_eq!((pixels.width(), pixels.height()), (25, 100));
+
+        let url = format!(
+            "data:image/png;base64,{}",
+            encoded_png(1, LARGEST_SOURCE_SIDE + 1)
+        );
+        assert!(data_url_cover(&url, 100).is_err());
+    }
+
+    #[test]
+    fn a_file_with_a_picture_item_but_no_server_keys_by_its_own_id() {
+        let file = Track {
+            artwork_item: Some("item".to_owned()),
+            ..crate::library::test_support::track(1, "a")
+        };
+        assert_eq!(CoverKeys::new(&[file]).key(1), CoverKey::Track(1));
+    }
+
+    #[test]
+    fn a_cache_with_no_room_keeps_nothing_and_a_key_evicted_comes_back_when_inserted() {
+        let mut empty = BoundedCache::new(0);
+        empty.insert(1, "one");
+        assert_eq!(empty.get(&1), None);
+
+        let mut cache = BoundedCache::new(1);
+        cache.insert(1, "one");
+        cache.insert(2, "two");
+        cache.insert(1, "one again");
+        assert_eq!(cache.get(&1), Some(&"one again"));
+        assert_eq!(cache.get(&2), None);
+    }
+
+    proptest::proptest! {
+        #[test]
+        fn the_cache_never_holds_more_than_its_limit(
+            limit in 0usize..8,
+            keys in proptest::collection::vec(0u8..16, 0..64),
+        ) {
+            let mut cache = BoundedCache::new(limit);
+            for key in keys {
+                cache.insert(key, ());
+                proptest::prop_assert!(cache.entries.len() <= limit);
+                proptest::prop_assert_eq!(cache.entries.len(), cache.order.len());
+            }
+        }
+    }
 }
