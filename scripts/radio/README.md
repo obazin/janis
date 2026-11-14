@@ -23,6 +23,8 @@ The builder is a small Rust package of its own in this directory (`Cargo.toml`, 
 |---|---|
 | `just stations --output <file>` | Writes the catalog somewhere other than `data/stations.json` |
 | `just stations --mirror <url>` | Asks one Radio Browser mirror, or a local copy of its answers, instead of the built-in ones |
+| `just stations --curated <file>` | Starts from another seed than `curated.json` |
+| `just stations --pause <milliseconds>` | Waits that long between two requests instead of 400 ms; `0` against a local mirror |
 
 ## Tuning
 
