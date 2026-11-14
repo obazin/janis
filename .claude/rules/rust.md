@@ -37,7 +37,7 @@ paths:
 ## Testing
 
 - Every state-module decision and every pure function has a test; the test names say the behaviour in a sentence.
-- Catalog integrity is tested: both translation catalogs hold the same keys, and every station's genre and country has a label.
+- Catalog integrity is tested: both translation catalogs hold the same keys with the same placeholders, every key Rust names is in them, every key is used somewhere (Rust, a `Strings` property in `ui/`, the station catalog, or a prefix a key is built from), and every station's genre and country has a label. A count's wording is a `.one` / `.other` pair read through `Translations::count`.
 - `cargo test`; doctests are not used.
 
 ## Style

@@ -31,6 +31,8 @@ mod platform;
 mod playback_options;
 mod player;
 mod radio;
+#[cfg(test)]
+mod string_names;
 mod text;
 mod translations;
 mod visualizer;
