@@ -13,7 +13,7 @@ use std::time::Duration;
 use serde::Deserialize;
 
 use crate::audio::{Location, Metadata, RemoteFile, LOSSLESS_EXTENSIONS};
-use crate::library::ServerSong;
+use crate::library::{ServerSong, Track};
 use crate::persistence::{MediaServer, NewMediaServer};
 
 /// How Janis names itself to the server. No personal detail: the device is
@@ -512,6 +512,63 @@ pub fn songs(session: &Session, server_identifier: &str) -> Result<Vec<ServerSon
             _ => {}
         }
     }
+}
+
+/// The session of the signed-in `server`, when the song is one of its own.
+fn session_of(
+    track: &Track,
+    server: Option<&MediaServer>,
+    device_identifier: &str,
+) -> Option<Session> {
+    server
+        .filter(|server| Some(server.id) == track.server_id)
+        .map(|server| Session::new(server, device_identifier))
+}
+
+/// Where the engine finds a track's audio: its file, or the original file on
+/// the signed-in server. A song of a server Janis is not signed in to is
+/// handed over as its address, which the engine reports as unplayable.
+pub fn track_location(
+    track: &Track,
+    server: Option<&MediaServer>,
+    device_identifier: &str,
+) -> Location {
+    if track.server_id.is_some() {
+        let location = session_of(track, server, device_identifier)
+            .and_then(|session| session.stream_location(&track.path, &track.format));
+        if let Some(location) = location {
+            return location;
+        }
+        log::warn!(
+            "track {} is on a server Janis is not signed in to",
+            track.id
+        );
+    }
+    Location::File(std::path::PathBuf::from(&track.path))
+}
+
+/// Where a track's overview is read from, in the order to try them: its file;
+/// or, for a song of the signed-in server, the server's small transcode, then
+/// the original file should the server not transcode. A song of a server Janis
+/// is not signed in to has nowhere to be read from.
+pub fn overview_locations(
+    track: &Track,
+    server: Option<&MediaServer>,
+    device_identifier: &str,
+) -> Vec<Location> {
+    if track.server_id.is_none() {
+        return vec![Location::File(std::path::PathBuf::from(&track.path))];
+    }
+    let Some(session) = session_of(track, server, device_identifier) else {
+        return Vec::new();
+    };
+    [
+        session.overview_location(&track.path),
+        session.stream_location(&track.path, &track.format),
+    ]
+    .into_iter()
+    .flatten()
+    .collect()
 }
 
 /// An item's picture, as the server encodes it, no larger than needed.
@@ -1169,5 +1226,64 @@ mod tests {
         )
         .expect("an item parses");
         assert!(item_song(&item, "server").metadata.lossless);
+    }
+
+    fn signed_in_server() -> MediaServer {
+        MediaServer {
+            id: 7,
+            address: "http://jellyfin.local:8096".to_owned(),
+            server_identifier: "server".to_owned(),
+            server_name: "Home".to_owned(),
+            user_identifier: "user".to_owned(),
+            user_name: "listener".to_owned(),
+            access_token: "token".to_owned(),
+            last_sync_at: None,
+        }
+    }
+
+    #[test]
+    fn a_file_plays_and_is_read_from_its_path() {
+        let file = crate::library::test_support::track(1, "a");
+        let server = signed_in_server();
+        let expected = Location::File(std::path::PathBuf::from("/music/1.flac"));
+        assert_eq!(track_location(&file, Some(&server), "device"), expected);
+        assert_eq!(overview_locations(&file, None, "device"), [expected]);
+    }
+
+    #[test]
+    fn a_song_of_the_signed_in_server_plays_its_original_and_overviews_its_transcode_first() {
+        let server = signed_in_server();
+        let song = crate::library::Track {
+            path: song_address("server", "item"),
+            ..crate::library::test_support::track(1, "a").server(7, "item")
+        };
+        let session = Session::new(&server, "device");
+        let original = session.stream_location(&song.path, &song.format);
+        assert_eq!(
+            Some(track_location(&song, Some(&server), "device")),
+            original
+        );
+        assert_eq!(
+            overview_locations(&song, Some(&server), "device"),
+            [session.overview_location(&song.path), original]
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn a_song_of_another_server_has_no_overview_and_plays_as_its_address() {
+        let server = signed_in_server();
+        let song = crate::library::Track {
+            path: song_address("elsewhere", "item"),
+            ..crate::library::test_support::track(1, "a").server(8, "item")
+        };
+        assert_eq!(overview_locations(&song, Some(&server), "device"), []);
+        assert_eq!(overview_locations(&song, None, "device"), []);
+        assert_eq!(
+            track_location(&song, Some(&server), "device"),
+            Location::File(std::path::PathBuf::from("jellyfin://elsewhere/item"))
+        );
     }
 }

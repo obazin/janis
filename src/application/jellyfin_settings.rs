@@ -6,7 +6,6 @@
 //! a sign-out queued behind a sync runs after it and the library ends without
 //! the server's songs.
 
-use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -153,21 +152,11 @@ impl Application {
     /// Where the engine finds a track's audio: its file, or the original file
     /// on its server.
     pub(super) fn track_location(&self, track: &Track) -> Location {
-        if let Some(server_id) = track.server_id {
-            let location = self
-                .session_for(server_id)
-                .and_then(|session| session.stream_location(&track.path, &track.format));
-            if let Some(location) = location {
-                return location;
-            }
-            // The engine reports the address as unplayable, which the
-            // listener sees as a toast.
-            log::warn!(
-                "track {} is on a server Janis is not signed in to",
-                track.id
-            );
-        }
-        Location::File(PathBuf::from(&track.path))
+        jellyfin::track_location(
+            track,
+            self.media_server.borrow().server(),
+            &self.device_identifier,
+        )
     }
 
     /// Where a track's overview is read from, in the order to try them: its
@@ -175,28 +164,11 @@ impl Application {
     /// transcode, then the original file should the server not transcode. A
     /// song on a server Janis is not signed in to has nowhere to be read from.
     pub(super) fn overview_locations(&self, track: &Track) -> Vec<Location> {
-        let Some(server_id) = track.server_id else {
-            return vec![Location::File(PathBuf::from(&track.path))];
-        };
-        let Some(session) = self.session_for(server_id) else {
-            return Vec::new();
-        };
-        [
-            session.overview_location(&track.path),
-            session.stream_location(&track.path, &track.format),
-        ]
-        .into_iter()
-        .flatten()
-        .collect()
-    }
-
-    /// The signed-in session, when it is the one of server `server_id`.
-    fn session_for(&self, server_id: i64) -> Option<Session> {
-        self.media_server
-            .borrow()
-            .server()
-            .filter(|server| server.id == server_id)
-            .map(|server| Session::new(server, &self.device_identifier))
+        jellyfin::overview_locations(
+            track,
+            self.media_server.borrow().server(),
+            &self.device_identifier,
+        )
     }
 
     /// The signed-in session, for the cover loader.
