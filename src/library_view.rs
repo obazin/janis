@@ -485,6 +485,51 @@ pub struct Selection {
     pub tracks: Vec<Track>,
 }
 
+/// The selection a click on an album's card opens: its tracks in running
+/// order, under its title.
+pub fn album_selection(album: &AlbumGroup, translations: &Translations) -> Selection {
+    Selection {
+        kind: SelectionKind::Album,
+        key: album.key.clone(),
+        label: album
+            .album
+            .clone()
+            .unwrap_or_else(|| translations.text("common.unknownAlbum")),
+        tracks: album.tracks.clone(),
+    }
+}
+
+/// The selection a click on an artist's card opens: their tracks album by
+/// album, under their name.
+pub fn artist_selection(artist: &ArtistGroup) -> Selection {
+    Selection {
+        kind: SelectionKind::Artist,
+        key: artist.artist.clone(),
+        label: artist.artist.clone(),
+        tracks: artist_tracks(artist),
+    }
+}
+
+/// Where the selection's card sits in the grid of the open tab: nowhere on
+/// another tab, or when the search hides it.
+pub fn selection_place(
+    tab: LibraryTab,
+    selection: Option<&Selection>,
+    albums: &[AlbumGroup],
+    artists: &[ArtistGroup],
+) -> Option<usize> {
+    let selection = selection?;
+    match (tab, selection.kind) {
+        (LibraryTab::Albums, SelectionKind::Album) => {
+            albums.iter().position(|album| album.key == selection.key)
+        }
+        (LibraryTab::Artists, SelectionKind::Artist) => artists
+            .iter()
+            .position(|artist| artist.artist == selection.key),
+        _ => None,
+    }
+}
+
 /// Selects `next`, or clears the selection when it is already the selected
 /// one — clicking the open tile again is how the listener backs out of it.
 pub fn toggle_selection(current: &mut Option<Selection>, next: Selection) {
@@ -1322,5 +1367,72 @@ mod tests {
             Some(QueueClick::Replace(album.to_vec(), 1))
         );
         assert_eq!(queue_click(QueueView::Album, &album_rows, &album, 2), None);
+    }
+
+    #[test]
+    fn a_card_opens_its_album_or_artist_under_its_name() {
+        let tracks = [
+            album_track(1, "Second", "Blue", "Joni", Some(2)),
+            album_track(2, "First", "Blue", "Joni", Some(1)),
+            track(3, "Loose").artist("Joni"),
+        ];
+        let english = Translations::new(Language::English);
+        let groups = albums(&tracks);
+        let blue = groups
+            .iter()
+            .find(|group| group.album.is_some())
+            .expect("Blue");
+        let selection = album_selection(blue, &english);
+        assert_eq!(selection.kind, SelectionKind::Album);
+        assert_eq!(selection.label, "Blue");
+        assert_eq!(titles(&selection.tracks), ["First", "Second"]);
+        let untitled = groups
+            .iter()
+            .find(|group| group.album.is_none())
+            .expect("an untitled album");
+        assert_eq!(album_selection(untitled, &english).label, "Unknown album");
+
+        let joni = artist_selection(&artists(&tracks)[0]);
+        assert_eq!(
+            (joni.kind, joni.label.as_str()),
+            (SelectionKind::Artist, "Joni")
+        );
+        assert_eq!(joni.tracks.len(), 3);
+    }
+
+    #[test]
+    fn a_selection_sits_under_its_card_only_on_its_own_tab_and_while_shown() {
+        let tracks = [
+            album_track(1, "a", "Blue", "Joni", Some(1)),
+            album_track(2, "b", "Hejira", "Joni", Some(1)),
+        ];
+        let groups = albums(&tracks);
+        let people = artists(&tracks);
+        let english = Translations::new(Language::English);
+        let hejira = album_selection(&groups[1], &english);
+
+        assert_eq!(
+            selection_place(LibraryTab::Albums, Some(&hejira), &groups, &people),
+            Some(1)
+        );
+        assert_eq!(
+            selection_place(LibraryTab::Artists, Some(&hejira), &groups, &people),
+            None,
+            "an album has no card on the Artists tab"
+        );
+        assert_eq!(
+            selection_place(LibraryTab::Albums, Some(&hejira), &groups[..1], &people),
+            None,
+            "the search hides its card"
+        );
+        let joni = artist_selection(&people[0]);
+        assert_eq!(
+            selection_place(LibraryTab::Artists, Some(&joni), &groups, &people),
+            Some(0)
+        );
+        assert_eq!(
+            selection_place(LibraryTab::Albums, None, &groups, &people),
+            None
+        );
     }
 }

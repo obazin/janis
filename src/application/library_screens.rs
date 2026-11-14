@@ -94,18 +94,9 @@ impl Application {
             let Some(album) = album else {
                 return;
             };
-            let label = album.album.clone().unwrap_or_else(|| {
-                application
-                    .translations
-                    .borrow()
-                    .text("common.unknownAlbum")
-            });
-            application.toggle_selection(Selection {
-                kind: SelectionKind::Album,
-                key: album.key,
-                label,
-                tracks: album.tracks,
-            });
+            let selection =
+                library_view::album_selection(&album, &application.translations.borrow());
+            application.toggle_selection(selection);
         }));
         view.on_artist_clicked(self.handler(|application, index: i32| {
             let artist = list_place(index).and_then(|place| {
@@ -119,12 +110,7 @@ impl Application {
             let Some(artist) = artist else {
                 return;
             };
-            application.toggle_selection(Selection {
-                kind: SelectionKind::Artist,
-                key: artist.artist.clone(),
-                tracks: library_view::artist_tracks(&artist),
-                label: artist.artist,
-            });
+            application.toggle_selection(library_view::artist_selection(&artist));
         }));
         view.on_song_clicked(self.handler(|application, index: i32| {
             let tracks = application.library_screen.borrow().shown_tracks.clone();
@@ -227,8 +213,9 @@ impl Application {
         self.refresh_library();
 
         let view = self.window.global::<user_interface::Library>();
-        match (folding, folding_index) {
-            (Some(folding), Some(index)) => {
+        // Only a panel that sat under a card folds; another closes at once.
+        match folding.zip(folding_index) {
+            Some((folding, index)) => {
                 view.set_folding_index(index as i32);
                 view.set_folding_heading(folding.label.as_str().into());
                 self.library_folding_tracks.set_vec(track_rows(
@@ -237,7 +224,7 @@ impl Application {
                     &self.translations.borrow(),
                 ));
             }
-            _ => {
+            None => {
                 view.set_folding_index(-1);
                 self.library_folding_tracks.set_vec(Vec::new());
             }
@@ -306,21 +293,12 @@ impl Application {
         rows: &slint::VecModel<LibraryTrack>,
         translations: &Translations,
     ) -> Option<usize> {
-        let selection_index =
-            screen
-                .selection
-                .as_ref()
-                .and_then(|selection| match (screen.tab, selection.kind) {
-                    (LibraryTab::Albums, SelectionKind::Album) => screen
-                        .shown_albums
-                        .iter()
-                        .position(|album| album.key == selection.key),
-                    (LibraryTab::Artists, SelectionKind::Artist) => screen
-                        .shown_artists
-                        .iter()
-                        .position(|artist| artist.artist == selection.key),
-                    _ => None,
-                });
+        let selection_index = library_view::selection_place(
+            screen.tab,
+            screen.selection.as_ref(),
+            &screen.shown_albums,
+            &screen.shown_artists,
+        );
         view.set_selection_index(selection_index.map_or(-1, |index| index as i32));
         view.set_selection_present(screen.selection.is_some());
         match &screen.selection {
