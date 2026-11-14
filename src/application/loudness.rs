@@ -3,10 +3,10 @@
 //! as soon as it is known.
 //!
 //! The library holds every gain the database knew when it was read; a gain
-//! measured since is kept in `measured_gains` for the rest of the session, at
+//! measured since is kept in `session_gains` for the rest of the session, at
 //! most one number per local file, and a queue takes it from there.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -14,7 +14,7 @@ use std::sync::{Arc, Mutex};
 use super::{post, Application};
 use crate::audio;
 use crate::background::Worker;
-use crate::library::{self, Gains, PendingLoudness, Track};
+use crate::library::{self, PendingLoudness, SessionGains, Track};
 use crate::platform;
 
 /// What the controller keeps for the background measurement.
@@ -22,8 +22,8 @@ pub(super) struct LoudnessMeasurement {
     /// One thread of its own, so a long measurement never holds up a scan,
     /// and a scan never waits behind one.
     worker: Worker,
-    /// The gains measured this session, by track id.
-    measured_gains: std::cell::RefCell<HashMap<i64, f64>>,
+    /// The gains measured this session.
+    session_gains: std::cell::RefCell<SessionGains>,
     /// The tracks tried this session, measured or not, so a file that cannot
     /// be measured is not read again at every scan.
     tried: Arc<Mutex<HashSet<i64>>>,
@@ -40,7 +40,7 @@ impl LoudnessMeasurement {
         worker.run(platform::lower_current_thread_priority);
         Ok(Self {
             worker,
-            measured_gains: Default::default(),
+            session_gains: Default::default(),
             tried: Default::default(),
             stopping: Default::default(),
         })
@@ -49,11 +49,7 @@ impl LoudnessMeasurement {
     /// The gain `track` plays at: the one measured this session, when there
     /// is one, else the one the library read.
     pub fn gain_of(&self, track: &Track) -> f64 {
-        self.measured_gains
-            .borrow()
-            .get(&track.id)
-            .copied()
-            .unwrap_or(track.gain_db)
+        self.session_gains.borrow().gain_of(track)
     }
 
     pub fn stop(&self) {
@@ -110,12 +106,10 @@ impl Application {
     /// Plays `track_id` at its measured gain from the next queue on, and
     /// stores the measurement from the library thread.
     fn loudness_measured(&self, track_id: i64, measured: audio::Measured) {
-        let gain =
-            library::resolved_gain(Gains::default(), Some(measured.lufs), Some(measured.peak));
         self.loudness
-            .measured_gains
+            .session_gains
             .borrow_mut()
-            .insert(track_id, gain);
+            .measured(track_id, measured.lufs, measured.peak);
         let database = Arc::clone(&self.database);
         self.library_worker.run(move || {
             library::store_loudness(&database, track_id, measured.lufs, measured.peak);

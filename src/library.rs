@@ -700,6 +700,31 @@ pub struct Gains {
 ///
 /// The album gain first, so the songs of one record keep the loudness
 /// differences their mastering gave them; the track gain when the album has
+/// The gains measured while Janis runs, at most one per local file: a queue
+/// takes a track's from here once it is known, ahead of the gain the library
+/// read before the measurement.
+#[derive(Debug, Default)]
+pub struct SessionGains {
+    measured: std::collections::HashMap<i64, f64>,
+}
+
+impl SessionGains {
+    /// The gain `track` plays at.
+    pub fn gain_of(&self, track: &Track) -> f64 {
+        self.measured
+            .get(&track.id)
+            .copied()
+            .unwrap_or(track.gain_db)
+    }
+
+    /// A measurement of `track_id` ended: the gain it plays at from now on.
+    pub fn measured(&mut self, track_id: i64, lufs: f64, peak: f64) -> f64 {
+        let gain = resolved_gain(Gains::default(), Some(lufs), Some(peak));
+        self.measured.insert(track_id, gain);
+        gain
+    }
+}
+
 /// none; the measured loudness when there is no gain at all. Each gain keeps
 /// its own peak, and borrows the other's when it has none, so a boost never
 /// lifts the loudest sample past full scale for want of a figure.
@@ -1357,5 +1382,28 @@ mod tests {
 
         remove_watched_folder(&database, folders[0].id).expect("the parent is removed");
         assert_eq!(list_tracks(&database).map(|tracks| tracks.len()), Ok(0));
+    }
+
+    #[test]
+    fn a_gain_measured_this_session_wins_over_the_one_the_library_read() {
+        let mut gains = SessionGains::default();
+        let tagged = Track {
+            gain_db: -3.0,
+            ..test_support::track(1, "a")
+        };
+        assert_eq!(gains.gain_of(&tagged), -3.0);
+
+        let gain = gains.measured(1, -12.0, 0.5);
+
+        assert_eq!(
+            gain,
+            resolved_gain(Gains::default(), Some(-12.0), Some(0.5))
+        );
+        assert_eq!(gains.gain_of(&tagged), gain);
+        assert_eq!(
+            gains.gain_of(&test_support::track(2, "b")),
+            0.0,
+            "another track keeps its own"
+        );
     }
 }
