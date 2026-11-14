@@ -456,10 +456,7 @@ impl Application {
                 .map(|album| user_interface::SpotlightAlbum {
                     title: album.album.as_deref().unwrap_or(&unknown_album).into(),
                     detail: translations
-                        .translate(
-                            "library.tracks",
-                            &[("count", album.tracks.len().to_string())],
-                        )
+                        .count("library.tracks", album.tracks.len())
                         .into(),
                     track_id: album
                         .tracks

@@ -28,6 +28,20 @@ impl Language {
         }
     }
 
+    /// Which of a count's two wordings, `.one` or `.other`, the language
+    /// uses: English says "1 track" but "0 tracks", French "0 titre" too.
+    fn plural_form(self, count: usize) -> &'static str {
+        let singular = match self {
+            Language::English => count == 1,
+            Language::French => count <= 1,
+        };
+        if singular {
+            "one"
+        } else {
+            "other"
+        }
+    }
+
     /// The language a stored code names; anything unknown is English.
     pub fn from_code(code: &str) -> Language {
         match code {
@@ -79,6 +93,13 @@ impl Translations {
         value
     }
 
+    /// The wording of `count` things: `key.one` or `key.other`, whichever the
+    /// current language uses for that number, with `{count}` replaced.
+    pub fn count(&self, key: &str, count: usize) -> String {
+        let form = self.current.plural_form(count);
+        self.translate(&format!("{key}.{form}"), &[("count", count.to_string())])
+    }
+
     /// Every key of the reference catalog.
     #[cfg(test)]
     pub fn keys(&self) -> impl Iterator<Item = &str> {
@@ -121,11 +142,25 @@ mod tests {
     fn placeholders_are_replaced_in_the_current_language() {
         let mut translations = Translations::new(Language::English);
         assert_eq!(
-            translations.translate("library.tracks", &[("count", "12".to_owned())]),
-            "12 tracks"
+            translations.translate("error.radio", &[("name", "FIP".to_owned())]),
+            "Couldn't connect to FIP"
         );
         translations.set_current(Language::French);
         assert_ne!(translations.text("common.unknownAlbum"), "Unknown album");
+    }
+
+    #[test]
+    fn a_count_takes_the_wording_its_language_uses_for_that_number() {
+        let mut translations = Translations::new(Language::English);
+        let english: Vec<String> = [0, 1, 2]
+            .map(|count| translations.count("library.tracks", count))
+            .into();
+        assert_eq!(english, ["0 tracks", "1 track", "2 tracks"]);
+        translations.set_current(Language::French);
+        let french: Vec<String> = [0, 1, 2]
+            .map(|count| translations.count("library.tracks", count))
+            .into();
+        assert_eq!(french, ["0 titre", "1 titre", "2 titres"]);
     }
 
     #[test]
