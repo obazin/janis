@@ -25,6 +25,14 @@ pub struct StreamInfo {
     pub album: Option<String>,
 }
 
+/// What the Now Playing lists depend on; see [`Player::lists_basis`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ListsBasis {
+    mode: Mode,
+    index: Option<usize>,
+    shuffle: bool,
+}
+
 pub struct Player {
     queue: Vec<Track>,
     index: usize,
@@ -129,6 +137,17 @@ impl Player {
         match self.mode {
             Mode::Local => self.queue.get(self.index),
             Mode::Idle | Mode::Radio => None,
+        }
+    }
+
+    /// What the Now Playing lists are built from: they change with the
+    /// current track and the shuffle switch, and nothing else the engine
+    /// reports — position reports ten times a second among it.
+    pub fn lists_basis(&self) -> ListsBasis {
+        ListsBasis {
+            mode: self.mode,
+            index: self.current_index(),
+            shuffle: self.shuffle,
         }
     }
 
@@ -813,5 +832,30 @@ mod tests {
             [Effect::SetVolume(0.5)],
             "the engine keeps the volume it had"
         );
+    }
+
+    #[test]
+    fn the_now_playing_lists_follow_the_track_and_shuffle_but_not_the_position() {
+        let now = Instant::now();
+        let mut player = Player::new(now);
+        player.play_queue(vec![timed_track(1, 100.0), timed_track(2, 100.0)], 0, now);
+        let basis = player.lists_basis();
+
+        player.apply(
+            EngineEvent::Position {
+                position_secs: 10.0,
+                duration_secs: 100.0,
+            },
+            now,
+            &no_stations,
+        );
+        assert_eq!(player.lists_basis(), basis);
+
+        player.apply(EngineEvent::TrackChanged { index: 1 }, now, &no_stations);
+        let next = player.lists_basis();
+        assert_ne!(next, basis);
+
+        player.toggle_shuffle();
+        assert_ne!(player.lists_basis(), next);
     }
 }

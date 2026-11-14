@@ -479,17 +479,13 @@ impl Application {
     }
 
     fn on_engine_event(&self, event: EngineEvent) {
-        // The lists follow the current track and the shuffle switch; most events — position reports
-        // ten times a second among them — leave it where it was.
-        let current_track =
-            |player: &Player| (player.mode(), player.current_index(), player.shuffle());
         let (before, effects, after) = {
             let mut player = self.player.borrow_mut();
-            let before = current_track(&player);
+            let before = player.lists_basis();
             let effects = player.apply(event, Instant::now(), &|id| {
                 self.catalog.station_by_id(id).cloned()
             });
-            (before, effects, current_track(&player))
+            (before, effects, player.lists_basis())
         };
         self.run(effects);
         self.refresh_player();
