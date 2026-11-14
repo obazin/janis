@@ -69,6 +69,9 @@ CREATE INDEX IF NOT EXISTS idx_tracks_added ON tracks(added_at DESC);
 /// converge on the same shape.
 const SCHEMA_VERSION: i64 = 6;
 
+// The migrations reach the version a fresh database is stamped with.
+const _: () = assert!(MIGRATIONS.len() as i64 + 1 == SCHEMA_VERSION);
+
 /// Index `i` upgrades to version `i + 2`. Append only: editing a shipped entry
 /// would skip the change for anyone who already ran it.
 const MIGRATIONS: &[&str] = &[
@@ -190,10 +193,11 @@ fn migrate(conn: &Connection) -> Result<(), String> {
         version = target;
     }
 
-    debug_assert_eq!(
-        version, SCHEMA_VERSION,
-        "MIGRATIONS must reach SCHEMA_VERSION"
-    );
+    if version > SCHEMA_VERSION {
+        // Written by a later Janis: its additions are columns and tables this
+        // one does not read, so the file opens as it is.
+        log::warn!("janis.db is at version {version}, newer than this Janis ({SCHEMA_VERSION})");
+    }
     Ok(())
 }
 
@@ -858,6 +862,23 @@ mod tests {
         ] {
             assert_eq!(defaults.enabled(option), saved, "{option:?}");
         }
+    }
+
+    #[test]
+    fn a_database_from_a_newer_janis_opens_as_it_is() {
+        let directory = tempfile::tempdir().expect("a temporary directory");
+        database_at_version(directory.path(), SCHEMA_VERSION);
+        Connection::open(directory.path().join(DATABASE_FILE))
+            .and_then(|connection| {
+                connection.pragma_update(None, "user_version", SCHEMA_VERSION + 1)
+            })
+            .expect("stamp a later version");
+
+        let database = init(directory.path().to_path_buf()).expect("a newer database opens");
+        assert_eq!(
+            get_preferences(&database).map(|preferences| preferences.volume),
+            Ok(0.3)
+        );
     }
 
     #[test]
