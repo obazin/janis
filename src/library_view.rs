@@ -616,18 +616,16 @@ mod tests {
     use crate::translations::Language;
 
     fn album_track(id: i64, title: &str, album: &str, artist: &str, number: Option<u32>) -> Track {
-        let mut track = track(id, title);
-        track.album = Some(album.to_owned());
-        track.artist = Some(artist.to_owned());
-        track.track_number = number;
-        track
+        Track {
+            track_number: number,
+            ..track(id, title).album(album).artist(artist)
+        }
     }
 
     #[test]
     fn local_files_lists_only_the_files_on_disk() {
         let file = track(1, "Alive");
-        let mut song = track(2, "Alive again");
-        song.server_id = Some(7);
+        let song = track(2, "Alive again").server(7, "item");
         let tracks = vec![file.clone(), song];
 
         assert_eq!(search_local_files(&tracks, ""), vec![file.clone()]);
@@ -641,8 +639,7 @@ mod tests {
 
     #[test]
     fn an_album_plays_in_disc_then_track_order_with_untagged_tracks_last() {
-        let mut second_disc = album_track(1, "Later", "A", "X", Some(1));
-        second_disc.disc_number = Some(2);
+        let second_disc = album_track(1, "Later", "A", "X", Some(1)).disc(2);
         let tracks = [
             second_disc,
             album_track(2, "zeta", "A", "X", None),
@@ -663,10 +660,8 @@ mod tests {
 
     #[test]
     fn a_compilation_stays_one_album_under_its_album_artist() {
-        let mut first = album_track(1, "One", "Hits", "Artist A", Some(1));
-        first.album_artist = Some("Various".to_owned());
-        let mut second = album_track(2, "Two", "Hits", "Artist B", Some(2));
-        second.album_artist = Some("Various".to_owned());
+        let first = album_track(1, "One", "Hits", "Artist A", Some(1)).album_artist("Various");
+        let second = album_track(2, "Two", "Hits", "Artist B", Some(2)).album_artist("Various");
         let other = album_track(3, "Three", "Hits", "Someone Else", Some(1));
 
         let groups = albums(&[first, second, other]);
@@ -679,16 +674,15 @@ mod tests {
 
     #[test]
     fn albums_list_newest_addition_first_and_sum_what_their_tracks_say() {
-        let mut old = album_track(1, "Old", "Old Album", "X", Some(1));
-        old.added_at = 10;
-        let mut new_first = album_track(2, "New 1", "New Album", "X", Some(1));
-        new_first.added_at = 20;
-        new_first.duration_secs = 100.0;
-        let mut new_second = album_track(3, "New 2", "New Album", "X", Some(2));
-        new_second.added_at = 30;
-        new_second.duration_secs = 50.0;
-        new_second.year = Some(1971);
-        new_second.genre = Some("Rock".to_owned());
+        let old = album_track(1, "Old", "Old Album", "X", Some(1)).added(10);
+        let new_first = album_track(2, "New 1", "New Album", "X", Some(1))
+            .added(20)
+            .duration(100.0);
+        let new_second = album_track(3, "New 2", "New Album", "X", Some(2))
+            .added(30)
+            .duration(50.0)
+            .year(1971)
+            .genre("Rock");
 
         let groups = albums(&[old, new_first, new_second]);
 
@@ -721,10 +715,8 @@ mod tests {
 
     #[test]
     fn the_library_search_reads_six_fields_and_ignores_case_and_padding() {
-        let mut by_composer = track(1, "Prelude");
-        by_composer.composer = Some("Claude Debussy".to_owned());
-        let mut by_genre = track(2, "Song");
-        by_genre.genre = Some("Impressionist".to_owned());
+        let by_composer = track(1, "Prelude").composer("Claude Debussy");
+        let by_genre = track(2, "Song").genre("Impressionist");
         let unrelated = album_track(3, "Other", "Album", "Artist", None);
         let tracks = [by_composer, by_genre, unrelated];
 
@@ -761,8 +753,7 @@ mod tests {
     #[test]
     fn the_library_tabs_are_alphabetical_ignoring_case_and_accents() {
         // Newest addition first, as the library is read.
-        let mut untitled = track(5, "Unnamed");
-        untitled.artist = Some("zed".to_owned());
+        let untitled = track(5, "Unnamed").artist("zed");
         let tracks = [
             untitled,
             album_track(4, "beta", "Zénith", "Émile", Some(1)),
@@ -850,10 +841,8 @@ mod tests {
 
     #[test]
     fn the_current_album_is_found_by_album_artist_or_falls_back_to_the_track() {
-        let mut first = album_track(1, "One", "Hits", "Artist A", Some(1));
-        first.album_artist = Some("Various".to_owned());
-        let mut second = album_track(2, "Two", "Hits", "Artist B", Some(2));
-        second.album_artist = Some("Various".to_owned());
+        let first = album_track(1, "One", "Hits", "Artist A", Some(1)).album_artist("Various");
+        let second = album_track(2, "Two", "Hits", "Artist B", Some(2)).album_artist("Various");
         let groups = albums(&[first.clone(), second]);
 
         assert_eq!(titles(&album_tracks_of(&groups, &first)), ["One", "Two"]);
@@ -944,8 +933,7 @@ mod tests {
     #[test]
     fn the_playlist_and_album_views_mark_the_current_track() {
         let queue = [track(1, "a"), track(2, "b")];
-        let mut album_only = track(7, "not queued");
-        album_only.track_number = Some(5);
+        let album_only = track(7, "not queued").number(5);
         let album = [queue[1].clone(), album_only];
 
         let playlist = queue_rows(QueueView::Playlist, &queue, Some(1), &album, false);
@@ -1117,8 +1105,7 @@ mod tests {
 
     #[test]
     fn rows_are_numbered_by_place_or_by_the_album_position() {
-        let mut tagged = track(1, "a");
-        tagged.track_number = Some(7);
+        let tagged = track(1, "a").number(7);
         assert_eq!(row_number(&tagged, 0, false), 1);
         assert_eq!(row_number(&tagged, 0, true), 7);
         assert_eq!(row_number(&track(2, "b"), 4, true), 5);

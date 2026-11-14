@@ -87,6 +87,14 @@ libc = "0.2"
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Threading"] }
 
+[dev-dependencies]
+# Unique temporary directories, removed when a test ends, so concurrent test
+# runs never share or delete each other's databases and folders.
+tempfile = "3"
+# Property tests: invariants checked over generated inputs, shrunk to the
+# smallest failing case.
+proptest = "1"
+
 [profile.dev.package."*"]
 opt-level = 2
 

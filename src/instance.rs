@@ -107,81 +107,69 @@ mod tests {
     use super::*;
     use std::sync::mpsc::channel;
 
-    fn directory(name: &str) -> PathBuf {
-        let directory = std::env::temp_dir().join(format!("janis-instance-{name}"));
-        let _ = std::fs::remove_dir_all(&directory);
-        directory
-    }
-
     #[test]
     fn a_second_launch_brings_the_first_forward_and_steps_aside() {
-        let directory = directory("second");
+        let directory = tempfile::tempdir().expect("a temporary directory");
         let (shown, was_shown) = channel();
-        let first = claim(&directory, move || {
+        let first = claim(directory.path(), move || {
             let _ = shown.send(());
         })
         .expect("the first launch claims the instance");
         assert!(first.is_some());
 
-        let second = claim(&directory, || {}).expect("the second launch finds the first");
+        let second = claim(directory.path(), || {}).expect("the second launch finds the first");
 
         assert!(second.is_none());
         was_shown
             .recv_timeout(Duration::from_secs(5))
             .expect("the first instance is asked to come forward");
-        let _ = std::fs::remove_dir_all(&directory);
     }
 
     #[test]
     fn another_program_on_the_recorded_port_does_not_block_a_launch() {
-        let directory = directory("stranger");
-        std::fs::create_dir_all(&directory).expect("temp dir");
+        let directory = tempfile::tempdir().expect("a temporary directory");
         // Something else listens where a stale file points, and never
         // answers as Janis would.
         let stranger = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).expect("a free port");
         let port = stranger.local_addr().expect("its address").port();
-        std::fs::write(directory.join(PORT_FILE), port.to_string()).expect("write");
+        std::fs::write(directory.path().join(PORT_FILE), port.to_string()).expect("write");
 
-        let launch = claim(&directory, || {}).expect("the launch carries on");
+        let launch = claim(directory.path(), || {}).expect("the launch carries on");
 
         assert!(launch.is_some());
         drop(launch);
         drop(stranger);
-        let _ = std::fs::remove_dir_all(&directory);
     }
 
     #[test]
     fn an_instance_leaves_the_port_file_of_another_alone() {
-        let directory = directory("overwritten");
-        let first = claim(&directory, || {}).expect("the launch claims the instance");
+        let directory = tempfile::tempdir().expect("a temporary directory");
+        let first = claim(directory.path(), || {}).expect("the launch claims the instance");
         // Another instance has since recorded its own port.
-        std::fs::write(directory.join(PORT_FILE), "1").expect("write");
+        std::fs::write(directory.path().join(PORT_FILE), "1").expect("write");
 
         drop(first);
 
-        assert!(directory.join(PORT_FILE).exists());
-        let _ = std::fs::remove_dir_all(&directory);
+        assert!(directory.path().join(PORT_FILE).exists());
     }
 
     #[test]
     fn a_stale_port_file_does_not_block_a_launch() {
-        let directory = directory("stale");
-        std::fs::create_dir_all(&directory).expect("temp dir");
+        let directory = tempfile::tempdir().expect("a temporary directory");
         // A port nothing listens on any more: bind one, then let it go.
         let port = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
             .and_then(|listener| listener.local_addr())
             .expect("a free port")
             .port();
-        std::fs::write(directory.join(PORT_FILE), port.to_string()).expect("write");
+        std::fs::write(directory.path().join(PORT_FILE), port.to_string()).expect("write");
 
-        let launch = claim(&directory, || {}).expect("the launch carries on");
+        let launch = claim(directory.path(), || {}).expect("the launch carries on");
 
         assert!(launch.is_some());
         drop(launch);
         assert!(
-            !directory.join(PORT_FILE).exists(),
+            !directory.path().join(PORT_FILE).exists(),
             "the instance takes its port file with it"
         );
-        let _ = std::fs::remove_dir_all(&directory);
     }
 }

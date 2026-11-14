@@ -813,6 +813,74 @@ pub mod test_support {
             gain_db: 0.0,
         }
     }
+
+    /// Builder steps over `track`, so a test names only the tags it cares
+    /// about: `track(1, "A").album("X").artist("Y").number(3)`.
+    impl Track {
+        pub fn album(mut self, album: &str) -> Self {
+            self.album = Some(album.to_owned());
+            self
+        }
+
+        pub fn artist(mut self, artist: &str) -> Self {
+            self.artist = Some(artist.to_owned());
+            self
+        }
+
+        pub fn album_artist(mut self, album_artist: &str) -> Self {
+            self.album_artist = Some(album_artist.to_owned());
+            self
+        }
+
+        pub fn composer(mut self, composer: &str) -> Self {
+            self.composer = Some(composer.to_owned());
+            self
+        }
+
+        pub fn genre(mut self, genre: &str) -> Self {
+            self.genre = Some(genre.to_owned());
+            self
+        }
+
+        pub fn year(mut self, year: u32) -> Self {
+            self.year = Some(year);
+            self
+        }
+
+        pub fn number(mut self, number: u32) -> Self {
+            self.track_number = Some(number);
+            self
+        }
+
+        pub fn disc(mut self, disc: u32) -> Self {
+            self.disc_number = Some(disc);
+            self
+        }
+
+        pub fn added(mut self, added_at: i64) -> Self {
+            self.added_at = added_at;
+            self
+        }
+
+        pub fn duration(mut self, seconds: f64) -> Self {
+            self.duration_secs = seconds;
+            self
+        }
+
+        pub fn quality(mut self, format: &str, bit_depth: u8, sample_rate: u32) -> Self {
+            self.format = format.to_owned();
+            self.bit_depth = Some(bit_depth);
+            self.sample_rate = Some(sample_rate);
+            self
+        }
+
+        /// A song of the media server `server_id`, showing `item`'s picture.
+        pub fn server(mut self, server_id: i64, item: &str) -> Self {
+            self.server_id = Some(server_id);
+            self.artwork_item = Some(item.to_owned());
+            self
+        }
+    }
 }
 
 #[cfg(test)]
@@ -841,7 +909,7 @@ mod tests {
         wav.extend_from_slice(b"data");
         wav.extend_from_slice(&data_len.to_le_bytes());
         wav.extend_from_slice(&vec![0u8; data_len as usize]);
-        std::fs::create_dir_all(path.parent().expect("has a parent")).expect("temp dir");
+        std::fs::create_dir_all(path.parent().expect("has a parent")).expect("temp directory");
         std::fs::File::create(path)
             .and_then(|mut file| file.write_all(&wav))
             .expect("write test wav");
@@ -849,10 +917,9 @@ mod tests {
 
     #[test]
     fn importing_a_file_of_a_watched_folder_leaves_it_in_that_folder() {
-        let dir = std::env::temp_dir().join("janis-import-test");
-        let _ = std::fs::remove_dir_all(&dir);
-        let db = crate::persistence::init(dir.clone()).expect("db");
-        let folder = dir.join("watched");
+        let directory = tempfile::tempdir().expect("a temporary directory");
+        let db = crate::persistence::init(directory.path().to_path_buf()).expect("db");
+        let folder = directory.path().join("watched");
         let file = folder.join("song.wav");
         write_wav(&file);
 
@@ -865,8 +932,6 @@ mod tests {
         assert_eq!(folders[0].track_count, 1);
         let tracks = list_tracks(&db).expect("tracks");
         assert_eq!(tracks[0].folder_id, Some(folders[0].id));
-
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     fn server_song(item: &str, title: &str) -> ServerSong {
@@ -917,9 +982,8 @@ mod tests {
 
     #[test]
     fn a_sync_adds_updates_and_removes_what_the_server_lists() {
-        let dir = std::env::temp_dir().join("janis-server-sync-test");
-        let _ = std::fs::remove_dir_all(&dir);
-        let db = crate::persistence::init(dir.clone()).expect("db");
+        let directory = tempfile::tempdir().expect("a temporary directory");
+        let db = crate::persistence::init(directory.path().to_path_buf()).expect("db");
         let server_id = signed_in(&db);
 
         let first = sync_server_tracks(
@@ -958,15 +1022,12 @@ mod tests {
                 artwork_item: Some("album-of-a".to_owned())
             }
         );
-
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn a_rescan_never_touches_a_servers_songs() {
-        let dir = std::env::temp_dir().join("janis-server-rescan-test");
-        let _ = std::fs::remove_dir_all(&dir);
-        let db = crate::persistence::init(dir.clone()).expect("db");
+        let directory = tempfile::tempdir().expect("a temporary directory");
+        let db = crate::persistence::init(directory.path().to_path_buf()).expect("db");
         let server_id = signed_in(&db);
         sync_server_tracks(&db, server_id, vec![server_song("a", "One")]).expect("sync");
 
@@ -974,19 +1035,17 @@ mod tests {
 
         assert_eq!(report.removed, 0);
         assert_eq!(list_tracks(&db).expect("tracks").len(), 1);
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn prune_spares_tracks_whose_root_is_unreachable() {
-        let dir = std::env::temp_dir().join("janis-prune-test");
-        let _ = std::fs::remove_dir_all(&dir);
-        let db = crate::persistence::init(dir.clone()).expect("db");
+        let directory = tempfile::tempdir().expect("a temporary directory");
+        let db = crate::persistence::init(directory.path().to_path_buf()).expect("db");
 
-        let live_root = dir.join("live");
+        let live_root = directory.path().join("live");
         let kept = live_root.join("kept.wav");
         write_wav(&kept);
-        let ejected_root = dir.join("ejected");
+        let ejected_root = directory.path().join("ejected");
 
         {
             let conn = db.lock();
@@ -1027,8 +1086,6 @@ mod tests {
             "the unreachable volume's track must survive: an ejected drive \
              must not empty the library"
         );
-
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -1078,10 +1135,9 @@ mod tests {
 
     #[test]
     fn only_local_files_without_any_gain_wait_for_a_measurement() {
-        let directory = std::env::temp_dir().join("janis-pending-loudness-test");
-        let _ = std::fs::remove_dir_all(&directory);
-        let database = crate::persistence::init(directory.clone()).expect("db");
-        let folder = directory.join("watched");
+        let directory = tempfile::tempdir().expect("a temporary directory");
+        let database = crate::persistence::init(directory.path().to_path_buf()).expect("db");
+        let folder = directory.path().join("watched");
         write_wav(&folder.join("first.wav"));
         write_wav(&folder.join("second.wav"));
         add_watched_folder(&database, &folder.to_string_lossy()).expect("scan");
@@ -1096,15 +1152,12 @@ mod tests {
         let still = tracks_needing_loudness(&database).expect("pending");
         assert_eq!(still, vec![pending[1].clone()]);
         assert!(!needs_loudness(&database, pending[0].track_id));
-
-        let _ = std::fs::remove_dir_all(&directory);
     }
 
     #[test]
     fn a_servers_gains_are_kept_and_played() {
-        let directory = std::env::temp_dir().join("janis-server-gain-test");
-        let _ = std::fs::remove_dir_all(&directory);
-        let database = crate::persistence::init(directory.clone()).expect("db");
+        let directory = tempfile::tempdir().expect("a temporary directory");
+        let database = crate::persistence::init(directory.path().to_path_buf()).expect("db");
         let server_id = signed_in(&database);
         let mut song = server_song("a", "One");
         song.metadata.rg_track_gain_db = Some(-7.0);
@@ -1117,7 +1170,5 @@ mod tests {
             !needs_loudness(&database, tracks[0].id),
             "a song with a gain is not measured as it plays"
         );
-
-        let _ = std::fs::remove_dir_all(&directory);
     }
 }

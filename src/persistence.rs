@@ -544,12 +544,6 @@ pub fn device_identifier(database: &DbState) -> Result<String, String> {
 mod tests {
     use super::*;
 
-    fn temp_dir(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("janis-db-{}", name));
-        let _ = std::fs::remove_dir_all(&dir);
-        dir
-    }
-
     fn columns(conn: &Connection, table: &str) -> Vec<String> {
         let mut stmt = conn
             .prepare(&format!("PRAGMA table_info({})", table))
@@ -564,8 +558,8 @@ mod tests {
 
     #[test]
     fn a_fresh_database_lands_on_the_current_version() {
-        let dir = temp_dir("fresh");
-        let db = init(dir.clone()).expect("init a new database");
+        let directory = tempfile::tempdir().expect("a temporary directory");
+        let db = init(directory.path().to_path_buf()).expect("init a new database");
         let conn = db.lock();
 
         let version: i64 = conn
@@ -585,7 +579,6 @@ mod tests {
         }
         assert!(columns(&conn, "user_preferences").contains(&"eq_linear_phase".to_string()));
         drop(conn);
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -593,10 +586,9 @@ mod tests {
         // The case that silently breaks without migrations: a library created
         // before these columns existed. `CREATE TABLE IF NOT EXISTS` would
         // leave it untouched and every read of a new column would fail.
-        let dir = temp_dir("upgrade");
-        std::fs::create_dir_all(&dir).expect("temp dir");
+        let directory = tempfile::tempdir().expect("a temporary directory");
         {
-            let conn = Connection::open(dir.join(DATABASE_FILE)).expect("open");
+            let conn = Connection::open(directory.path().join(DATABASE_FILE)).expect("open");
             conn.execute_batch(SCHEMA).expect("v1 schema");
             conn.execute(
                 "INSERT INTO tracks (path, title, format) VALUES ('/a.flac', 'A', 'FLAC')",
@@ -607,7 +599,7 @@ mod tests {
             conn.pragma_update(None, "user_version", 0).expect("stamp");
         }
 
-        let db = init(dir.clone()).expect("init over an existing database");
+        let db = init(directory.path().to_path_buf()).expect("init over an existing database");
         let conn = db.lock();
 
         let cols = columns(&conn, "tracks");
@@ -639,7 +631,6 @@ mod tests {
         assert_eq!(track_number, None);
 
         drop(conn);
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -648,10 +639,9 @@ mod tests {
         // the DDL committed, the stamp did not. Running that migration again
         // dies on "duplicate column name" at every launch. Such a file must
         // be adopted, not refused.
-        let dir = temp_dir("wounded");
-        std::fs::create_dir_all(&dir).expect("temp dir");
+        let directory = tempfile::tempdir().expect("a temporary directory");
         {
-            let conn = Connection::open(dir.join(DATABASE_FILE)).expect("open");
+            let conn = Connection::open(directory.path().join(DATABASE_FILE)).expect("open");
             conn.execute_batch(SCHEMA).expect("v1 schema");
             // Migration to v2 fully applied…
             conn.execute_batch(MIGRATIONS[0]).expect("v2 ddl");
@@ -659,7 +649,8 @@ mod tests {
             conn.pragma_update(None, "user_version", 1).expect("stamp");
         }
 
-        let db = init(dir.clone()).expect("init must adopt the applied migration");
+        let db =
+            init(directory.path().to_path_buf()).expect("init must adopt the applied migration");
         let conn = db.lock();
         let version: i64 = conn
             .query_row("PRAGMA user_version", [], |r| r.get(0))
@@ -670,13 +661,12 @@ mod tests {
             "the migrations after the adopted one still run"
         );
         drop(conn);
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn a_favourite_station_is_remembered_until_its_star_is_taken_away() {
-        let directory = temp_dir("favourites");
-        let database = init(directory.clone()).expect("init a new database");
+        let directory = tempfile::tempdir().expect("a temporary directory");
+        let database = init(directory.path().to_path_buf()).expect("init a new database");
         assert_eq!(favourite_station_ids(&database), Ok(Vec::new()));
 
         set_favourite_station(&database, "fip", true).expect("star a station");
@@ -686,13 +676,12 @@ mod tests {
 
         set_favourite_station(&database, "fip", false).expect("take the star away");
         assert_eq!(favourite_station_ids(&database), Ok(Vec::new()));
-        let _ = std::fs::remove_dir_all(&directory);
     }
 
     /// A database as an earlier Janis left it: the frozen schema, the
     /// migrations up to `version`, a preference changed and one track.
     fn database_at_version(directory: &std::path::Path, version: i64) {
-        std::fs::create_dir_all(directory).expect("temp dir");
+        std::fs::create_dir_all(directory).expect("temp directory");
         let connection = Connection::open(directory.join(DATABASE_FILE)).expect("open");
         connection.execute_batch(SCHEMA).expect("v1 schema");
         for migration in &MIGRATIONS[..(version.max(1) - 1) as usize] {
@@ -722,10 +711,10 @@ mod tests {
         // Version 0 is a file from before migrations; 1 to 5 are each release
         // since. Every one must land on the current shape with nothing lost.
         for version in 0..SCHEMA_VERSION {
-            let directory = temp_dir(&format!("upgrade-from-v{version}"));
-            database_at_version(&directory, version);
+            let directory = tempfile::tempdir().expect("a temporary directory");
+            database_at_version(directory.path(), version);
 
-            let database = init(directory.clone())
+            let database = init(directory.path().to_path_buf())
                 .unwrap_or_else(|error| panic!("init over a v{version} database: {error}"));
             let preferences = get_preferences(&database).expect("the preferences read");
             assert_eq!(preferences.volume, 0.3, "v{version}: the volume survives");
@@ -753,7 +742,6 @@ mod tests {
                 .expect("read version");
             assert_eq!(schema_version, SCHEMA_VERSION);
             drop(connection);
-            let _ = std::fs::remove_dir_all(&directory);
         }
     }
 
@@ -787,8 +775,8 @@ mod tests {
 
     #[test]
     fn signing_in_again_to_the_same_server_keeps_its_songs_and_renews_the_token() {
-        let directory = temp_dir("media-server-renew");
-        let database = init(directory.clone()).expect("init a new database");
+        let directory = tempfile::tempdir().expect("a temporary directory");
+        let database = init(directory.path().to_path_buf()).expect("init a new database");
         assert_eq!(media_server(&database), Ok(None));
 
         let first = save_media_server(&database, &new_server("server", "user", "one"))
@@ -800,13 +788,12 @@ mod tests {
         assert_eq!(second.id, first.id);
         assert_eq!(second.access_token, "two");
         assert_eq!(track_count(&database), 1, "the songs stay");
-        let _ = std::fs::remove_dir_all(&directory);
     }
 
     #[test]
     fn another_server_or_signing_out_takes_the_songs_away() {
-        let directory = temp_dir("media-server-replace");
-        let database = init(directory.clone()).expect("init a new database");
+        let directory = tempfile::tempdir().expect("a temporary directory");
+        let database = init(directory.path().to_path_buf()).expect("init a new database");
         let first = save_media_server(&database, &new_server("server", "user", "one"))
             .expect("save a sign-in");
         server_track(&database, first.id, "a");
@@ -824,33 +811,30 @@ mod tests {
         remove_media_server(&database, other.id).expect("sign out");
         assert_eq!(media_server(&database), Ok(None));
         assert_eq!(track_count(&database), 0);
-        let _ = std::fs::remove_dir_all(&directory);
     }
 
     #[test]
     fn the_device_identifier_is_made_once() {
-        let directory = temp_dir("device-identifier");
-        let database = init(directory.clone()).expect("init a new database");
+        let directory = tempfile::tempdir().expect("a temporary directory");
+        let database = init(directory.path().to_path_buf()).expect("init a new database");
         let first = device_identifier(&database).expect("made");
         let second = device_identifier(&database).expect("read back");
         assert_eq!(first.len(), 32);
         assert_eq!(first, second);
-        let _ = std::fs::remove_dir_all(&directory);
     }
 
     #[test]
     fn migrating_twice_is_a_no_op() {
         // Every launch runs `init`; the second must not try to re-add columns.
-        let dir = temp_dir("idempotent");
-        let first = init(dir.clone()).expect("first open");
+        let directory = tempfile::tempdir().expect("a temporary directory");
+        let first = init(directory.path().to_path_buf()).expect("first open");
         drop(first);
-        let second = init(dir.clone()).expect("second open must not fail");
+        let second = init(directory.path().to_path_buf()).expect("second open must not fail");
         let conn = second.lock();
         let version: i64 = conn
             .query_row("PRAGMA user_version", [], |r| r.get(0))
             .expect("read version");
         assert_eq!(version, SCHEMA_VERSION);
         drop(conn);
-        let _ = std::fs::remove_dir_all(&dir);
     }
 }

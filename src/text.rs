@@ -144,17 +144,13 @@ mod tests {
 
     #[test]
     fn quality_label_marks_high_resolution_when_depth_exceeds_sixteen_bits() {
-        let mut flac = track(1, "A");
-        flac.bit_depth = Some(24);
-        flac.sample_rate = Some(96_000);
+        let flac = track(1, "A").quality("FLAC", 24, 96_000);
         assert_eq!(quality_label(&flac), "Hi-Res · FLAC 24/96");
     }
 
     #[test]
     fn quality_label_keeps_compact_disc_quality_plain_with_fractional_kilohertz() {
-        let mut flac = track(1, "A");
-        flac.bit_depth = Some(16);
-        flac.sample_rate = Some(44_100);
+        let flac = track(1, "A").quality("FLAC", 16, 44_100);
         assert_eq!(quality_label(&flac), "FLAC 16/44.1");
     }
 
