@@ -824,6 +824,43 @@ mod tests {
     }
 
     #[test]
+    fn a_fresh_database_reads_the_documented_defaults() {
+        let directory = tempfile::tempdir().expect("a temporary directory");
+        let database = init(directory.path().to_path_buf()).expect("init a new database");
+        assert_eq!(
+            get_preferences(&database),
+            Ok(Preferences {
+                volume: 0.8,
+                eq_gains: vec![0.0; EQ_BAND_COUNT],
+                eq_preset: "flat".to_owned(),
+                eq_linear_phase: false,
+                gapless: true,
+                crossfade: true,
+                normalize: true,
+                exclusive: false,
+                language: "en".to_owned(),
+            })
+        );
+    }
+
+    #[test]
+    fn the_saved_playback_switches_start_where_the_player_does() {
+        use crate::playback_options::PlaybackOptions;
+        let directory = tempfile::tempdir().expect("a temporary directory");
+        let database = init(directory.path().to_path_buf()).expect("init a new database");
+        let saved = get_preferences(&database).expect("the preferences read");
+        let defaults = PlaybackOptions::default();
+        for (option, saved) in [
+            (PlaybackOption::Gapless, saved.gapless),
+            (PlaybackOption::Crossfade, saved.crossfade),
+            (PlaybackOption::Normalize, saved.normalize),
+            (PlaybackOption::Exclusive, saved.exclusive),
+        ] {
+            assert_eq!(defaults.enabled(option), saved, "{option:?}");
+        }
+    }
+
+    #[test]
     fn migrating_twice_is_a_no_op() {
         // Every launch runs `init`; the second must not try to re-add columns.
         let directory = tempfile::tempdir().expect("a temporary directory");

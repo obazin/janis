@@ -15,11 +15,12 @@ pub struct PlaybackOptions {
     exclusive: bool,
 }
 
+/// What a fresh database holds, until `restore` reads the saved switches.
 impl Default for PlaybackOptions {
     fn default() -> Self {
         Self {
             gapless: true,
-            crossfade: false,
+            crossfade: true,
             normalize: true,
             exclusive: false,
         }
@@ -117,14 +118,15 @@ mod tests {
     fn a_toggle_is_saved_and_reaches_the_engine_when_the_engine_acts_on_it() {
         let mut options = PlaybackOptions::default();
 
+        // Crossfade starts on.
         assert_eq!(
             options.toggle(PlaybackOption::Crossfade),
             [
                 Effect::PersistPlaybackOption {
                     option: PlaybackOption::Crossfade,
-                    enabled: true,
+                    enabled: false,
                 },
-                Effect::SetCrossfade(true),
+                Effect::SetCrossfade(false),
             ]
         );
         // Exclusive output is remembered, but nothing in the engine reads it.
