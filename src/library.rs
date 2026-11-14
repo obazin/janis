@@ -1406,4 +1406,303 @@ mod tests {
             "another track keeps its own"
         );
     }
+
+    /// A row of `tracks`, as a scan or a sync would leave it.
+    struct Row<'row> {
+        id: i64,
+        path: &'row str,
+        album: Option<&'row str>,
+        artist: Option<&'row str>,
+        album_artist: Option<&'row str>,
+        disc: Option<u32>,
+        number: Option<u32>,
+        server_id: Option<i64>,
+    }
+
+    impl Default for Row<'_> {
+        fn default() -> Self {
+            Row {
+                id: 0,
+                path: "",
+                album: Some("Blue"),
+                artist: Some("Joni"),
+                album_artist: None,
+                disc: None,
+                number: None,
+                server_id: None,
+            }
+        }
+    }
+
+    fn insert(database: &DbState, row: Row) {
+        database
+            .lock()
+            .execute(
+                "INSERT INTO tracks (id, path, title, format, album, artist, album_artist,
+                                     disc_number, track_number, server_id)
+                 VALUES (?1, ?2, 'T', 'FLAC', ?3, ?4, ?5, ?6, ?7, ?8)",
+                rusqlite::params![
+                    row.id,
+                    row.path,
+                    row.album,
+                    row.artist,
+                    row.album_artist,
+                    row.disc,
+                    row.number,
+                    row.server_id
+                ],
+            )
+            .expect("insert a track");
+    }
+
+    fn fresh_database() -> (tempfile::TempDir, DbState) {
+        let directory = tempfile::tempdir().expect("a temporary directory");
+        let database = crate::persistence::init(directory.path().join("data")).expect("a database");
+        (directory, database)
+    }
+
+    #[test]
+    fn a_track_offers_its_own_file_then_its_album_siblings_in_disc_and_track_order() {
+        let (_directory, database) = fresh_database();
+        let server = crate::persistence::save_media_server(
+            &database,
+            &crate::persistence::NewMediaServer {
+                address: "http://jellyfin.local:8096".to_owned(),
+                server_identifier: "server".to_owned(),
+                server_name: "Home".to_owned(),
+                user_identifier: "user".to_owned(),
+                user_name: "listener".to_owned(),
+                access_token: "token".to_owned(),
+            },
+        )
+        .expect("a server");
+        insert(
+            &database,
+            Row {
+                id: 1,
+                path: "/own.flac",
+                disc: Some(1),
+                number: Some(3),
+                ..Row::default()
+            },
+        );
+        insert(
+            &database,
+            Row {
+                id: 2,
+                path: "/second-disc.flac",
+                disc: Some(2),
+                number: Some(1),
+                ..Row::default()
+            },
+        );
+        insert(
+            &database,
+            Row {
+                id: 3,
+                path: "/first.flac",
+                disc: Some(1),
+                number: Some(1),
+                ..Row::default()
+            },
+        );
+        insert(
+            &database,
+            Row {
+                id: 4,
+                path: "/other-album.flac",
+                album: Some("Hejira"),
+                ..Row::default()
+            },
+        );
+        insert(
+            &database,
+            Row {
+                id: 5,
+                path: "/other-artist.flac",
+                artist: Some("Someone"),
+                ..Row::default()
+            },
+        );
+        insert(
+            &database,
+            Row {
+                id: 6,
+                path: "jellyfin://server/item",
+                server_id: Some(server.id),
+                ..Row::default()
+            },
+        );
+
+        assert_eq!(
+            cover_candidates(&database, 1),
+            ["/own.flac", "/first.flac", "/second-disc.flac"]
+        );
+        assert!(
+            cover_candidates(&database, 6).is_empty(),
+            "a server song offers no file"
+        );
+        assert_eq!(
+            cover_source(&database, 6),
+            CoverSource::Server { artwork_item: None }
+        );
+        assert_eq!(cover_source(&database, 1), CoverSource::File);
+        assert_eq!(cover_source(&database, 99), CoverSource::File);
+    }
+
+    #[test]
+    fn siblings_offered_for_a_cover_stop_at_the_limit() {
+        let (_directory, database) = fresh_database();
+        let paths: Vec<String> = (1..=20).map(|id| format!("/{id}.flac")).collect();
+        for (index, path) in paths.iter().enumerate() {
+            insert(
+                &database,
+                Row {
+                    id: index as i64 + 1,
+                    path,
+                    ..Row::default()
+                },
+            );
+        }
+        assert_eq!(
+            cover_candidates(&database, 1).len(),
+            COVER_SIBLING_LIMIT + 1
+        );
+    }
+
+    #[test]
+    fn a_track_on_no_album_offers_only_its_own_file_and_untagged_artists_still_match() {
+        let (_directory, database) = fresh_database();
+        insert(
+            &database,
+            Row {
+                id: 1,
+                path: "/loose.flac",
+                album: None,
+                ..Row::default()
+            },
+        );
+        insert(
+            &database,
+            Row {
+                id: 2,
+                path: "/loose-too.flac",
+                album: None,
+                ..Row::default()
+            },
+        );
+        assert_eq!(cover_candidates(&database, 1), ["/loose.flac"]);
+
+        insert(
+            &database,
+            Row {
+                id: 3,
+                path: "/a.flac",
+                album: Some("Untitled"),
+                artist: None,
+                ..Row::default()
+            },
+        );
+        insert(
+            &database,
+            Row {
+                id: 4,
+                path: "/b.flac",
+                album: Some("Untitled"),
+                artist: None,
+                ..Row::default()
+            },
+        );
+        assert_eq!(cover_candidates(&database, 3), ["/a.flac", "/b.flac"]);
+    }
+
+    #[test]
+    fn an_imported_file_is_pruned_only_once_its_folder_is_back_without_it() {
+        let directory = tempfile::tempdir().expect("a temporary directory");
+        let database = crate::persistence::init(directory.path().join("data")).expect("a database");
+        let present = directory.path().join("present");
+        write_wav(&present.join("kept.wav"));
+        write_wav(&present.join("deleted.wav"));
+        let elsewhere = directory.path().join("elsewhere");
+        write_wav(&elsewhere.join("on-a-drive.wav"));
+        let path = |file: &Path| file.to_str().expect("a Unicode path").to_owned();
+        let report = import_files(
+            &database,
+            vec![
+                path(&present.join("kept.wav")),
+                path(&present.join("deleted.wav")),
+                path(&elsewhere.join("on-a-drive.wav")),
+            ],
+        );
+        assert_eq!(report.added, 3);
+        std::fs::remove_file(present.join("deleted.wav")).expect("delete one file");
+        std::fs::remove_dir_all(&elsewhere).expect("eject the drive");
+
+        assert_eq!(prune_missing(&database), Ok(1));
+        assert_eq!(list_tracks(&database).map(|tracks| tracks.len()), Ok(2));
+    }
+
+    #[test]
+    fn a_rescan_picks_up_new_files_and_prunes_deleted_ones() {
+        let directory = tempfile::tempdir().expect("a temporary directory");
+        let database = crate::persistence::init(directory.path().join("data")).expect("a database");
+        let music = directory.path().join("music");
+        write_wav(&music.join("first.wav"));
+        write_wav(&music.join("second.wav"));
+        watch(&database, &music).expect("watched");
+
+        std::fs::remove_file(music.join("first.wav")).expect("delete a file");
+        write_wav(&music.join("third.wav"));
+        let report = rescan_library(&database).expect("rescanned");
+
+        assert_eq!((report.added, report.updated, report.removed), (1, 1, 1));
+        let mut titles: Vec<String> = list_tracks(&database)
+            .expect("tracks")
+            .into_iter()
+            .map(|track| track.path)
+            .collect();
+        titles.sort();
+        assert_eq!(titles.len(), 2);
+        assert!(titles[0].ends_with("second.wav") && titles[1].ends_with("third.wav"));
+    }
+
+    #[test]
+    fn a_folder_larger_than_one_burst_is_written_whole() {
+        let directory = tempfile::tempdir().expect("a temporary directory");
+        let database = crate::persistence::init(directory.path().join("data")).expect("a database");
+        let music = directory.path().join("music");
+        for index in 0..=SCAN_BATCH {
+            write_wav(&music.join(format!("{index:03}.wav")));
+        }
+        let report = watch(&database, &music).expect("watched");
+        assert_eq!(report.added, SCAN_BATCH + 1);
+    }
+
+    #[test]
+    fn what_cannot_be_watched_or_imported_is_refused_or_counted() {
+        let directory = tempfile::tempdir().expect("a temporary directory");
+        let database = crate::persistence::init(directory.path().join("data")).expect("a database");
+        let file = directory.path().join("song.wav");
+        write_wav(&file);
+        assert!(matches!(watch(&database, &file), Err(ScanError::Failed(_))));
+
+        let text = directory.path().join("notes.wav");
+        std::fs::write(&text, "not audio").expect("write a fake");
+        let report = import_files(
+            &database,
+            vec![
+                directory
+                    .path()
+                    .join("missing.wav")
+                    .to_string_lossy()
+                    .into_owned(),
+                text.to_string_lossy().into_owned(),
+            ],
+        );
+        assert_eq!((report.added, report.skipped), (0, 2));
+        assert!(
+            !needs_loudness(&database, 99),
+            "an unknown track needs nothing"
+        );
+    }
 }
