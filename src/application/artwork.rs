@@ -17,7 +17,7 @@ use slint::{ComponentHandle, Image, Model, TimerMode};
 
 use super::{post, with_application, Application};
 use crate::cover_requests::{self, Direction};
-use crate::covers::{self, CoverKey, Pixels};
+use crate::covers::{self, CoverKey, CoverRequest, CurrentArtRequests, Pixels};
 use crate::jellyfin::{self, Session};
 use crate::library::{self, CoverSource};
 use crate::persistence::DbState;
@@ -56,16 +56,9 @@ pub(super) struct ListWindows {
 /// The art of whatever is playing.
 #[derive(Default)]
 pub(super) struct CurrentArt {
-    /// Bumped on every change of track, so a slow load that finishes after
-    /// the listener moved on is recognised and dropped.
-    pub(super) epoch: u64,
-    /// The track whose cover is loaded or loading.
-    track_id: Option<i64>,
+    /// Which loads are still wanted, and whether the track's cover failed.
+    pub(super) requests: CurrentArtRequests,
     pub(super) track_cover: Option<Image>,
-    pub(super) track_cover_failed: bool,
-    /// Bumped each time a station announces other art, or none, for the same
-    /// reason.
-    pub(super) stream_epoch: u64,
     pub(super) stream_cover: Option<Image>,
 }
 
@@ -195,20 +188,15 @@ impl Application {
     }
 
     pub(super) fn load_current_cover(&self, track_id: Option<i64>) {
-        let epoch = {
+        let load = {
             let mut art = self.current_art.borrow_mut();
-            // The engine confirms a track the click already showed: its
-            // cover is not read a second time.
-            if track_id.is_some() && art.track_id == track_id && !art.track_cover_failed {
+            let CoverRequest::Cleared { load } = art.requests.request(track_id) else {
                 return;
-            }
-            art.track_id = track_id;
-            art.epoch += 1;
+            };
             art.track_cover = None;
-            art.track_cover_failed = false;
-            art.epoch
+            load
         };
-        let Some(track_id) = track_id else {
+        let (Some(epoch), Some(track_id)) = (load, track_id) else {
             return;
         };
         let database = Arc::clone(&self.database);
@@ -220,31 +208,25 @@ impl Application {
     }
 
     pub(super) fn current_cover_loaded(&self, epoch: u64, loaded: Result<Option<Pixels>, String>) {
-        {
+        let failed = {
             let mut art = self.current_art.borrow_mut();
-            if art.epoch != epoch {
+            if !art.requests.loaded(epoch, loaded.is_ok()) {
                 return;
             }
             match loaded {
                 Ok(pixels) => art.track_cover = pixels.map(Image::from_rgba8),
-                Err(error) => {
-                    log::error!("current cover: {error}");
-                    art.track_cover_failed = true;
-                }
+                Err(error) => log::error!("current cover: {error}"),
             }
-        }
-        if self.current_art.borrow().track_cover_failed {
+            art.requests.failed()
+        };
+        if failed {
             self.notify_cover_unavailable();
         }
         self.refresh_player();
     }
 
     pub(super) fn show_stream_cover(&self, url: Option<String>) {
-        let epoch = {
-            let mut art = self.current_art.borrow_mut();
-            art.stream_epoch += 1;
-            art.stream_epoch
-        };
+        let epoch = self.current_art.borrow_mut().requests.request_stream();
         let Some(url) = url else {
             self.current_art.borrow_mut().stream_cover = None;
             return;
@@ -256,7 +238,7 @@ impl Application {
     }
 
     pub(super) fn stream_cover_loaded(&self, epoch: u64, decoded: Result<Pixels, String>) {
-        if self.current_art.borrow().stream_epoch != epoch {
+        if !self.current_art.borrow().requests.stream_is_current(epoch) {
             return;
         }
         match decoded {
@@ -313,7 +295,7 @@ impl Application {
             return;
         }
         let session = self.media_session();
-        let epoch = self.thumbnail_epoch.get();
+        let epoch = self.cover_requests.borrow().epoch();
         for key in keys {
             let database = Arc::clone(&self.database);
             let session = session.clone();
@@ -330,12 +312,12 @@ impl Application {
         key: CoverKey,
         loaded: Result<Option<Pixels>, String>,
     ) {
-        if self.thumbnail_epoch.get() != epoch {
-            return;
-        }
         let (shown, started) = {
             let mut requests = self.cover_requests.borrow_mut();
-            let shown = requests.finished(&key);
+            // A load from before the library was replaced is dropped.
+            let Some(shown) = requests.finished(&key, epoch) else {
+                return;
+            };
             (shown, requests.start())
         };
         self.load_thumbnails(started);
@@ -390,7 +372,9 @@ fn library_cover(
     longest_side: u32,
 ) -> Result<Option<Pixels>, String> {
     match library::cover_source(database, track_id) {
-        CoverSource::File => covers::track_cover(database, track_id, longest_side),
+        CoverSource::File => library::track_cover(database, track_id)
+            .map(|art| covers::base64_cover(&art.data_base64, longest_side))
+            .transpose(),
         CoverSource::Server { artwork_item: None } => Ok(None),
         CoverSource::Server {
             artwork_item: Some(item),

@@ -29,6 +29,9 @@ pub struct CoverRequests<Key> {
     sequence: u64,
     parallel_limit: usize,
     prefetch_limit: usize,
+    /// Moves on when the requests are cleared, so a load started before is
+    /// recognised on arrival and dropped.
+    epoch: u64,
 }
 
 struct Waiting {
@@ -64,7 +67,13 @@ impl<Key: Clone + Eq + Hash> CoverRequests<Key> {
             sequence: 0,
             parallel_limit,
             prefetch_limit,
+            epoch: 0,
         }
+    }
+
+    /// The epoch the loads started now run under.
+    pub fn epoch(&self) -> u64 {
+        self.epoch
     }
 
     /// A tile in view wants this cover. One already loading is only marked
@@ -162,12 +171,19 @@ impl<Key: Clone + Eq + Hash> CoverRequests<Key> {
         started
     }
 
-    /// A cover's load ended, whatever its outcome: its loader is free. True
-    /// when a tile in view asked for it, so the window must look again.
-    pub fn finished(&mut self, key: &Key) -> bool {
-        self.loading
-            .remove(key)
-            .is_some_and(|loading| loading.shown)
+    /// A cover's load, started under `epoch`, ended, whatever its outcome:
+    /// its loader is free. `None` when the requests were cleared since, and
+    /// the cover is to be dropped; otherwise whether a tile in view asked for
+    /// it, so the window must look again.
+    pub fn finished(&mut self, key: &Key, epoch: u64) -> Option<bool> {
+        if epoch != self.epoch {
+            return None;
+        }
+        Some(
+            self.loading
+                .remove(key)
+                .is_some_and(|loading| loading.shown),
+        )
     }
 
     /// Whether requests wait, so the checks must go on.
@@ -181,6 +197,7 @@ impl<Key: Clone + Eq + Hash> CoverRequests<Key> {
         self.waiting.clear();
         self.loading.clear();
         self.prefetching.clear();
+        self.epoch += 1;
     }
 }
 
@@ -247,7 +264,7 @@ mod tests {
         );
         assert!(requests.start().is_empty(), "no loader is free");
 
-        requests.finished(&1);
+        requests.finished(&1, 0);
         assert_eq!(requests.start(), [3]);
     }
 
@@ -263,7 +280,7 @@ mod tests {
 
         // Tile 2 scrolled away while cover 1 loaded.
         requests.check();
-        requests.finished(&1);
+        requests.finished(&1, 0);
         assert!(requests.start().is_empty());
         assert!(!requests.has_waiting());
     }
@@ -324,7 +341,11 @@ mod tests {
             "two loaders stay for the tiles"
         );
 
-        assert!(!requests.finished(&10), "no tile shows a prefetched cover");
+        assert_eq!(
+            requests.finished(&10, 0),
+            Some(false),
+            "no tile shows a prefetched cover"
+        );
         assert_eq!(requests.start(), [12]);
     }
 
@@ -339,7 +360,7 @@ mod tests {
         requests.ask(1);
         assert_eq!(requests.check(), [1]);
 
-        assert!(requests.finished(&1), "the tile is told");
+        assert_eq!(requests.finished(&1, 0), Some(true), "the tile is told");
         assert_eq!(requests.start(), [10]);
     }
 
@@ -350,7 +371,7 @@ mod tests {
         assert_eq!(requests.start(), [10]);
 
         requests.prefetch(vec![20]);
-        requests.finished(&10);
+        requests.finished(&10, 0);
         assert_eq!(requests.start(), [20]);
     }
 
@@ -362,7 +383,7 @@ mod tests {
 
         requests.ask(10);
         assert!(confirm(&mut requests, &[10]).is_empty(), "not loaded twice");
-        assert!(requests.finished(&10));
+        assert_eq!(requests.finished(&10, 0), Some(true));
     }
 
     #[test]
@@ -376,5 +397,20 @@ mod tests {
         assert_eq!(nearby(0, 3, 5, Direction::Down), [3, 4]);
         assert_eq!(nearby(3, 3, 5, Direction::Down), [2, 1, 0]);
         assert!(nearby(0, 3, 0, Direction::Down).is_empty());
+    }
+
+    #[test]
+    fn a_load_started_before_the_requests_were_cleared_is_dropped() {
+        let mut requests = CoverRequests::new(4, 2);
+        requests.ask(1);
+        requests.check();
+        requests.ask(1);
+        assert_eq!(requests.check(), [1]);
+        let epoch = requests.epoch();
+
+        requests.clear();
+
+        assert_eq!(requests.finished(&1, epoch), None);
+        assert_eq!(requests.finished(&1, requests.epoch()), Some(false));
     }
 }

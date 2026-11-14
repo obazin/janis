@@ -12,10 +12,75 @@ use std::hash::Hash;
 use base64::Engine as _;
 use slint::{Rgba8Pixel, SharedPixelBuffer};
 
-use crate::library::{self, Track};
-use crate::persistence::DbState;
+use crate::library::Track;
 
 pub type Pixels = SharedPixelBuffer<Rgba8Pixel>;
+
+/// Which loads of the art of whatever plays are still wanted. Each change of
+/// track, and each art a station announces, moves an epoch on, so a slow load
+/// that ends after the listener moved on is recognised and dropped.
+#[derive(Debug, Default)]
+pub struct CurrentArtRequests {
+    epoch: u64,
+    /// The track whose cover is loaded or loading.
+    track_id: Option<i64>,
+    failed: bool,
+    stream_epoch: u64,
+}
+
+/// What asking for the cover of a track leads to.
+#[derive(Debug, PartialEq, Eq)]
+pub enum CoverRequest {
+    /// The cover shown already belongs to that track: nothing to do.
+    Unchanged,
+    /// The cover shown is cleared, and loaded under the epoch given when
+    /// there is a track.
+    Cleared { load: Option<u64> },
+}
+
+impl CurrentArtRequests {
+    /// The cover of `track_id`, or none.
+    pub fn request(&mut self, track_id: Option<i64>) -> CoverRequest {
+        // The engine confirms a track the click already showed: its cover is
+        // not read a second time, unless it failed.
+        if track_id.is_some() && self.track_id == track_id && !self.failed {
+            return CoverRequest::Unchanged;
+        }
+        self.track_id = track_id;
+        self.epoch += 1;
+        self.failed = false;
+        CoverRequest::Cleared {
+            load: track_id.map(|_| self.epoch),
+        }
+    }
+
+    /// A cover load ended. True when it is still wanted; a failure is then
+    /// remembered, so the art tile says so and the cover is read again when
+    /// asked for again.
+    pub fn loaded(&mut self, epoch: u64, succeeded: bool) -> bool {
+        if epoch != self.epoch {
+            return false;
+        }
+        self.failed = !succeeded;
+        true
+    }
+
+    /// Whether the cover of the current track failed to load.
+    pub fn failed(&self) -> bool {
+        self.failed
+    }
+
+    /// A station announced other art, or none: the epoch its decode runs under.
+    pub fn request_stream(&mut self) -> u64 {
+        self.stream_epoch += 1;
+        self.stream_epoch
+    }
+
+    /// Whether a station art decode started under `epoch` is still wanted.
+    pub fn stream_is_current(&self, epoch: u64) -> bool {
+        epoch == self.stream_epoch
+    }
+}
 
 /// The longest side of the art shown large on Now Playing, in pixels.
 pub const HERO_SIDE: u32 = 800;
@@ -28,28 +93,17 @@ const LARGEST_DECODE_BYTES: u64 = 512 * 1024 * 1024;
 /// Covers kept in memory at once for lists and grids.
 pub const THUMBNAIL_LIMIT: usize = 300;
 
-/// A track's cover, scaled to fit `longest_side`. `Ok(None)` when neither the
-/// file nor its album carries art; `Err` when art exists but cannot be read.
-pub fn track_cover(
-    database: &DbState,
-    track_id: i64,
-    longest_side: u32,
-) -> Result<Option<Pixels>, String> {
-    match library::track_cover(database, track_id) {
-        Some(art) => decode_base64(&art.data_base64, longest_side).map(Some),
-        None => Ok(None),
-    }
-}
-
 /// The picture in a `data:` URL, scaled to fit `longest_side`.
 pub fn data_url_cover(url: &str, longest_side: u32) -> Result<Pixels, String> {
     let (_, encoded) = url
         .split_once(";base64,")
         .ok_or_else(|| "cover is not a base64 data URL".to_owned())?;
-    decode_base64(encoded, longest_side)
+    base64_cover(encoded, longest_side)
 }
 
-fn decode_base64(encoded: &str, longest_side: u32) -> Result<Pixels, String> {
+/// A base64-encoded picture, as a file embeds it, scaled to fit
+/// `longest_side`.
+pub fn base64_cover(encoded: &str, longest_side: u32) -> Result<Pixels, String> {
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(encoded)
         .map_err(|error| format!("decode cover base64: {error}"))?;
@@ -256,5 +310,46 @@ mod tests {
         assert!(data_url_cover("https://example.invalid/cover.png", 100).is_err());
         assert!(data_url_cover("data:image/png;base64,AAAA", 100).is_err());
         assert!(data_url_cover("data:image/png;base64,***", 100).is_err());
+    }
+
+    #[test]
+    fn a_confirmed_track_keeps_its_cover_and_a_failed_one_is_read_again() {
+        let mut requests = CurrentArtRequests::default();
+        let CoverRequest::Cleared { load: Some(epoch) } = requests.request(Some(1)) else {
+            panic!("the first cover loads");
+        };
+        assert_eq!(requests.request(Some(1)), CoverRequest::Unchanged);
+        assert!(requests.loaded(epoch, false));
+        assert!(requests.failed());
+        assert!(matches!(
+            requests.request(Some(1)),
+            CoverRequest::Cleared { load: Some(_) }
+        ));
+        assert!(!requests.failed());
+    }
+
+    #[test]
+    fn a_cover_for_a_track_the_listener_left_is_dropped() {
+        let mut requests = CurrentArtRequests::default();
+        let CoverRequest::Cleared { load: Some(first) } = requests.request(Some(1)) else {
+            panic!("the first cover loads");
+        };
+        requests.request(Some(2));
+        assert!(!requests.loaded(first, false));
+        assert!(
+            !requests.failed(),
+            "a stale failure is not the current one's"
+        );
+        assert_eq!(requests.request(None), CoverRequest::Cleared { load: None });
+    }
+
+    #[test]
+    fn station_art_announced_again_drops_the_decode_still_in_flight() {
+        let mut requests = CurrentArtRequests::default();
+        let first = requests.request_stream();
+        assert!(requests.stream_is_current(first));
+        let second = requests.request_stream();
+        assert!(!requests.stream_is_current(first));
+        assert!(requests.stream_is_current(second));
     }
 }
