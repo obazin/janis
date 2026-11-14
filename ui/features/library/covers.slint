@@ -1,5 +1,9 @@
 // Cover art for lists and grids, fetched as tiles come into view.
 
+// The long lists that report what they show, so the covers just beyond it
+// load ahead of a scroll. `none` is a list that does not report.
+export enum CoverList { none, albums, artists, songs }
+
 export global Covers {
     // Bumped whenever a cover finishes loading, so tiles look theirs up again.
     in property <int> revision;
@@ -9,4 +13,6 @@ export global Covers {
     pure callback thumbnail(track-id: int, revision: int) -> image;
     // True when the track's art exists but could not be read.
     pure callback unavailable(track-id: int, revision: int) -> bool;
+    // The places `first` to `first + count` of `list` are drawn.
+    callback in-view(list: CoverList, first: int, count: int);
 }

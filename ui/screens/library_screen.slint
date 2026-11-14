@@ -8,6 +8,7 @@ import { SectionLabel } from "../atoms/section_label.slint";
 import { ScreenHeader } from "../molecules/screen_header.slint";
 import { ScrollArea } from "../molecules/scroll_area.slint";
 import { Library } from "../features/library/library.slint";
+import { CoverList } from "../features/library/covers.slint";
 import { CardGrid } from "../features/library/card_grid.slint";
 import { TrackList } from "../features/library/track_list.slint";
 
@@ -93,6 +94,8 @@ export component LibraryScreen inherits Rectangle {
                 y: 0;
                 visible: !Library.empty && root.grid-tab;
                 cards: Library.tab == "albums" ? Library.albums : Library.artists;
+                // Only the list on show reports what it draws.
+                cover-list: !root.grid-tab ? CoverList.none : Library.tab == "albums" ? CoverList.albums : CoverList.artists;
                 shows-detail: Library.tab == "albums";
                 view-top: page.scroll-offset - body.y;
                 view-height: page.height;
@@ -114,6 +117,7 @@ export component LibraryScreen inherits Rectangle {
                 y: 0;
                 visible: !Library.empty && Library.tab == "songs";
                 tracks: Library.songs;
+                cover-list: Library.tab == "songs" ? CoverList.songs : CoverList.none;
                 view-top: page.scroll-offset - body.y;
                 view-height: page.height;
                 clicked(index) => { Library.song-clicked(index); }

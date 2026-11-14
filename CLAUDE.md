@@ -64,10 +64,11 @@ Development hooks, debug builds only:
 | `src/radio.rs` | The station catalog (`data/stations.json`) and its filters | `audio` (types), `text`, `translations` |
 | `src/visualizer.rs`, `src/halo.rs`, `src/overview.rs` | The oscilloscope trace as path commands; the glow picture behind the Now Playing art; the track overview's alpha mask | nothing (`halo`: `covers` type; `overview`: `audio` and `covers` types) |
 | `src/covers.rs` | Cover art from base64 to pixels; the bounded thumbnail cache | `library`, `persistence` |
+| `src/cover_requests.rs` | Which thumbnails to load: the requests the tiles still in view repeat, then the places just beyond a list at rest, a few at once | nothing |
 | `src/translations.rs`, `src/text.rs` | The catalogs and lookups; label ordering and formatting | `library` (types) |
 | `src/library.rs`, `src/persistence.rs` | The scanner, watched folders, cover lookup; the database, its migrations, the preferences. The only SQL | `audio` (facade functions), rusqlite, walkdir |
 | `src/audio.rs` | The `audio-stack-rs` facade re-exports and the `EngineBridge` event sink | `audio_stack_rs` — the only module that names it |
-| `src/background.rs`, `src/instance.rs`, `src/logging.rs`, `src/platform.rs` | Worker threads; the one-instance guard; the logger; what differs by operating system | std, `log`, Slint's winit window |
+| `src/background.rs`, `src/instance.rs`, `src/logging.rs`, `src/platform.rs` | Worker threads and pools; the one-instance guard; the logger; what differs by operating system | std, `log`, Slint's winit window |
 | `ui/` | The Slint interface in atomic tiers (see `.claude/rules/slint-ui.md`) | tokens and lower tiers |
 
 ## Data flow
@@ -91,7 +92,7 @@ a new track       → Effect::LoadOverview → overview thread → AudioEngine::
 | `Player` | `ui/features/player/player.slint` | What is playing, transport, waveform, track overview, animation clock, queue card, artist spotlight |
 | `Equalizer` | `ui/features/equalizer/equalizer.slint` | Gains, presets, linear phase |
 | `Library` | `ui/features/library/library.slint` | Library, Local Files and Discover lists; library actions |
-| `Covers` | `ui/features/library/covers.slint` | Thumbnails by track id, loaded as tiles appear |
+| `Covers` | `ui/features/library/covers.slint` | Thumbnails by track id, loaded as tiles appear; the slice each long list draws, for prefetching |
 | `Radio` | `ui/features/radio/radio.slint` | Filter chips, the favourites filter, stations, the loaded station and its star |
 | `Settings` | `ui/features/settings/settings.slint` | Playback switches, output device, language |
 | `Jellyfin` | `ui/features/jellyfin/jellyfin.slint` | The server form, its status line, Sign in / Sync now / Sign out |

@@ -28,7 +28,8 @@ use std::time::{Duration, Instant};
 use slint::{ComponentHandle, ModelRc, Timer, TimerMode, VecModel};
 
 use crate::audio::{self, AudioEngine, EngineBridge, EngineEvent};
-use crate::background::Worker;
+use crate::background::{Worker, WorkerPool};
+use crate::cover_requests::CoverRequests;
 use crate::covers;
 use crate::effects::Effect;
 use crate::equalizer::Equalizer;
@@ -97,6 +98,18 @@ pub struct Application {
     /// Bumped when the library is replaced, so a thumbnail read from the
     /// library as it was is recognised and dropped.
     thumbnail_epoch: Cell<u64>,
+    /// The thumbnails tiles asked for that are not cached: waiting to be
+    /// confirmed by the tiles still in view, or loading.
+    cover_requests: RefCell<CoverRequests<covers::CoverKey>>,
+    /// Runs the cover checks while requests wait.
+    cover_timer: Timer,
+    /// What the long list on screen last said it draws, and where it last
+    /// rested.
+    list_windows: Cell<artwork::ListWindows>,
+    /// Waits for the list to rest before its nearby covers are prefetched.
+    prefetch_timer: Timer,
+    /// Where thumbnails load, a few at once.
+    thumbnail_workers: WorkerPool,
     queue_view: Cell<QueueView>,
     now_playing_lists: RefCell<NowPlayingLists>,
     queue_rows: Rc<VecModel<user_interface::QueueRow>>,
@@ -138,6 +151,7 @@ pub struct Application {
     dropped_files: RefCell<Vec<String>>,
     drop_timer: Timer,
     toasts: Rc<VecModel<Toast>>,
+    /// Where the art of whatever plays is read, never behind thumbnails.
     picture_worker: Worker,
     /// Where stations connect and their streams download.
     station_runtime: tokio::runtime::Runtime,
@@ -204,6 +218,14 @@ impl Application {
             current_art: RefCell::new(CurrentArt::default()),
             thumbnails: RefCell::new(covers::BoundedCache::new(covers::THUMBNAIL_LIMIT)),
             thumbnail_epoch: Cell::new(0),
+            cover_requests: RefCell::new(CoverRequests::new(
+                artwork::PARALLEL_THUMBNAILS,
+                artwork::PARALLEL_PREFETCHES,
+            )),
+            cover_timer: Timer::default(),
+            list_windows: Cell::new(artwork::ListWindows::default()),
+            prefetch_timer: Timer::default(),
+            thumbnail_workers: WorkerPool::new("janis thumbnails", artwork::PARALLEL_THUMBNAILS)?,
             queue_view: Cell::new(QueueView::default()),
             now_playing_lists: RefCell::new(NowPlayingLists::default()),
             queue_rows: Rc::new(VecModel::default()),

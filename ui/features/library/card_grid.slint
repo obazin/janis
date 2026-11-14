@@ -1,5 +1,6 @@
 import { Motion } from "../../tokens.slint";
 import { Library, LibraryCard } from "library.slint";
+import { Covers, CoverList } from "covers.slint";
 import { AlbumCard } from "album_card.slint";
 import { LibraryTrackAccordion } from "library_track_accordion.slint";
 
@@ -17,6 +18,9 @@ export component CardGrid inherits Rectangle {
     // Where the visible window starts, measured from the top of the grid.
     in property <length> view-top;
     in property <length> view-height;
+    // Which list the cards are, as told to `Covers.in-view`; `none` reports
+    // nothing.
+    in property <CoverList> cover-list;
     callback card-clicked(index: int);
     // A card was opened: the page brings `line-top`, where its line starts
     // once the panel open before has folded, to the top. `settled-height` is
@@ -70,6 +74,19 @@ export component CardGrid inherits Rectangle {
     property <length> lines-top: root.view-top - max(0px, min(root.accordion-room, root.view-top - root.accordion-top)) - max(0px, min(root.folding-room, root.view-top - root.folding-top));
     property <int> first-line: max(0, floor(root.lines-top / root.line-height));
     property <int> line-span: ceil(root.view-height / root.line-height) + 1;
+
+    // The cards drawn, told to the controller so it loads the covers beyond.
+    property <int> shown-first: root.first-line * root.columns;
+    property <int> shown-count: root.line-span * root.columns;
+    function report-shown() {
+        if root.cover-list != CoverList.none {
+            Covers.in-view(root.cover-list, root.shown-first, root.shown-count);
+        }
+    }
+    init => { root.report-shown(); }
+    changed shown-first => { root.report-shown(); }
+    changed shown-count => { root.report-shown(); }
+    changed cover-list => { root.report-shown(); }
 
     // Only a panel folding above the opened card's line moves that line, so
     // only then does the new panel wait for the fold; under the same line or
