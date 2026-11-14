@@ -858,4 +858,195 @@ mod tests {
         player.toggle_shuffle();
         assert_ne!(player.lists_basis(), next);
     }
+
+    /// A player playing `tracks` from the first, its position reported at
+    /// `position` seconds.
+    fn playing(tracks: Vec<Track>, position: f64, now: Instant) -> Player {
+        let mut player = Player::new(now);
+        let duration = tracks[0].duration_secs;
+        player.play_queue(tracks, 0, now);
+        player.apply(
+            EngineEvent::Position {
+                position_secs: position,
+                duration_secs: duration,
+            },
+            now,
+            &no_stations,
+        );
+        player
+    }
+
+    #[test]
+    fn a_seek_while_paused_moves_the_playhead_at_once_and_it_stays_there() {
+        let now = Instant::now();
+        let mut player = playing(vec![timed_track(1, 200.0)], 20.0, now);
+        player.toggle(now);
+
+        assert_eq!(player.seek_to(0.5, now), [Effect::Seek(100.0)]);
+
+        assert_eq!(player.live_progress(now), 0.5);
+        assert_eq!(player.live_progress(now + Duration::from_secs(30)), 0.5);
+    }
+
+    #[test]
+    fn progress_is_zero_for_a_station_nothing_or_a_track_of_unknown_length() {
+        let now = Instant::now();
+        assert_eq!(Player::new(now).live_progress(now), 0.0);
+        let unknown = playing(vec![timed_track(1, 0.0)], 0.0, now);
+        assert_eq!(unknown.live_progress(now + Duration::from_secs(5)), 0.0);
+        let mut radio = Player::new(now);
+        radio.play_station(station("fip"));
+        radio.apply(state(Mode::Radio, true, 0, Some("fip")), now, &|_| {
+            Some(station("fip"))
+        });
+        assert_eq!(radio.live_progress(now + Duration::from_secs(5)), 0.0);
+    }
+
+    #[test]
+    fn seeking_is_refused_without_a_length_or_a_fraction() {
+        let now = Instant::now();
+        let mut unknown = playing(vec![timed_track(1, 0.0)], 0.0, now);
+        assert!(unknown.seek_to(0.5, now).is_empty());
+        let mut known = playing(vec![timed_track(1, 100.0)], 0.0, now);
+        assert!(known.seek_to(f64::NAN, now).is_empty());
+        assert_eq!(
+            known.seek_to(7.0, now),
+            [Effect::Seek(100.0)],
+            "held to the end"
+        );
+    }
+
+    #[test]
+    fn the_engine_state_corrects_the_shuffle_and_repeat_switches() {
+        let now = Instant::now();
+        let mut player = playing(vec![timed_track(1, 100.0)], 0.0, now);
+        player.toggle_shuffle();
+        assert!(player.shuffle());
+        player.apply(
+            EngineEvent::State {
+                playing: true,
+                mode: Mode::Local,
+                index: 0,
+                queue_len: 1,
+                shuffle: false,
+                repeat: true,
+                station_id: None,
+            },
+            now,
+            &no_stations,
+        );
+        assert!(!player.shuffle());
+        assert!(player.repeat());
+    }
+
+    #[test]
+    fn a_radio_state_naming_the_station_shown_keeps_it_and_one_naming_none_clears_it() {
+        let now = Instant::now();
+        let mut player = Player::new(now);
+        player.play_station(station("fip"));
+        let looked_up = std::cell::Cell::new(0);
+        let lookup = |id: &str| {
+            looked_up.set(looked_up.get() + 1);
+            Some(station(id))
+        };
+        player.apply(state(Mode::Radio, true, 0, Some("fip")), now, &lookup);
+        assert_eq!(looked_up.get(), 0, "the station shown is kept as it is");
+        assert_eq!(
+            player.station().map(|station| station.id.as_str()),
+            Some("fip")
+        );
+
+        player.apply(state(Mode::Radio, true, 0, None), now, &lookup);
+        assert_eq!(player.station(), None);
+    }
+
+    #[test]
+    fn a_track_change_beyond_the_queue_clears_the_cover_and_the_overview() {
+        let now = Instant::now();
+        let mut player = playing(vec![timed_track(1, 100.0)], 30.0, now);
+        assert_eq!(
+            player.apply(EngineEvent::TrackChanged { index: 5 }, now, &no_stations),
+            [Effect::LoadCover(None), Effect::LoadOverview(None)]
+        );
+        assert_eq!(player.position_seconds(), 30.0, "the position stays");
+    }
+
+    #[test]
+    fn playing_a_queue_over_a_station_clears_the_station_and_what_it_announced() {
+        let now = Instant::now();
+        let mut player = Player::new(now);
+        player.play_station(station("fip"));
+        player.apply(
+            EngineEvent::StreamMetadata {
+                title: Some("Song".to_owned()),
+                artist: None,
+                album: None,
+                cover: None,
+            },
+            now,
+            &no_stations,
+        );
+        let tracks = vec![timed_track(1, 100.0)];
+
+        let effects = player.play_queue(tracks.clone(), 0, now);
+
+        assert_eq!(
+            effects,
+            [
+                Effect::ShowStreamCover(None),
+                Effect::LoadCover(Some(1)),
+                Effect::LoadOverview(Some(1)),
+                Effect::LoadQueue { tracks, index: 0 },
+            ]
+        );
+        assert_eq!(player.station(), None);
+        assert_eq!(player.stream().title, None);
+        assert!(!player.connecting());
+    }
+
+    #[test]
+    fn a_station_connects_with_the_previous_art_and_overview_cleared() {
+        let now = Instant::now();
+        let mut player = playing(vec![timed_track(1, 100.0)], 30.0, now);
+        let fip = station("fip");
+
+        let effects = player.play_station(fip.clone());
+
+        assert_eq!(
+            effects,
+            [
+                Effect::ShowStreamCover(None),
+                Effect::LoadCover(None),
+                Effect::LoadOverview(None),
+                Effect::ConnectStation {
+                    station: fip,
+                    epoch: 2,
+                },
+            ]
+        );
+        assert!(player.connecting());
+        assert_eq!(player.position_seconds(), 0.0);
+    }
+
+    #[test]
+    fn a_station_pauses_and_resumes() {
+        let now = Instant::now();
+        let mut player = Player::new(now);
+        player.play_station(station("fip"));
+        player.apply(state(Mode::Radio, true, 0, Some("fip")), now, &|_| {
+            Some(station("fip"))
+        });
+        assert_eq!(player.toggle(now), [Effect::Toggle]);
+        assert!(!player.playing());
+        assert_eq!(player.toggle(now), [Effect::Toggle]);
+        assert!(player.playing());
+    }
+
+    #[test]
+    fn the_transport_buttons_reach_the_engine() {
+        let player = Player::new(Instant::now());
+        assert_eq!(player.next(), [Effect::Next]);
+        assert_eq!(player.previous(), [Effect::Previous]);
+        assert_eq!(player.jump_to(3), [Effect::JumpTo(3)]);
+    }
 }
