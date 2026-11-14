@@ -102,6 +102,9 @@ Superseded: the loudness thread at normal priority, writing its results to the d
 **D56 · A scan follows links and counts what it cannot enter** — *current* (2026-11-14)
 The scanner follows symbolic links, so a watched folder may link to music on another disk or a network share. A link back up the tree is noticed by the walk and ends that branch; it, an unreadable folder and a link to nothing each count as one skipped entry in the scan report, with the detail in the log. The stored path is the one under the watched folder, through the link, so pruning and the reachability guard read it as they read any other file. Before, links were not followed and a walk error was dropped without a count.
 
+**D57 · Watched folders do not nest** — *current* (2026-11-14)
+A track belongs to one watched folder, through `folder_id`. A folder inside a watched one used to take the tracks it held from the outer folder, and removing it then deleted tracks the outer folder still covered, until the next rescan. Adding such a folder is now refused (`ScanError::InsideWatched`, an `error.folderInsideWatched` toast naming the outer folder). Adding a folder that holds watched folders takes them over in the registration's transaction: their tracks move to it, keeping their loudness, and their rows go. Paths are compared whole component by whole component with links resolved, so `/music/a` holds `/music/a/b` but not `/music/ab`; adding a watched folder again rescans it.
+
 ## Interface
 
 **D15 · Atomic design in three layers** — *current* (first version)
