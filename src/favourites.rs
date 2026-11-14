@@ -87,4 +87,13 @@ mod tests {
         assert!(favourites.contains("jazz"));
         assert!(!favourites.contains("rock"));
     }
+
+    #[test]
+    fn restoring_replaces_the_stars_already_held() {
+        let mut favourites = FavouriteStations::default();
+        favourites.toggle("fip");
+        favourites.restore(vec!["nova".to_owned()]);
+        assert!(!favourites.contains("fip"));
+        assert!(favourites.contains("nova"));
+    }
 }

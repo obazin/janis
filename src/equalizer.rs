@@ -226,13 +226,18 @@ mod tests {
 
         assert_eq!(equalizer.gains()[..5], [3.5, 12.0, 0.0, 0.5, -12.0]);
         assert_eq!(equalizer.preset(), CUSTOM_PRESET);
-        assert!(matches!(
-            effects.as_slice(),
+        let mut expected = vec![0.0; EQ_BAND_COUNT];
+        expected[..5].copy_from_slice(&[3.5, 12.0, 0.0, 0.5, -12.0]);
+        assert_eq!(
+            effects,
             [
-                Effect::SetEqualizerGains(_),
-                Effect::PersistEqualizerDebounced { .. }
+                Effect::SetEqualizerGains(expected.clone()),
+                Effect::PersistEqualizerDebounced {
+                    gains: expected,
+                    preset: CUSTOM_PRESET.to_owned(),
+                }
             ]
-        ));
+        );
         assert!(equalizer.set_band(EQ_BAND_COUNT, 1.0).is_empty());
     }
 
@@ -339,5 +344,46 @@ mod tests {
         assert_eq!(equalizer.latency_milliseconds(), Some(43));
         equalizer.apply_engine_report(false, 0.0426);
         assert_eq!(equalizer.latency_milliseconds(), None);
+    }
+
+    #[test]
+    fn reset_applies_and_saves_the_flat_curve() {
+        let mut equalizer = Equalizer::default();
+        equalizer.set_preset("rock");
+        assert_eq!(
+            equalizer.reset(),
+            [
+                Effect::SetEqualizerGains(vec![0.0; EQ_BAND_COUNT]),
+                Effect::PersistEqualizer {
+                    gains: vec![0.0; EQ_BAND_COUNT],
+                    preset: "flat".to_owned(),
+                }
+            ]
+        );
+    }
+
+    #[test]
+    fn custom_is_not_a_preset_that_can_be_applied() {
+        let mut equalizer = Equalizer::default();
+        equalizer.set_band(0, 6.0);
+        assert!(equalizer.set_preset(CUSTOM_PRESET).is_empty());
+        assert_eq!(equalizer.gains()[0], 6.0);
+    }
+
+    #[test]
+    fn restoring_adopts_the_saved_gains_preset_and_mode_without_saving_them_back() {
+        let mut equalizer = Equalizer::default();
+        let mut saved = vec![0.0; EQ_BAND_COUNT];
+        saved[2] = -4.5;
+        assert_eq!(
+            equalizer.restore(&saved, "custom", true),
+            [
+                Effect::SetEqualizerGains(saved.clone()),
+                Effect::SetLinearPhase(true)
+            ]
+        );
+        assert_eq!(equalizer.gains().to_vec(), saved);
+        assert_eq!(equalizer.preset(), "custom");
+        assert!(equalizer.linear_phase());
     }
 }

@@ -139,4 +139,29 @@ mod tests {
         );
         assert!(options.enabled(PlaybackOption::Exclusive));
     }
+
+    #[test]
+    fn the_gapless_and_normalization_switches_reach_the_engine() {
+        let mut options = PlaybackOptions::default();
+        assert_eq!(
+            options.toggle(PlaybackOption::Gapless),
+            [
+                Effect::PersistPlaybackOption {
+                    option: PlaybackOption::Gapless,
+                    enabled: false,
+                },
+                Effect::SetGapless(false),
+            ]
+        );
+        assert_eq!(
+            options.toggle(PlaybackOption::Normalize),
+            [
+                Effect::PersistPlaybackOption {
+                    option: PlaybackOption::Normalize,
+                    enabled: false,
+                },
+                Effect::SetNormalize(false),
+            ]
+        );
+    }
 }

@@ -564,4 +564,75 @@ mod tests {
         assert!(!card.signed_in);
         assert_eq!(card.status_key, None);
     }
+
+    #[test]
+    fn a_sign_in_answer_after_signing_out_is_dropped() {
+        let mut state = signed_in();
+        let epoch = sign_in_epoch(&state.sign_in("http://other.local", "someone", "pass"));
+        state.sign_out();
+
+        assert!(state.sign_in_finished(epoch, Ok(server())).is_empty());
+        assert_eq!(state.server(), None);
+        assert_eq!(state.phase(), Phase::SignedOut);
+    }
+
+    #[test]
+    fn sync_now_is_ignored_while_a_sync_runs_or_when_signed_out() {
+        assert!(MediaServerState::default().sync().is_empty());
+        let mut state = signed_in();
+        sync_epoch(&state.sync());
+        assert!(state.busy());
+        assert!(state.sync().is_empty(), "Sync now pressed twice");
+        assert!(
+            state
+                .sign_in("http://other.local", "someone", "pass")
+                .is_empty(),
+            "a sign-in waits for the sync"
+        );
+    }
+
+    #[test]
+    fn a_failed_sync_raises_one_toast_that_the_next_failure_joins() {
+        let mut state = signed_in();
+        let epoch = sync_epoch(&state.sync());
+        assert_eq!(
+            state.sync_finished(epoch, Err(Failure::Unreachable("down".to_owned())), 200),
+            [Effect::NotifyError {
+                key: "error.jellyfinSync",
+                parameters: Vec::new(),
+                dedupe_key: Some("jellyfin-sync"),
+            }]
+        );
+        assert_eq!(state.phase(), Phase::SignedIn, "the songs read before stay");
+        assert_eq!(state.message_key(), Some("jellyfin.status.unreachable"));
+    }
+
+    #[test]
+    fn a_successful_sign_in_clears_the_status_line() {
+        let mut state = MediaServerState::default();
+        let epoch = sign_in_epoch(&state.sign_in("http://jellyfin.local:8096", "listener", "x"));
+        assert_eq!(state.message_key(), Some("jellyfin.status.signingIn"));
+        let epoch = sync_epoch(&state.sign_in_finished(epoch, Ok(server())));
+        assert_eq!(state.message_key(), Some("jellyfin.status.syncing"));
+        state.sync_finished(epoch, Ok(ScanReport::default()), 300);
+        assert_eq!(state.message_key(), None);
+    }
+
+    #[test]
+    fn every_failure_names_a_status_line_both_languages_hold() {
+        use crate::translations::{Language, Translations};
+        for failure in [
+            Failure::InvalidAddress,
+            Failure::Unreachable(String::new()),
+            Failure::NotJellyfin(String::new()),
+            Failure::CredentialsRejected,
+            Failure::TokenRejected,
+            Failure::Other(String::new()),
+        ] {
+            let key = failure_key(&failure);
+            for language in Language::ALL {
+                assert_ne!(Translations::new(language).text(key), key, "{failure:?}");
+            }
+        }
+    }
 }
