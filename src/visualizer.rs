@@ -180,4 +180,30 @@ mod tests {
         let commands = visualizer.path_commands(318.0, 100.0);
         assert!(!commands.contains("NaN"), "{commands}");
     }
+
+    #[test]
+    fn a_frame_too_short_to_draw_falls_back_to_the_synthetic_trace() {
+        let mut visualizer = Visualizer::default();
+        let short = [128u8; WAVE_POINTS - 1];
+        for _ in 0..100 {
+            visualizer.tick(0.016, Some(&short), true);
+        }
+        let peak = visualizer
+            .wave()
+            .iter()
+            .fold(0.0f32, |peak, sample| peak.max(sample.abs()));
+        assert!(
+            peak > 0.5,
+            "a silent frame would have drawn a flat line: {peak}"
+        );
+    }
+
+    #[test]
+    fn a_long_pause_between_frames_counts_as_one_short_step() {
+        let mut stalled = Visualizer::default();
+        stalled.tick(60.0, None, true);
+        let mut stepped = Visualizer::default();
+        stepped.tick(LONGEST_STEP_SECONDS, None, true);
+        assert_eq!(stalled.wave(), stepped.wave());
+    }
 }

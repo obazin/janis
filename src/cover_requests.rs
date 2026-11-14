@@ -413,4 +413,99 @@ mod tests {
         assert_eq!(requests.finished(&1, epoch), None);
         assert_eq!(requests.finished(&1, requests.epoch()), Some(false));
     }
+
+    #[test]
+    fn with_no_room_for_prefetches_none_starts() {
+        let mut requests = CoverRequests::new(4, 0);
+        requests.prefetch(vec![1, 2]);
+        assert!(requests.start().is_empty());
+    }
+
+    #[test]
+    fn finishing_a_cover_nobody_asked_for_tells_no_tile() {
+        let mut requests: CoverRequests<u32> = CoverRequests::new(4, 2);
+        assert_eq!(requests.finished(&7, requests.epoch()), Some(false));
+    }
+
+    #[test]
+    fn a_prefetch_already_loading_for_a_tile_is_not_started_again() {
+        let mut requests = CoverRequests::new(4, 2);
+        requests.ask(1);
+        requests.check();
+        requests.ask(1);
+        assert_eq!(requests.check(), [1]);
+        requests.prefetch(vec![1, 2]);
+        assert_eq!(requests.start(), [2]);
+    }
+
+    #[test]
+    fn an_empty_window_or_one_past_the_end_has_no_places_nearby() {
+        assert!(nearby(0, 0, 100, Direction::Down).is_empty());
+        assert!(nearby(200, 10, 100, Direction::Down)
+            .iter()
+            .all(|place| *place < 100));
+    }
+
+    /// What a test may do to the requests.
+    #[derive(Clone, Debug)]
+    enum Step {
+        Ask(u8),
+        Check,
+        Finish(u8),
+        Prefetch(Vec<u8>),
+        Start,
+    }
+
+    fn step() -> impl proptest::strategy::Strategy<Value = Step> {
+        use proptest::prelude::*;
+        prop_oneof![
+            (0u8..12).prop_map(Step::Ask),
+            Just(Step::Check),
+            (0u8..12).prop_map(Step::Finish),
+            proptest::collection::vec(0u8..12, 0..6).prop_map(Step::Prefetch),
+            Just(Step::Start),
+        ]
+    }
+
+    proptest::proptest! {
+        #[test]
+        fn loads_never_exceed_their_limits_and_no_cover_starts_twice(
+            steps in proptest::collection::vec(step(), 0..80),
+        ) {
+            let mut requests = CoverRequests::new(3, 1);
+            let mut loading: std::collections::HashSet<u8> = Default::default();
+            for step in steps {
+                let started = match step {
+                    Step::Ask(key) => {
+                        requests.ask(key);
+                        Vec::new()
+                    }
+                    Step::Check => requests.check(),
+                    Step::Finish(key) => {
+                        let epoch = requests.epoch();
+                        if requests.finished(&key, epoch).is_some() {
+                            loading.remove(&key);
+                        }
+                        Vec::new()
+                    }
+                    Step::Prefetch(keys) => {
+                        requests.prefetch(keys);
+                        Vec::new()
+                    }
+                    Step::Start => requests.start(),
+                };
+                for key in started {
+                    proptest::prop_assert!(loading.insert(key), "cover {} started twice", key);
+                }
+                proptest::prop_assert!(requests.loading.len() <= 3);
+                proptest::prop_assert!(
+                    requests.loading.values().filter(|loading| loading.prefetched).count() <= 1
+                );
+                proptest::prop_assert!(requests
+                    .waiting
+                    .keys()
+                    .all(|key| !requests.loading.contains_key(key)));
+            }
+        }
+    }
 }

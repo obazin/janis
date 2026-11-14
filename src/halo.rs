@@ -85,4 +85,23 @@ mod tests {
     fn no_colors_draw_nothing() {
         assert!(picture(&[]).as_slice().iter().all(|pixel| pixel.a == 0));
     }
+
+    #[test]
+    fn a_single_colour_glows_that_colour_all_around() {
+        let pixels = picture(&[[200, 40, 120]]);
+        let side = pixels.width() as usize;
+        let at = |x: usize, y: usize| pixels.as_slice()[y * side + x];
+        // The glow fades with the distance, the hue does not: wherever it
+        // shows, red, green and blue keep the colour's proportions.
+        for pixel in [
+            at(side / 2, side / 8),
+            at(side * 7 / 8, side / 2),
+            at(side / 8, side / 2),
+        ] {
+            assert!(pixel.a > 0);
+            let ratio = |channel: u8| f32::from(channel) / f32::from(pixel.r);
+            assert!((ratio(pixel.g) - 40.0 / 200.0).abs() < 0.05, "{pixel:?}");
+            assert!((ratio(pixel.b) - 120.0 / 200.0).abs() < 0.05, "{pixel:?}");
+        }
+    }
 }
