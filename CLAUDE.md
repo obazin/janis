@@ -61,6 +61,7 @@ Development hooks, debug builds only:
 | `src/jellyfin.rs` | The Jellyfin client (sign-in, song listing, pictures) and the pure mapping of its answers | `audio` (types), `library` (types), `persistence` (types), reqwest |
 | `src/notifications.rs` | Error notifications, deduplicated by key | nothing |
 | `src/library_view.rs` | Pure: album and artist grouping, search, the Now Playing lists, the Library selection | `library` (types), `text`, `translations` |
+| `src/now_playing.rs` | Pure: what Now Playing and the mini player say about what plays, and which cover they show | `audio` (types), `library_view`, `player`, `text`, `translations` |
 | `src/radio.rs` | The station catalog (`data/stations.json`) and its filters | `audio` (types), `text`, `translations` |
 | `src/visualizer.rs`, `src/halo.rs`, `src/overview.rs` | The oscilloscope trace as path commands; the glow picture behind the Now Playing art; the track overview's alpha mask | nothing (`halo`: `covers` type; `overview`: `audio` and `covers` types) |
 | `src/covers.rs` | Cover art from base64 to pixels; the bounded thumbnail cache | `library`, `persistence` |

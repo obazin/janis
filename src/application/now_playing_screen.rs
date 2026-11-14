@@ -12,6 +12,7 @@ use crate::audio::Mode;
 use crate::halo;
 use crate::library::Track;
 use crate::library_view::{self, AlbumGroup, QueueView};
+use crate::now_playing;
 use crate::player::Player;
 use crate::text;
 use crate::translations::Translations;
@@ -23,8 +24,6 @@ use crate::user_interface::{self, Tokens};
 /// playback costs the graphics processor; thirty frames a second halves it
 /// against sixty.
 const FRAME_INTERVAL: Duration = Duration::from_millis(33);
-/// The seed of the art shown when nothing is loaded.
-const IDLE_ART_SEED: &str = "janis";
 
 /// What the rows of the Now Playing lists stand for, kept so a click on a
 /// row finds what to play.
@@ -173,8 +172,7 @@ impl Application {
         view.set_repeat(player.repeat());
         view.set_volume(player.volume() as f32);
 
-        self.show_current_summary(&view, &player, &translations);
-        self.show_current_details(&view, &player, &translations);
+        self.show_current(&view, &player, &translations);
         self.refresh_output_readout(&player);
         self.refresh_active_station(&player);
         self.refresh_track_overview(&player);
@@ -191,145 +189,43 @@ impl Application {
         }
     }
 
-    /// What plays, as the mini player and the art tile show it: a title, a
-    /// line under it, and the art.
-    fn show_current_summary(
+    /// What plays, as the mini player, the art tile and Now Playing show it.
+    fn show_current(
         &self,
         view: &user_interface::Player<'_>,
         player: &Player,
         translations: &Translations,
     ) {
+        let text = now_playing::now_playing_text(player, translations);
+        view.set_title(text.title.into());
+        view.set_subtitle(text.subtitle.into());
+        view.set_gradient_index(text.gradient_index as i32);
+        view.set_local(text.local);
+        view.set_radio(text.radio);
+        view.set_hero_title(text.hero_title.into());
+        view.set_initials(text.initials.into());
+        view.set_elapsed(text.elapsed.into());
+        view.set_total(text.total.into());
+        view.set_eyebrow(text.eyebrow.into());
+        view.set_quality(text.quality.into());
+        view.set_lossless(text.lossless);
+        view.set_artist(text.artist.into());
+        view.set_composer(text.composer.into());
+        view.set_album(text.album.into());
+        view.set_album_line(text.album_line.into());
+        view.set_genre(text.genre.into());
+        view.set_station_name(text.station_name.into());
+        view.set_station_genre(text.station_genre.into());
+
         let art = self.current_art.borrow();
-        let current = player.current();
-        let station = player.station();
-        view.set_title(
-            current
-                .map(|track| track.title.as_str())
-                .or(station.map(|station| station.name.as_str()))
-                .unwrap_or("—")
-                .into(),
-        );
-        view.set_subtitle(
-            match (current, station) {
-                (Some(track), _) => track
-                    .artist
-                    .clone()
-                    .unwrap_or_else(|| translations.text("common.unknownArtist")),
-                (None, Some(station)) => translations.text(&station.genre_key),
-                (None, None) => String::new(),
-            }
-            .into(),
-        );
-        view.set_gradient_index(match (current, station) {
-            (_, Some(station)) => station.gradient_index % text::ART_GRADIENT_COUNT,
-            (Some(track), None) => text::art_gradient_index(&library_view::art_seed(track)),
-            (None, None) => text::art_gradient_index(IDLE_ART_SEED),
-        } as i32);
-        let cover = if player.mode() == Mode::Radio {
+        let shown = now_playing::cover_shown(player.mode(), art.track_cover_failed);
+        let cover = if shown.stream {
             art.stream_cover.clone()
         } else {
             art.track_cover.clone()
         };
         view.set_cover(cover.unwrap_or_default());
-        view.set_cover_unavailable(player.mode() == Mode::Local && art.track_cover_failed);
-    }
-
-    /// What plays, as Now Playing spells it out: the hero title, the times,
-    /// and every tag the track or the station gave.
-    fn show_current_details(
-        &self,
-        view: &user_interface::Player<'_>,
-        player: &Player,
-        translations: &Translations,
-    ) {
-        let current = player.current();
-        let station = player.station();
-        let stream = player.stream();
-        let hero_title = current
-            .map(|track| track.title.as_str())
-            .or(stream.title.as_deref())
-            .or(station.map(|station| station.name.as_str()))
-            .unwrap_or_default();
-        view.set_local(current.is_some());
-        view.set_radio(station.is_some());
-        view.set_hero_title(hero_title.into());
-        view.set_initials(text::art_initials(hero_title).into());
-        view.set_elapsed(text::format_time(player.position_seconds()).into());
-        view.set_total(
-            if current.is_some() {
-                text::format_time(player.duration_seconds())
-            } else {
-                translations.text("radio.live")
-            }
-            .into(),
-        );
-        view.set_eyebrow(
-            match (current, station) {
-                (Some(track), _) => match &track.album {
-                    Some(album) => {
-                        translations.translate("now.eyebrow", &[("album", album.clone())])
-                    }
-                    None => translations.text("now.eyebrowNoAlbum"),
-                },
-                (None, Some(station)) => {
-                    translations.translate("now.eyebrowRadio", &[("station", station.name.clone())])
-                }
-                (None, None) => String::new(),
-            }
-            .into(),
-        );
-        view.set_quality(current.map(text::quality_label).unwrap_or_default().into());
-        view.set_lossless(current.is_some_and(|track| track.lossless));
-        view.set_artist(
-            match current {
-                Some(track) => track
-                    .artist
-                    .clone()
-                    .unwrap_or_else(|| translations.text("common.unknownArtist")),
-                None => stream.artist.clone().unwrap_or_default(),
-            }
-            .into(),
-        );
-        view.set_composer(
-            current
-                .and_then(|track| track.composer.clone())
-                .unwrap_or_default()
-                .into(),
-        );
-        view.set_album(
-            match current {
-                Some(track) => track
-                    .album
-                    .clone()
-                    .unwrap_or_else(|| translations.text("common.unknownAlbum")),
-                None => stream.album.clone().unwrap_or_default(),
-            }
-            .into(),
-        );
-        view.set_album_line(
-            current
-                .and_then(|track| library_view::album_line(track, translations))
-                .unwrap_or_default()
-                .into(),
-        );
-        view.set_genre(
-            current
-                .and_then(|track| track.genre.clone())
-                .unwrap_or_default()
-                .into(),
-        );
-        view.set_station_name(
-            station
-                .map(|station| station.name.clone())
-                .unwrap_or_default()
-                .into(),
-        );
-        view.set_station_genre(
-            station
-                .map(|station| translations.text(&station.genre_key))
-                .unwrap_or_default()
-                .into(),
-        );
+        view.set_cover_unavailable(shown.unavailable);
     }
 
     /// Rebuilds the lists Now Playing shows around the current track: the
