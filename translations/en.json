@@ -46,6 +46,7 @@
     "library.tab.artists": "Artists",
     "library.tab.albums": "Albums",
     "library.tab.songs": "Songs",
+    "library.tab.favourites": "Favourites",
     "library.recentlyAdded": "Recently added",
     "library.collapseSelection": "Collapse selection",
     "library.tracks.one": "{count} track",
@@ -54,6 +55,10 @@
     "library.playlistsSoon.desc": "Creating and editing playlists lands in a future release. Browse your albums, artists and songs meanwhile.",
     "library.empty.title": "Your library is empty",
     "library.empty.desc": "Add a folder to scan, or drop audio files anywhere in the window.",
+    "library.favouriteAdd": "Add to favourites",
+    "library.favouriteRemove": "Remove from favourites",
+    "library.favourites.empty.title": "No favourite songs yet",
+    "library.favourites.empty.desc": "Star a song in any list, or on Now Playing, to find it here. The songs you star on your Jellyfin server appear here too.",
     "discover.eyebrow": "From your library",
     "discover.title": "Discover",
     "discover.recentAlbums": "Recently added albums",
@@ -241,5 +246,7 @@
     "error.preferences": "Your choice couldn't be saved — it will be forgotten on the next launch",
     "error.jellyfinSync": "Couldn't read your Jellyfin songs — the server may be unreachable",
     "error.jellyfinSignInAgain": "Jellyfin signed Janis out — sign in again in Settings",
+    "error.favouriteAdd": "Couldn't star the song on your Jellyfin server — the server may be unreachable",
+    "error.favouriteRemove": "Couldn't take the song's star away on your Jellyfin server — the server may be unreachable",
     "notification.dismiss": "Dismiss"
 }

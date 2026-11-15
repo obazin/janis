@@ -52,6 +52,8 @@ export global Player {
     in property <int> gradient-index;
     in property <bool> cover-unavailable;
     in property <string> initials;
+    // The track that plays is one the listener starred.
+    in property <bool> favourite;
     // The rotating glow behind the Now Playing art.
     in property <image> halo;
 
@@ -118,6 +120,8 @@ export global Player {
     callback volume-changed(volume: float);
     // A fraction of the current track.
     callback seek(fraction: float);
+    // Stars the track that plays, or takes its star away.
+    callback favourite-toggled();
     callback queue-view-selected(view: QueueView);
     callback queue-row-clicked(index: int);
     callback spotlight-track-clicked(index: int);

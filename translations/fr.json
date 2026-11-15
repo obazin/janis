@@ -46,6 +46,7 @@
     "library.tab.artists": "Artistes",
     "library.tab.albums": "Albums",
     "library.tab.songs": "Titres",
+    "library.tab.favourites": "Favoris",
     "library.recentlyAdded": "Ajouts récents",
     "library.collapseSelection": "Réduire la sélection",
     "library.tracks.one": "{count} titre",
@@ -54,6 +55,10 @@
     "library.playlistsSoon.desc": "La création et l'édition de playlists arriveront dans une prochaine version. Parcourez vos albums, artistes et titres en attendant.",
     "library.empty.title": "Votre bibliothèque est vide",
     "library.empty.desc": "Ajoutez un dossier à analyser, ou déposez des fichiers audio dans la fenêtre.",
+    "library.favouriteAdd": "Ajouter aux favoris",
+    "library.favouriteRemove": "Retirer des favoris",
+    "library.favourites.empty.title": "Aucun titre favori pour l’instant",
+    "library.favourites.empty.desc": "Marquez un titre d’une étoile dans une liste, ou dans « En cours », pour le retrouver ici. Les titres marqués sur votre serveur Jellyfin y apparaissent aussi.",
     "discover.eyebrow": "Depuis votre bibliothèque",
     "discover.title": "Découvrir",
     "discover.recentAlbums": "Albums ajoutés récemment",
@@ -241,5 +246,7 @@
     "error.preferences": "Votre choix n'a pas pu être enregistré — il sera oublié au prochain lancement",
     "error.jellyfinSync": "Impossible de lire vos morceaux Jellyfin — le serveur est peut-être injoignable",
     "error.jellyfinSignInAgain": "Jellyfin a déconnecté Janis — reconnectez-vous dans les Réglages",
+    "error.favouriteAdd": "Impossible d’ajouter le titre aux favoris sur votre serveur Jellyfin — le serveur est peut-être injoignable",
+    "error.favouriteRemove": "Impossible de retirer le titre des favoris sur votre serveur Jellyfin — le serveur est peut-être injoignable",
     "notification.dismiss": "Fermer"
 }

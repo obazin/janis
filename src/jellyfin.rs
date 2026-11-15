@@ -1,5 +1,5 @@
 //! The Jellyfin client: signing in, listing the server's libraries and their
-//! songs, and the addresses Janis plays and draws them from.
+//! songs, starring a song, and the addresses Janis plays and draws them from.
 //!
 //! Every call here waits on the network, so it runs on the server worker,
 //! never on the interface thread. What the server answers is mapped into the
@@ -205,6 +205,14 @@ pub struct Item {
     normalization_gain: Option<f64>,
     /// The same for the whole album the song is on.
     album_normalization_gain: Option<f64>,
+    /// What the signed-in user did with the song.
+    user_data: UserData,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "PascalCase", default)]
+struct UserData {
+    is_favorite: bool,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -343,6 +351,7 @@ pub fn item_song(item: &Item, server_identifier: &str) -> ServerSong {
         },
         artwork_item,
         libraries: Vec::new(),
+        favourite: item.user_data.is_favorite,
     }
 }
 
@@ -505,13 +514,14 @@ pub fn sign_in(
     })
 }
 
-/// Sends a signed-in GET.
+/// Sends a signed-in request.
 fn signed_in_send(
     session: &Session,
+    method: reqwest::Method,
     url: reqwest::Url,
 ) -> Result<reqwest::blocking::Response, Failure> {
     client()?
-        .get(url)
+        .request(method, url)
         .header(
             "Authorization",
             authorization(&session.device_identifier, Some(&session.access_token)),
@@ -546,9 +556,9 @@ fn views(session: &Session) -> Result<Vec<View>, Failure> {
         .append_pair("userId", &session.user_identifier)
         .append_pair("includeExternalContent", "false")
         .append_pair("includeHidden", "true");
-    let mut response = signed_in_send(session, url)?;
+    let mut response = signed_in_send(session, reqwest::Method::GET, url)?;
     if response.status() == reqwest::StatusCode::NOT_FOUND {
-        response = signed_in_send(session, {
+        response = signed_in_send(session, reqwest::Method::GET, {
             let mut url = parse(&format!("/Users/{}/Views", session.user_identifier))?;
             url.query_pairs_mut().append_pair("includeHidden", "true");
             url
@@ -574,10 +584,13 @@ fn library_songs(
             .append_pair("IncludeItemTypes", "Audio")
             .append_pair("Recursive", "true")
             .append_pair("Fields", "MediaSources,Genres,People")
+            // What the user did with each song: its favourite comes with it.
+            .append_pair("EnableUserData", "true")
             .append_pair("SortBy", "SortName")
             .append_pair("StartIndex", &songs.len().to_string())
             .append_pair("Limit", &PAGE_SIZE.to_string());
-        let page: ItemsPage = signed_in_answer(signed_in_send(session, url)?)?;
+        let page: ItemsPage =
+            signed_in_answer(signed_in_send(session, reqwest::Method::GET, url)?)?;
         let received = page.items.len();
         songs.extend(
             page.items
@@ -706,6 +719,42 @@ pub fn artwork(session: &Session, item: &str, longest_side: u32) -> Result<Vec<u
         .map_err(transport_failure)
 }
 
+/// Stars a song for the signed-in user, or takes its star away. A server
+/// older than Jellyfin 10.9 answers at `/Users/{user}/FavoriteItems` only.
+pub fn set_favourite(
+    session: &Session,
+    song_address: &str,
+    favourite: bool,
+) -> Result<(), Failure> {
+    let item = item_of_song_address(song_address)
+        .ok_or_else(|| Failure::Other(format!("{song_address} names no server item")))?;
+    let method = if favourite {
+        reqwest::Method::POST
+    } else {
+        reqwest::Method::DELETE
+    };
+    let send = |path: String, user_query: bool| {
+        let mut url = reqwest::Url::parse(&format!("{}{path}", session.address))
+            .map_err(|error| Failure::Other(error.to_string()))?;
+        if user_query {
+            url.query_pairs_mut()
+                .append_pair("userId", &session.user_identifier);
+        }
+        signed_in_send(session, method.clone(), url)
+    };
+    let mut response = send(format!("/UserFavoriteItems/{item}"), true)?;
+    if response.status() == reqwest::StatusCode::NOT_FOUND {
+        response = send(
+            format!("/Users/{}/FavoriteItems/{item}", session.user_identifier),
+            false,
+        )?;
+    }
+    if !response.status().is_success() {
+        return Err(status_failure(response.status(), false));
+    }
+    Ok(())
+}
+
 /// Ends the session on the server, so the token stops working. Best effort:
 /// signing out in Janis goes ahead whether or not the server is reachable.
 pub fn sign_out(session: &Session) {
@@ -730,6 +779,7 @@ mod tests {
 
     /// What a route of the fake server is handed.
     struct Request {
+        method: String,
         target: String,
         body: String,
         signed_in: bool,
@@ -844,6 +894,11 @@ mod tests {
                 let mut body = vec![0; content_length];
                 let _ = reader.read_exact(&mut body);
                 let request = Request {
+                    method: request_line
+                        .split_whitespace()
+                        .next()
+                        .unwrap_or_default()
+                        .to_owned(),
                     target: request_line
                         .split_whitespace()
                         .nth(1)
@@ -1117,6 +1172,7 @@ mod tests {
         "AlbumPrimaryImageTag": "tag",
         "NormalizationGain": -7.3,
         "AlbumNormalizationGain": -5.9,
+        "UserData": {"IsFavorite": true, "PlayCount": 3},
         "People": [{"Name": "Thomas", "Type": "Composer"}, {"Name": "Singer", "Type": "Artist"}],
         "MediaSources": [{
             "Path": "/media/music/Daft Punk/Homework/07 - Alive.flac",
@@ -1165,6 +1221,136 @@ mod tests {
             (metadata.rg_track_peak, metadata.rg_album_peak),
             (None, None)
         );
+        assert!(song.favourite, "the user's star comes with the song");
+    }
+
+    #[test]
+    fn a_song_without_user_data_is_not_a_favourite() {
+        let item: Item = serde_json::from_str(r#"{"Id": "song"}"#).expect("an item parses");
+        assert!(!item_song(&item, "server").favourite);
+    }
+
+    #[test]
+    fn the_listing_asks_for_each_songs_user_data() {
+        let (asked, was_asked) = std::sync::mpsc::channel();
+        let asked = std::sync::Mutex::new(asked);
+        let address = fake_server_with(vec![route("/Items?", move |request| {
+            let _ = asked
+                .lock()
+                .expect("the sender")
+                .send(query_value(&request.target, "EnableUserData").map(str::to_owned));
+            (
+                "200 OK",
+                r#"{"Items": [{"Id": "song", "UserData": {"IsFavorite": true}}], "TotalRecordCount": 1}"#
+                    .to_owned(),
+            )
+        })]);
+        let songs = songs(&signed_in_to(&address), "server").expect("the listing");
+        assert_eq!(
+            was_asked.recv_timeout(Duration::from_secs(5)),
+            Ok(Some("true".to_owned()))
+        );
+        assert!(songs[0].favourite);
+    }
+
+    /// A server that records each favourite call it is sent — its method, and
+    /// its path without the query — and answers it with `status`.
+    fn favourite_server(
+        prefix: &'static str,
+        status: &'static str,
+    ) -> (String, std::sync::mpsc::Receiver<(String, String, bool)>) {
+        let (calls, received) = std::sync::mpsc::channel();
+        let calls = std::sync::Mutex::new(calls);
+        let address = fake_server_with(vec![route(prefix, move |request| {
+            let path = request
+                .target
+                .split('?')
+                .next()
+                .unwrap_or_default()
+                .to_owned();
+            let _ = calls.lock().expect("the sender").send((
+                request.method.clone(),
+                format!(
+                    "{path}{}",
+                    query_value(&request.target, "userId")
+                        .map(|user| format!(" for {user}"))
+                        .unwrap_or_default()
+                ),
+                request.signed_in,
+            ));
+            (status, String::new())
+        })]);
+        (address, received)
+    }
+
+    #[test]
+    fn starring_a_song_posts_it_to_the_users_favourites_and_unstarring_deletes_it() {
+        let (address, calls) = favourite_server("/UserFavoriteItems/", "200 OK");
+        let session = signed_in_to(&address);
+
+        assert_eq!(
+            set_favourite(&session, "jellyfin://server/song", true),
+            Ok(())
+        );
+        assert_eq!(
+            calls.recv_timeout(Duration::from_secs(5)),
+            Ok((
+                "POST".to_owned(),
+                "/UserFavoriteItems/song for user".to_owned(),
+                true
+            ))
+        );
+
+        assert_eq!(
+            set_favourite(&session, "jellyfin://server/song", false),
+            Ok(())
+        );
+        assert_eq!(
+            calls.recv_timeout(Duration::from_secs(5)),
+            Ok((
+                "DELETE".to_owned(),
+                "/UserFavoriteItems/song for user".to_owned(),
+                true
+            ))
+        );
+    }
+
+    #[test]
+    fn a_server_before_user_favourite_items_is_starred_under_the_user() {
+        // `/UserFavoriteItems` is not a route here: the fake server answers 404.
+        let (address, calls) = favourite_server("/Users/user/FavoriteItems/", "200 OK");
+        let session = signed_in_to(&address);
+        assert_eq!(
+            set_favourite(&session, "jellyfin://server/song", true),
+            Ok(())
+        );
+        assert_eq!(
+            calls.recv_timeout(Duration::from_secs(5)),
+            Ok((
+                "POST".to_owned(),
+                "/Users/user/FavoriteItems/song".to_owned(),
+                true
+            ))
+        );
+    }
+
+    #[test]
+    fn a_star_the_server_refuses_is_a_failure() {
+        let (address, _calls) = favourite_server("/UserFavoriteItems/", "401 Unauthorized");
+        assert_eq!(
+            set_favourite(&signed_in_to(&address), "jellyfin://server/song", true),
+            Err(Failure::TokenRejected)
+        );
+        let (address, _calls) =
+            favourite_server("/UserFavoriteItems/", "500 Internal Server Error");
+        assert!(matches!(
+            set_favourite(&signed_in_to(&address), "jellyfin://server/song", false),
+            Err(Failure::Other(_))
+        ));
+        assert!(matches!(
+            set_favourite(&signed_in_to(&address), "/music/a.flac", true),
+            Err(Failure::Other(_))
+        ));
     }
 
     #[test]

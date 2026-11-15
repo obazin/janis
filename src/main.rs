@@ -14,6 +14,7 @@ mod cover_requests;
 mod covers;
 mod effects;
 mod equalizer;
+mod favourite_tracks;
 mod favourites;
 mod halo;
 mod instance;

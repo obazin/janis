@@ -312,11 +312,7 @@ impl MediaServerState {
                 }
                 Vec::new()
             }
-            Err(Failure::TokenRejected) => {
-                self.phase = Phase::SignInAgain;
-                self.message_key = Some(failure_key(&Failure::TokenRejected));
-                vec![notify("error.jellyfinSignInAgain")]
-            }
+            Err(Failure::TokenRejected) => self.sign_in_again(),
             Err(failure) => {
                 log::warn!("Jellyfin sync: {failure:?}");
                 // The songs read before stay; the next sync may well work.
@@ -325,6 +321,28 @@ impl MediaServerState {
                 vec![notify("error.jellyfinSync")]
             }
         }
+    }
+
+    /// A call made with `server`'s token — a song's star — found the server
+    /// no longer accepts it. The card asks for the password again, unless
+    /// the listener already signed in again or out since the call left.
+    pub fn token_rejected(&mut self, server: &MediaServer) -> Vec<Effect> {
+        let current = self
+            .server
+            .as_ref()
+            .is_some_and(|current| current.access_token == server.access_token);
+        if !current || !matches!(self.phase, Phase::SignedIn | Phase::Syncing) {
+            return Vec::new();
+        }
+        self.sign_in_again()
+    }
+
+    /// The server no longer accepts the kept token: its songs stay, and the
+    /// card asks for the password again.
+    fn sign_in_again(&mut self) -> Vec<Effect> {
+        self.phase = Phase::SignInAgain;
+        self.message_key = Some(failure_key(&Failure::TokenRejected));
+        vec![notify("error.jellyfinSignInAgain")]
     }
 
     /// The listener pressed Sign out: the server is forgotten at once, and
@@ -856,5 +874,37 @@ mod tests {
                 assert_ne!(Translations::new(language).text(key), key, "{failure:?}");
             }
         }
+    }
+
+    #[test]
+    fn a_star_refused_for_its_token_asks_for_the_password_again() {
+        let mut state = signed_in();
+        let effects = state.token_rejected(&server());
+        assert_eq!(state.phase(), Phase::SignInAgain);
+        assert_eq!(state.message_key(), Some("jellyfin.status.tokenRejected"));
+        assert!(matches!(
+            effects.as_slice(),
+            [Effect::NotifyError {
+                key: "error.jellyfinSignInAgain",
+                ..
+            }]
+        ));
+        assert!(state.token_rejected(&server()).is_empty(), "asked once");
+    }
+
+    #[test]
+    fn a_refusal_for_a_token_already_replaced_or_while_signing_in_changes_nothing() {
+        let mut state = signed_in();
+        let mut old = server();
+        old.access_token = "old token".to_owned();
+        assert!(state.token_rejected(&old).is_empty());
+        assert_eq!(state.phase(), Phase::SignedIn);
+
+        state.sign_in("http://jellyfin.local:8096", "listener", "right");
+        assert!(state.token_rejected(&server()).is_empty());
+        assert_eq!(state.phase(), Phase::SigningIn);
+
+        let mut signed_out = MediaServerState::default();
+        assert!(signed_out.token_rejected(&server()).is_empty());
     }
 }

@@ -67,7 +67,7 @@ CREATE INDEX IF NOT EXISTS idx_tracks_added ON tracks(added_at DESC);
 /// `SCHEMA` above is frozen at version 1 — it only ever creates a fresh file.
 /// Every change since is a migration, so a new database and an existing one
 /// converge on the same shape.
-const SCHEMA_VERSION: i64 = 7;
+const SCHEMA_VERSION: i64 = 8;
 
 // The migrations reach the version a fresh database is stamped with.
 const _: () = assert!(MIGRATIONS.len() as i64 + 1 == SCHEMA_VERSION);
@@ -147,6 +147,17 @@ const MIGRATIONS: &[&str] = &[
          PRIMARY KEY (track_id, library_id)
      ) WITHOUT ROWID;
      CREATE INDEX IF NOT EXISTS idx_track_libraries_library ON track_libraries(library_id);",
+    // → 8: the songs the listener starred. A row is a favourite; no row is the
+    //      default. It cascades from the song, so a file pruned or a server
+    //      song gone from its server takes its star with it. A server song's
+    //      row follows the server's own favourite at every sync; `added_at`
+    //      orders the Favourites tab, newest first.
+    //      Its own row id breaks a tie between two stars of the same second.
+    "CREATE TABLE IF NOT EXISTS favourite_tracks (
+         id INTEGER PRIMARY KEY,
+         track_id INTEGER NOT NULL UNIQUE REFERENCES tracks(id) ON DELETE CASCADE,
+         added_at INTEGER NOT NULL DEFAULT (unixepoch())
+     );",
 ];
 
 /// Opens (creating if needed) `janis.db` under the app-data directory and
@@ -397,6 +408,35 @@ pub fn set_favourite_station(
     connection
         .execute(statement, [station_id])
         .map_err(|error| format!("persist favourite station: {error}"))?;
+    Ok(())
+}
+
+/// The ids of the songs the listener starred, the newest favourite first.
+pub fn favourite_track_ids(database: &DbState) -> Result<Vec<i64>, String> {
+    let connection = database.lock();
+    connection
+        .prepare("SELECT track_id FROM favourite_tracks ORDER BY added_at DESC, id DESC")
+        .and_then(|mut statement| statement.query_map([], |row| row.get(0))?.collect())
+        .map_err(|error| format!("read favourite songs: {error}"))
+}
+
+/// Stars a song or takes its star away. Saving the state it already has
+/// changes nothing, and starring a song no longer in the library — removed
+/// while its star was on its way to a server — does nothing either.
+pub fn set_favourite_track(
+    database: &DbState,
+    track_id: i64,
+    favourite: bool,
+) -> Result<(), String> {
+    let connection = database.lock();
+    let statement = if favourite {
+        "INSERT OR IGNORE INTO favourite_tracks (track_id) SELECT id FROM tracks WHERE id = ?1"
+    } else {
+        "DELETE FROM favourite_tracks WHERE track_id = ?1"
+    };
+    connection
+        .execute(statement, [track_id])
+        .map_err(|error| format!("persist favourite song: {error}"))?;
     Ok(())
 }
 
@@ -763,6 +803,41 @@ mod tests {
         assert_eq!(favourite_station_ids(&database), Ok(Vec::new()));
     }
 
+    #[test]
+    fn a_favourite_song_is_remembered_newest_first_and_leaves_with_its_song() {
+        let (_directory, database) = fresh_database();
+        {
+            let connection = database.lock();
+            connection
+                .execute_batch(
+                    "INSERT INTO tracks (id, path, title, format) VALUES
+                         (1, '/a.flac', 'A', 'FLAC'), (2, '/b.flac', 'B', 'FLAC');",
+                )
+                .expect("seed two songs");
+        }
+        assert_eq!(favourite_track_ids(&database), Ok(Vec::new()));
+
+        // Starred within the same second: the later star still comes first.
+        set_favourite_track(&database, 2, true).expect("star the second");
+        set_favourite_track(&database, 1, true).expect("star the first");
+        // Starring twice keeps one row, in its place.
+        set_favourite_track(&database, 2, true).expect("star the second again");
+        assert_eq!(favourite_track_ids(&database), Ok(vec![1, 2]));
+
+        set_favourite_track(&database, 2, false).expect("take a star away");
+        assert_eq!(favourite_track_ids(&database), Ok(vec![1]));
+
+        // A song that is not in the library is not starred.
+        set_favourite_track(&database, 9, true).expect("star a song that is gone");
+        assert_eq!(favourite_track_ids(&database), Ok(vec![1]));
+
+        database
+            .lock()
+            .execute("DELETE FROM tracks WHERE id = 1", [])
+            .expect("remove the song");
+        assert_eq!(favourite_track_ids(&database), Ok(Vec::new()));
+    }
+
     /// A database as an earlier Janis left it: the frozen schema, the
     /// migrations up to `version`, a preference changed and one track.
     fn database_at_version(directory: &std::path::Path, version: i64) {
@@ -810,6 +885,7 @@ mod tests {
             assert_eq!(favourite_station_ids(&database), Ok(Vec::new()));
             assert_eq!(media_server(&database), Ok(None));
             assert_eq!(server_libraries(&database), Ok(Vec::new()));
+            assert_eq!(favourite_track_ids(&database), Ok(Vec::new()));
             let connection = database.lock();
             let (title, server_id): (String, Option<i64>) = connection
                 .query_row(

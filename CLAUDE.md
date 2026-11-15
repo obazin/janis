@@ -57,8 +57,9 @@ Development hooks, debug builds only:
 | `src/player.rs` | The playback mirror: what plays, transport flags, position interpolation | `audio` (event types), `effects` |
 | `src/equalizer.rs`, `src/playback_options.rs` | The EQ (bands, presets, linear phase); the four playback switches | `audio` (constants), `effects`, `persistence` (types) |
 | `src/favourites.rs` | The stations the listener starred | `effects` |
+| `src/favourite_tracks.rs` | The songs the listener starred, and the stars on their way to a Jellyfin server | `effects`, `jellyfin` (types), `library` (types), `persistence` (types) |
 | `src/media_server.rs` | The Jellyfin server signed in to: sign-in, sync and sign-out decisions | `effects`, `jellyfin`, `library`, `persistence` (types) |
-| `src/jellyfin.rs` | The Jellyfin client (sign-in, song listing, pictures) and the pure mapping of its answers | `audio` (types), `library` (types), `persistence` (types), reqwest |
+| `src/jellyfin.rs` | The Jellyfin client (sign-in, song listing, favourites, pictures) and the pure mapping of its answers | `audio` (types), `library` (types), `persistence` (types), reqwest |
 | `src/notifications.rs` | Error notifications, deduplicated by key | nothing |
 | `src/overview_reads.rs` | The track overview's reads: which start, which results count, what is kept, the order places are tried in | `audio` (types), `covers` (cache) |
 | `src/library_view.rs` | Pure: album and artist grouping, search, the Now Playing lists, the Library selection | `library` (types), `text`, `translations` |
@@ -85,6 +86,7 @@ engine            → EngineBridge → post() → Player::apply → effects → 
 a station click   → Player::play_station → Effect::ConnectStation → the station runtime → same path
 a Jellyfin sync   → MediaServerState::sync → Effect::SyncMediaServer → server worker → libraries + tracks → library refresh
 a library switch  → MediaServerState::toggle_library → Effect::PersistServerLibraryShown → group_library → refresh
+a song's star     → FavouriteTracks::toggle → Effect::PersistFavouriteTrack (+ Effect::PushServerFavourite → server worker → push_finished) → refresh_library
 a server song     → Effect::LoadQueue → Location::Remote (original file, downloaded as it plays) → same path
 a new track       → Effect::LoadOverview → overview thread → AudioEngine::read_overview → slices → overview::mask → Player.overview
 ```
@@ -94,7 +96,7 @@ a new track       → Effect::LoadOverview → overview thread → AudioEngine::
 | `Shell` | `ui/shell.slint` | Open screen, search text, equalizer sheet, notifications, window drag |
 | `Player` | `ui/features/player/player.slint` | What is playing, transport, waveform, track overview, animation clock, queue card, artist spotlight |
 | `Equalizer` | `ui/features/equalizer/equalizer.slint` | Gains, presets, linear phase |
-| `Library` | `ui/features/library/library.slint` | Library, Local Files and Discover lists; library actions |
+| `Library` | `ui/features/library/library.slint` | Library (favourites included), Local Files and Discover lists; library actions, stars |
 | `Covers` | `ui/features/library/covers.slint` | Thumbnails by track id, loaded as tiles appear; the slice each long list draws, for prefetching |
 | `Radio` | `ui/features/radio/radio.slint` | Filter chips, the favourites filter, stations, the loaded station and its star |
 | `Settings` | `ui/features/settings/settings.slint` | Playback switches, output device, language |

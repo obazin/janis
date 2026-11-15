@@ -294,6 +294,27 @@ pub fn recently_added(tracks: &[Track], search: &str) -> Vec<Track> {
         .collect()
 }
 
+/// The Favourites tab's rows: the starred songs on show that the search
+/// keeps, the newest favourite first. A favourite in a hidden server library
+/// is not on show, so not listed.
+pub fn favourite_songs(tracks: &[Track], favourites: &[i64], search: &str) -> Vec<Track> {
+    let query = normalized_query(search);
+    let by_id: HashMap<i64, &Track> = tracks.iter().map(|track| (track.id, track)).collect();
+    favourites
+        .iter()
+        .filter_map(|track_id| by_id.get(track_id).copied())
+        .filter(|track| library_match(track, &query))
+        .cloned()
+        .collect()
+}
+
+/// Whether any starred song is on show, whatever the search keeps: what
+/// tells the Favourites tab to invite a first star.
+pub fn any_favourite_shown(tracks: &[Track], favourites: &[i64]) -> bool {
+    let favourites: HashSet<i64> = favourites.iter().copied().collect();
+    tracks.iter().any(|track| favourites.contains(&track.id))
+}
+
 /// The tracks the Local Files screen's search keeps: files on disk whose
 /// title or artist matches. A media server's songs are in the library, not
 /// among the local files.
@@ -471,6 +492,7 @@ pub enum LibraryTab {
     #[default]
     Albums,
     Songs,
+    Favourites,
 }
 
 impl LibraryTab {
@@ -481,13 +503,20 @@ impl LibraryTab {
             LibraryTab::Artists => "artists",
             LibraryTab::Albums => "albums",
             LibraryTab::Songs => "songs",
+            LibraryTab::Favourites => "favourites",
         }
     }
 
     pub fn from_identifier(identifier: &str) -> Option<Self> {
-        [Self::Playlists, Self::Artists, Self::Albums, Self::Songs]
-            .into_iter()
-            .find(|tab| tab.identifier() == identifier)
+        [
+            Self::Playlists,
+            Self::Artists,
+            Self::Albums,
+            Self::Songs,
+            Self::Favourites,
+        ]
+        .into_iter()
+        .find(|tab| tab.identifier() == identifier)
     }
 }
 
@@ -960,6 +989,34 @@ mod tests {
     }
 
     #[test]
+    fn the_favourites_list_the_starred_songs_on_show_newest_star_first_as_the_search_keeps() {
+        let tracks = vec![
+            track(1, "Amsterdam").artist("Brel"),
+            track(2, "Bruxelles").artist("Brel"),
+            track(3, "Ces gens-là").artist("Brel"),
+        ];
+        // Song 9 is starred but not on show: in a hidden library, or gone.
+        let favourites = [3, 9, 1];
+        assert_eq!(
+            titles(&favourite_songs(&tracks, &favourites, "")),
+            ["Ces gens-là", "Amsterdam"]
+        );
+        assert_eq!(
+            titles(&favourite_songs(&tracks, &favourites, "amster")),
+            ["Amsterdam"]
+        );
+        assert!(favourite_songs(&tracks, &[], "").is_empty());
+    }
+
+    #[test]
+    fn a_favourite_counts_as_shown_only_when_its_song_is_on_show() {
+        let tracks = vec![track(1, "Amsterdam"), track(2, "Bruxelles")];
+        assert!(any_favourite_shown(&tracks, &[9, 2]));
+        assert!(!any_favourite_shown(&tracks, &[9]));
+        assert!(!any_favourite_shown(&tracks, &[]));
+    }
+
+    #[test]
     fn the_album_line_shows_only_what_the_tags_gave() {
         let translations = Translations::new(Language::English);
         let mut tagged = track(1, "A");
@@ -1365,6 +1422,7 @@ mod tests {
             LibraryTab::Artists,
             LibraryTab::Albums,
             LibraryTab::Songs,
+            LibraryTab::Favourites,
         ] {
             assert_eq!(LibraryTab::from_identifier(tab.identifier()), Some(tab));
         }

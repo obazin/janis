@@ -33,6 +33,7 @@ use crate::cover_requests::CoverRequests;
 use crate::covers;
 use crate::effects::Effect;
 use crate::equalizer::Equalizer;
+use crate::favourite_tracks::FavouriteTracks;
 use crate::favourites::FavouriteStations;
 use crate::library::{self, LoudnessStore, ScanReport, Track, WatchedFolder};
 use crate::library_view::{self, AlbumGroup, ArtistGroup, QueueView};
@@ -129,6 +130,7 @@ pub struct Application {
     library_artists: Rc<VecModel<user_interface::LibraryCard>>,
     library_songs: Rc<VecModel<user_interface::LibraryTrack>>,
     library_recent: Rc<VecModel<user_interface::LibraryTrack>>,
+    library_favourites: Rc<VecModel<user_interface::LibraryTrack>>,
     library_selection_tracks: Rc<VecModel<user_interface::LibraryTrack>>,
     library_folding_tracks: Rc<VecModel<user_interface::LibraryTrack>>,
     library_local: Rc<VecModel<user_interface::LibraryTrack>>,
@@ -142,6 +144,9 @@ pub struct Application {
     /// The shape of the current track, as the mini player draws it.
     track_overview: RefCell<OverviewReads>,
     favourite_stations: RefCell<FavouriteStations>,
+    /// The songs the listener starred, and the stars on their way to a
+    /// server.
+    favourite_tracks: RefCell<FavouriteTracks>,
     /// The Jellyfin server the listener signed in to, as Settings shows it.
     media_server: RefCell<MediaServerState>,
     /// The Jellyfin card's library rows, and the library each stands for.
@@ -189,6 +194,8 @@ impl Application {
         let folders = library::list_watched_folders(&database)?;
         let mut favourite_stations = FavouriteStations::default();
         favourite_stations.restore(persistence::favourite_station_ids(&database)?);
+        let mut favourite_tracks = FavouriteTracks::default();
+        favourite_tracks.restore(persistence::favourite_track_ids(&database)?);
         let kept_server = persistence::media_server(&database)?;
         let device_identifier = persistence::device_identifier(&database)?;
 
@@ -251,6 +258,7 @@ impl Application {
             library_artists: Rc::new(VecModel::default()),
             library_songs: Rc::new(VecModel::default()),
             library_recent: Rc::new(VecModel::default()),
+            library_favourites: Rc::new(VecModel::default()),
             library_selection_tracks: Rc::new(VecModel::default()),
             library_folding_tracks: Rc::new(VecModel::default()),
             library_local: Rc::new(VecModel::default()),
@@ -262,6 +270,7 @@ impl Application {
             loudness: loudness::LoudnessMeasurement::new()?,
             track_overview: RefCell::new(OverviewReads::default()),
             favourite_stations: RefCell::new(favourite_stations),
+            favourite_tracks: RefCell::new(favourite_tracks),
             media_server: RefCell::new(media_server),
             jellyfin_libraries: Rc::new(VecModel::default()),
             jellyfin_library_ids: RefCell::new(Vec::new()),
@@ -572,6 +581,13 @@ impl Application {
                     "favourite-station",
                     persistence::set_favourite_station(&self.database, &station_id, favourite),
                 ),
+                Effect::PersistFavouriteTrack {
+                    track_id,
+                    favourite,
+                } => self.saved(
+                    "favourite-track",
+                    persistence::set_favourite_track(&self.database, track_id, favourite),
+                ),
                 Effect::SignInMediaServer {
                     address,
                     user_name,
@@ -580,6 +596,13 @@ impl Application {
                 } => self.sign_in_media_server(address, user_name, password, epoch),
                 Effect::SyncMediaServer { server, epoch } => self.sync_media_server(server, epoch),
                 Effect::SignOutMediaServer { server } => self.sign_out_media_server(server),
+                Effect::PushServerFavourite {
+                    server,
+                    track_id,
+                    address,
+                    favourite,
+                    sequence,
+                } => self.push_server_favourite(server, track_id, address, favourite, sequence),
                 Effect::LoadCover(track_id) => self.load_current_cover(track_id),
                 Effect::LoadOverview(track_id) => self.load_overview(track_id),
                 Effect::ShowStreamCover(url) => self.show_stream_cover(url),

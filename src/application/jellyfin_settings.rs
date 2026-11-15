@@ -1,7 +1,7 @@
 //! The controller's side of the Jellyfin card in Settings: signing in,
 //! reading the server's songs into the library, showing or hiding each of its
-//! libraries, signing out, and where the engine and the cover loader find a
-//! server song.
+//! libraries, signing out, starring a song on the server, and where the
+//! engine and the cover loader find a server song.
 //!
 //! Every call to the server runs on the server worker, one after another, so
 //! a sign-out queued behind a sync runs after it and the library ends without
@@ -175,6 +175,45 @@ impl Application {
                     log::error!("Jellyfin sign-out: {error}");
                     application.notify_error("error.library", vec![("message", error)], None);
                 }
+            });
+        });
+    }
+
+    /// Stars a song on its server, or takes its star away, behind whatever
+    /// call to the server is already queued; then tells the favourites how
+    /// it went, and the Jellyfin card when the server refused the token.
+    pub(super) fn push_server_favourite(
+        &self,
+        server: MediaServer,
+        track_id: i64,
+        address: String,
+        favourite: bool,
+        sequence: u64,
+    ) {
+        let session = Session::new(&server, &self.device_identifier);
+        self.server_worker.run(move || {
+            let outcome = jellyfin::set_favourite(&session, &address, favourite);
+            post(move |application| {
+                let token_rejected = matches!(outcome, Err(Failure::TokenRejected));
+                let mut effects = application
+                    .favourite_tracks
+                    .borrow_mut()
+                    .push_finished(track_id, sequence, favourite, outcome);
+                if token_rejected {
+                    effects.extend(
+                        application
+                            .media_server
+                            .borrow_mut()
+                            .token_rejected(&server),
+                    );
+                    application.refresh_jellyfin();
+                }
+                if effects.is_empty() {
+                    return;
+                }
+                application.run(effects);
+                application.refresh_favourite(track_id);
+                application.refresh_player();
             });
         });
     }

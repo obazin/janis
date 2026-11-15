@@ -164,6 +164,7 @@ impl Application {
             CoverList::Albums => self.library_albums.row_count(),
             CoverList::Artists => self.library_artists.row_count(),
             CoverList::Songs => self.library_songs.row_count(),
+            CoverList::Favourites => self.library_favourites.row_count(),
             CoverList::None => 0,
         }
     }
@@ -181,6 +182,10 @@ impl Application {
                 .map(|card| card.track_id),
             CoverList::Songs => self
                 .library_songs
+                .row_data(place)
+                .map(|track| track.track_id),
+            CoverList::Favourites => self
+                .library_favourites
                 .row_data(place)
                 .map(|track| track.track_id),
             CoverList::None => None,

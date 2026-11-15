@@ -597,6 +597,8 @@ pub struct ServerSong {
     pub artwork_item: Option<String>,
     /// The server's identifiers of the libraries the song is listed in.
     pub libraries: Vec<String>,
+    /// The listener starred it on the server.
+    pub favourite: bool,
 }
 
 /// One library of a media server, as its listing names it.
@@ -726,9 +728,10 @@ fn sync_server_libraries(
     Ok(rows)
 }
 
-/// Upserts one server song and files it in the libraries that list it, as
-/// one step: should filing fail, the song is left as it was, so it never
-/// ends up in no library — which would show it whatever the switches say.
+/// Upserts one server song, files it in the libraries that list it and
+/// gives it the server's star, as one step: should filing fail, the song is
+/// left as it was, so it never ends up in no library — which would show it
+/// whatever the switches say.
 fn write_server_song(
     transaction: &mut rusqlite::Transaction<'_>,
     server_id: i64,
@@ -751,10 +754,30 @@ fn write_server_song(
         &song.libraries,
         library_rows,
     )?;
+    set_server_favourite(&savepoint, upserted.track_id, song)?;
     savepoint
         .commit()
         .map_err(|error| format!("finish writing {}: {error}", song.address))?;
     Ok(upserted)
+}
+
+/// Stars a server song as the server does, or takes its star away. A star
+/// the song already had keeps its date, and so its place among the
+/// favourites.
+fn set_server_favourite(
+    connection: &rusqlite::Connection,
+    track_id: i64,
+    song: &ServerSong,
+) -> Result<(), String> {
+    let statement = if song.favourite {
+        "INSERT OR IGNORE INTO favourite_tracks (track_id) VALUES (?1)"
+    } else {
+        "DELETE FROM favourite_tracks WHERE track_id = ?1"
+    };
+    connection
+        .execute(statement, [track_id])
+        .map_err(|error| format!("star {} as the server does: {error}", song.address))?;
+    Ok(())
 }
 
 /// Records the libraries a server song is listed in, in place of those it was
@@ -1232,7 +1255,56 @@ mod tests {
             },
             artwork_item: Some(format!("album-of-{item}")),
             libraries: Vec::new(),
+            favourite: false,
         }
+    }
+
+    fn starred(mut song: ServerSong) -> ServerSong {
+        song.favourite = true;
+        song
+    }
+
+    #[test]
+    fn a_sync_stars_the_songs_the_server_stars_and_takes_away_the_others() {
+        let directory = tempfile::tempdir().expect("a temporary directory");
+        let database = crate::persistence::init(directory.path().to_path_buf()).expect("db");
+        let server_id = signed_in(&database);
+        let identifier_of = |title: &str| {
+            list_tracks(&database)
+                .expect("tracks")
+                .iter()
+                .find(|track| track.title == title)
+                .map(|track| track.id)
+                .expect("a listed song")
+        };
+
+        sync_server_tracks(
+            &database,
+            server_id,
+            &[],
+            vec![starred(server_song("a", "One")), server_song("b", "Two")],
+        )
+        .expect("first sync");
+        let (one, two) = (identifier_of("One"), identifier_of("Two"));
+        assert_eq!(
+            crate::persistence::favourite_track_ids(&database),
+            Ok(vec![one])
+        );
+
+        // The listener starred Two in Janis; the server then took One's star
+        // away and starred Two as well.
+        crate::persistence::set_favourite_track(&database, two, true).expect("star Two");
+        sync_server_tracks(
+            &database,
+            server_id,
+            &[],
+            vec![server_song("a", "One"), starred(server_song("b", "Two"))],
+        )
+        .expect("second sync");
+        assert_eq!(
+            crate::persistence::favourite_track_ids(&database),
+            Ok(vec![two])
+        );
     }
 
     fn signed_in(database: &DbState) -> i64 {
@@ -1461,6 +1533,41 @@ mod tests {
 
         assert_eq!(report.removed, 0);
         assert_eq!(list_tracks(&db).expect("tracks").len(), 1);
+    }
+
+    #[test]
+    fn a_files_star_lives_in_janis_alone_through_rescans_and_syncs_and_leaves_with_the_file() {
+        let directory = tempfile::tempdir().expect("a temporary directory");
+        let database = crate::persistence::init(directory.path().to_path_buf()).expect("db");
+        let folder = directory.path().join("watched");
+        let file = folder.join("song.wav");
+        write_wav(&file);
+        add_watched_folder(&database, &folder.to_string_lossy()).expect("scan");
+        let file_id = list_tracks(&database).expect("tracks")[0].id;
+        crate::persistence::set_favourite_track(&database, file_id, true).expect("star the file");
+
+        // A rescan upserts the file in place: its row, and so its star, stay.
+        rescan_library(&database).expect("rescan");
+        assert_eq!(
+            crate::persistence::favourite_track_ids(&database),
+            Ok(vec![file_id])
+        );
+
+        // A sync stars and unstars the server's songs only.
+        let server_id = signed_in(&database);
+        sync_server_tracks(&database, server_id, &[], vec![server_song("a", "One")]).expect("sync");
+        assert_eq!(
+            crate::persistence::favourite_track_ids(&database),
+            Ok(vec![file_id])
+        );
+
+        // Gone from its folder, the file is pruned, and its star with it.
+        std::fs::remove_file(&file).expect("delete the file");
+        rescan_library(&database).expect("rescan");
+        assert_eq!(
+            crate::persistence::favourite_track_ids(&database),
+            Ok(Vec::new())
+        );
     }
 
     #[test]

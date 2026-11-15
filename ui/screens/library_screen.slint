@@ -13,13 +13,14 @@ import { CardGrid } from "../features/library/card_grid.slint";
 import { TrackList } from "../features/library/track_list.slint";
 
 // The library: albums and artists as grids that open in place, every song as
-// one list, and what was added last.
+// one list, the starred songs as another, and what was added last.
 export component LibraryScreen inherits Rectangle {
     property <length> side: 44px;
     property <length> section-gap: 36px;
     property <length> content-width: page.content-width - root.side - 32px;
     property <bool> grid-tab: Library.tab == "albums" || Library.tab == "artists";
-    property <bool> shows-recent: !Library.empty && Library.tab != "songs" && Library.tab != "playlists" && !Library.selection-present && Library.recent.length > 0;
+    property <bool> list-tab: Library.tab == "songs" || Library.tab == "favourites";
+    property <bool> shows-recent: !Library.empty && root.grid-tab && !Library.selection-present && Library.recent.length > 0;
 
     page := ScrollArea {
         content-height: recent.y + (root.shows-recent ? recent.height : 0px) + 40px;
@@ -75,6 +76,11 @@ export component LibraryScreen inherits Rectangle {
                     active: Library.tab == "songs";
                     clicked => { Library.tab-selected("songs"); }
                 }
+                Chip {
+                    label: Strings.library-tab-favourites;
+                    active: Library.tab == "favourites";
+                    clicked => { Library.tab-selected("favourites"); }
+                }
             }
 
             if !Library.empty && Library.tab == "playlists": EmptyState {
@@ -82,13 +88,19 @@ export component LibraryScreen inherits Rectangle {
                 title: Strings.library-playlists-soon-title;
                 description: Strings.library-playlists-soon-desc;
             }
+
+            if !Library.empty && Library.tab == "favourites" && Library.favourites-empty: EmptyState {
+                icon: Icons.star;
+                title: Strings.library-favourites-empty-title;
+                description: Strings.library-favourites-empty-desc;
+            }
         }
 
         body := Rectangle {
             x: root.side;
             y: top.height + 24px;
             width: root.content-width;
-            height: Library.empty ? 0px : root.grid-tab ? grid.height : Library.tab == "songs" ? songs.height : 0px;
+            height: Library.empty ? 0px : root.grid-tab ? grid.height : root.list-tab ? songs.height : 0px;
 
             grid := CardGrid {
                 y: 0;
@@ -113,14 +125,21 @@ export component LibraryScreen inherits Rectangle {
                 }
             }
 
+            // All the songs, or the starred ones: one list, whichever tab is open.
             songs := TrackList {
                 y: 0;
-                visible: !Library.empty && Library.tab == "songs";
-                tracks: Library.songs;
-                cover-list: Library.tab == "songs" ? CoverList.songs : CoverList.none;
+                visible: !Library.empty && root.list-tab;
+                tracks: Library.tab == "favourites" ? Library.favourites : Library.songs;
+                cover-list: Library.tab == "songs" ? CoverList.songs : Library.tab == "favourites" ? CoverList.favourites : CoverList.none;
                 view-top: page.scroll-offset - body.y;
                 view-height: page.height;
-                clicked(index) => { Library.song-clicked(index); }
+                clicked(index) => {
+                    if Library.tab == "favourites" {
+                        Library.favourite-clicked(index);
+                    } else {
+                        Library.song-clicked(index);
+                    }
+                }
             }
         }
 

@@ -69,6 +69,11 @@ pub enum Effect {
         station_id: String,
         favourite: bool,
     },
+    /// Remember that a song is, or stopped being, a favourite.
+    PersistFavouriteTrack {
+        track_id: i64,
+        favourite: bool,
+    },
 
     // ── Media server ─────────────────────────────────────────────────────────
     /// Sign in to a Jellyfin server off the user-interface thread and keep
@@ -89,6 +94,17 @@ pub enum Effect {
     /// End the session on the server and forget it, with its songs.
     SignOutMediaServer {
         server: MediaServer,
+    },
+    /// Star a server song on its server, or take its star away, off the
+    /// user-interface thread, then report back through
+    /// `FavouriteTracks::push_finished` with the same `sequence`.
+    PushServerFavourite {
+        server: MediaServer,
+        track_id: i64,
+        /// The song's `jellyfin://<server>/<item>` address.
+        address: String,
+        favourite: bool,
+        sequence: u64,
     },
 
     // ── Presentation ─────────────────────────────────────────────────────────

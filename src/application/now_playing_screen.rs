@@ -40,6 +40,12 @@ impl Application {
     /// and the clock everything that moves during playback runs on.
     pub(super) fn connect_player(self: &Rc<Self>) {
         let player = self.window.global::<user_interface::Player>();
+        player.on_favourite_toggled(self.action(|application| {
+            let track_id = application.player.borrow().current().map(|track| track.id);
+            if let Some(track_id) = track_id {
+                application.toggle_favourite(track_id);
+            }
+        }));
         player.on_toggled(self.action(|application| {
             let effects = application.player.borrow_mut().toggle(Instant::now());
             application.run(effects);
@@ -203,6 +209,11 @@ impl Application {
         view.set_radio(text.radio);
         view.set_hero_title(text.hero_title.into());
         view.set_initials(text.initials.into());
+        view.set_favourite(
+            player
+                .current()
+                .is_some_and(|track| self.favourite_tracks.borrow().contains(track.id)),
+        );
         view.set_elapsed(text.elapsed.into());
         view.set_total(text.total.into());
         view.set_eyebrow(text.eyebrow.into());

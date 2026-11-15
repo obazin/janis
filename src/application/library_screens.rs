@@ -5,7 +5,7 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use slint::ComponentHandle;
+use slint::{ComponentHandle, Model};
 
 use super::{
     album_gradient_index, gradient_index, interface_id, list_place, post, with_application,
@@ -36,6 +36,8 @@ pub(super) struct LibraryScreen {
     shown_tracks: Vec<Track>,
     /// The "Recently added" rows, newest first.
     recent_tracks: Vec<Track>,
+    /// The Favourites tab's rows, the newest favourite first.
+    favourite_tracks: Vec<Track>,
     shown_albums: Vec<AlbumGroup>,
     shown_artists: Vec<ArtistGroup>,
     local_tracks: Vec<Track>,
@@ -50,6 +52,7 @@ pub(super) struct LibrarySnapshot {
     tracks: Vec<Track>,
     folders: Vec<WatchedFolder>,
     libraries: Vec<ServerLibrary>,
+    favourite_track_ids: Vec<i64>,
 }
 
 impl LibrarySnapshot {
@@ -58,6 +61,7 @@ impl LibrarySnapshot {
             tracks: library::list_tracks(database)?,
             folders: library::list_watched_folders(database)?,
             libraries: persistence::server_libraries(database)?,
+            favourite_track_ids: persistence::favourite_track_ids(database)?,
         })
     }
 }
@@ -69,6 +73,7 @@ impl Application {
         view.set_artists(self.library_artists.clone().into());
         view.set_songs(self.library_songs.clone().into());
         view.set_recent(self.library_recent.clone().into());
+        view.set_favourites(self.library_favourites.clone().into());
         view.set_selection_tracks(self.library_selection_tracks.clone().into());
         view.set_folding_tracks(self.library_folding_tracks.clone().into());
 
@@ -121,6 +126,13 @@ impl Application {
         view.on_recent_clicked(self.handler(|application, index: i32| {
             let tracks = application.library_screen.borrow().recent_tracks.clone();
             application.play_list(tracks, index);
+        }));
+        view.on_favourite_clicked(self.handler(|application, index: i32| {
+            let tracks = application.library_screen.borrow().favourite_tracks.clone();
+            application.play_list(tracks, index);
+        }));
+        view.on_favourite_toggled(self.handler(|application, track_id: i32| {
+            application.toggle_favourite(i64::from(track_id));
         }));
         view.on_selection_track_clicked(self.handler(|application, index: i32| {
             let tracks = application
@@ -198,6 +210,85 @@ impl Application {
         }
     }
 
+    /// Stars a song, or takes its star away, and shows it wherever it is
+    /// listed.
+    pub(super) fn toggle_favourite(&self, track_id: i64) {
+        let track = self
+            .all_tracks
+            .borrow()
+            .iter()
+            .find(|track| track.id == track_id)
+            .cloned();
+        let Some(track) = track else {
+            return;
+        };
+        let effects = self
+            .favourite_tracks
+            .borrow_mut()
+            .toggle(&track, self.media_server.borrow().server());
+        self.run(effects);
+        self.refresh_favourite(track_id);
+    }
+
+    /// Shows a song's star wherever it is listed, and the Favourites tab as
+    /// the stars now stand. A star changes nothing else: the other lists keep
+    /// their rows.
+    pub(super) fn refresh_favourite(&self, track_id: i64) {
+        let translations = self.translations.borrow();
+        let tracks = self.tracks.borrow();
+        let search = self.search.borrow();
+        let favourites = self.favourite_tracks.borrow();
+        let mut screen = self.library_screen.borrow_mut();
+        let view = self.window.global::<user_interface::Library>();
+
+        screen.favourite_tracks =
+            library_view::favourite_songs(&tracks, favourites.track_ids(), &search);
+        self.library_favourites.set_vec(track_rows(
+            &screen.favourite_tracks,
+            None,
+            |id| favourites.contains(id),
+            &translations,
+        ));
+        view.set_favourites_empty(!library_view::any_favourite_shown(
+            &tracks,
+            favourites.track_ids(),
+        ));
+
+        let favourite = favourites.contains(track_id);
+        mark_favourite(
+            &self.library_songs,
+            &screen.shown_tracks,
+            track_id,
+            favourite,
+        );
+        mark_favourite(
+            &self.library_recent,
+            &screen.recent_tracks,
+            track_id,
+            favourite,
+        );
+        if let Some(selection) = &screen.selection {
+            mark_favourite(
+                &self.library_selection_tracks,
+                &selection.tracks,
+                track_id,
+                favourite,
+            );
+        }
+        // The panel folding away keeps no list of its own; it is a few rows.
+        let identifier = interface_id(track_id);
+        for place in 0..self.library_folding_tracks.row_count() {
+            if let Some(mut row) = self
+                .library_folding_tracks
+                .row_data(place)
+                .filter(|row| row.track_id == identifier)
+            {
+                row.favourite = favourite;
+                self.library_folding_tracks.set_row_data(place, row);
+            }
+        }
+    }
+
     fn toggle_selection(&self, selection: Selection) {
         self.change_selection(|current| library_view::toggle_selection(current, selection));
     }
@@ -225,6 +316,7 @@ impl Application {
                 self.library_folding_tracks.set_vec(track_rows(
                     &folding.tracks,
                     Some(folding.kind),
+                    |id| self.favourite_tracks.borrow().contains(id),
                     &self.translations.borrow(),
                 ));
             }
@@ -245,11 +337,14 @@ impl Application {
         let artists = self.artists.borrow();
         let order = self.library_order.borrow();
         let search = self.search.borrow();
+        let favourites = self.favourite_tracks.borrow();
         let mut screen = self.library_screen.borrow_mut();
         let view = self.window.global::<user_interface::Library>();
 
         screen.shown_tracks = library_view::library_songs(&tracks, &order, &search);
         screen.recent_tracks = library_view::recently_added(&tracks, &search);
+        screen.favourite_tracks =
+            library_view::favourite_songs(&tracks, favourites.track_ids(), &search);
         screen.shown_albums = library_view::albums_matching(&albums, &order, &screen.shown_tracks)
             .into_iter()
             .cloned()
@@ -276,15 +371,36 @@ impl Application {
                 .map(|artist| artist_card(artist, &translations))
                 .collect::<Vec<_>>(),
         );
-        self.library_songs
-            .set_vec(track_rows(&screen.shown_tracks, None, &translations));
-        self.library_recent
-            .set_vec(track_rows(&screen.recent_tracks, None, &translations));
+        let is_favourite = |id| favourites.contains(id);
+        self.library_songs.set_vec(track_rows(
+            &screen.shown_tracks,
+            None,
+            is_favourite,
+            &translations,
+        ));
+        self.library_recent.set_vec(track_rows(
+            &screen.recent_tracks,
+            None,
+            is_favourite,
+            &translations,
+        ));
+        self.library_favourites.set_vec(track_rows(
+            &screen.favourite_tracks,
+            None,
+            is_favourite,
+            &translations,
+        ));
+        // The tab invites a first star only while none shows at all.
+        view.set_favourites_empty(!library_view::any_favourite_shown(
+            &tracks,
+            favourites.track_ids(),
+        ));
 
         screen.shown_selection = Self::show_selection(
             &screen,
             &view,
             &self.library_selection_tracks,
+            is_favourite,
             &translations,
         );
     }
@@ -295,6 +411,7 @@ impl Application {
         screen: &LibraryScreen,
         view: &user_interface::Library<'_>,
         rows: &slint::VecModel<LibraryTrack>,
+        is_favourite: impl Fn(i64) -> bool,
         translations: &Translations,
     ) -> Option<usize> {
         let selection_index = library_view::selection_place(
@@ -311,6 +428,7 @@ impl Application {
                 rows.set_vec(track_rows(
                     &selection.tracks,
                     Some(selection.kind),
+                    is_favourite,
                     translations,
                 ));
             }
@@ -369,8 +487,13 @@ impl Application {
         let view = self.window.global::<user_interface::Library>();
 
         screen.local_tracks = library_view::search_local_files(&tracks, &search);
-        self.library_local
-            .set_vec(track_rows(&screen.local_tracks, None, &translations));
+        // The Local Files table shows no star.
+        self.library_local.set_vec(track_rows(
+            &screen.local_tracks,
+            None,
+            |_| false,
+            &translations,
+        ));
         view.set_scanned_heading(
             translations
                 .count("local.scanned", screen.local_tracks.len())
@@ -499,6 +622,9 @@ impl Application {
         *self.cover_keys.borrow_mut() = covers::CoverKeys::new(&snapshot.tracks);
         *self.all_tracks.borrow_mut() = snapshot.tracks;
         *self.folders.borrow_mut() = snapshot.folders;
+        self.favourite_tracks
+            .borrow_mut()
+            .restore(snapshot.favourite_track_ids);
         self.group_library();
         // A rescan may have changed any file's art.
         self.thumbnails.borrow_mut().clear();
@@ -580,11 +706,32 @@ fn artist_card(artist: &ArtistGroup, translations: &Translations) -> LibraryCard
     }
 }
 
+/// Sets the star of the rows of `track_id` in a list whose rows are
+/// `tracks`, one for one.
+fn mark_favourite(
+    rows: &slint::VecModel<LibraryTrack>,
+    tracks: &[Track],
+    track_id: i64,
+    favourite: bool,
+) {
+    for (place, _) in tracks
+        .iter()
+        .enumerate()
+        .filter(|(_, track)| track.id == track_id)
+    {
+        if let Some(mut row) = rows.row_data(place) {
+            row.favourite = favourite;
+            rows.set_row_data(place, row);
+        }
+    }
+}
+
 /// Rows for a track list. An album's rows are numbered by their place on
 /// the record, an artist's are titled album first; `None` is a plain list.
 pub(super) fn track_rows(
     tracks: &[Track],
     browsed: Option<SelectionKind>,
+    is_favourite: impl Fn(i64) -> bool,
     translations: &Translations,
 ) -> Vec<LibraryTrack> {
     let use_track_number = browsed == Some(SelectionKind::Album);
@@ -608,6 +755,7 @@ pub(super) fn track_rows(
             format: track.format.as_str().into(),
             duration: text::format_time(track.duration_secs).into(),
             gradient_index: gradient_index(track),
+            favourite: is_favourite(track.id),
         })
         .collect()
 }

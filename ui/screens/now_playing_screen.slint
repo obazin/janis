@@ -6,7 +6,7 @@ import { Badge, BadgeVariant } from "../atoms/badge.slint";
 import { EmptyState } from "../atoms/empty_state.slint";
 import { Eyebrow } from "../atoms/eyebrow.slint";
 import { GlyphMode } from "../atoms/glyph.slint";
-import { IconButton, IconButtonIdentifier, IconButtonTone } from "../atoms/icon_button.slint";
+import { IconButton, IconButtonIdentifier, IconButtonSize, IconButtonTone } from "../atoms/icon_button.slint";
 import { SectionLabel } from "../atoms/section_label.slint";
 import { ScrollArea } from "../molecules/scroll_area.slint";
 import { Player } from "../features/player/player.slint";
@@ -238,15 +238,34 @@ export component NowPlayingScreen inherits Rectangle {
                         tone: Accent.accent;
                         overflow: elide;
                     }
-                    Text {
-                        text: Player.hero-title;
-                        font-family: Fonts.display;
-                        font-weight: Typography.black;
-                        font-size: Typography.hero;
-                        letter-spacing: Typography.tracking-tight * Typography.hero;
-                        color: Tokens.text;
-                        horizontal-alignment: left;
-                        wrap: word-wrap;
+                    HorizontalLayout {
+                        spacing: 14px;
+                        Text {
+                            horizontal-stretch: 1;
+                            text: Player.hero-title;
+                            font-family: Fonts.display;
+                            font-weight: Typography.black;
+                            font-size: Typography.hero;
+                            letter-spacing: Typography.tracking-tight * Typography.hero;
+                            color: Tokens.text;
+                            horizontal-alignment: left;
+                            wrap: word-wrap;
+                        }
+                        // A track can be starred; a station is starred by its name.
+                        if Player.local: VerticalLayout {
+                            alignment: start;
+                            padding-top: 12px;
+                            IconButton {
+                                identifier: IconButtonIdentifier.now-playing-favourite;
+                                icon: Icons.star;
+                                label: Player.favourite ? Strings.library-favourite-remove : Strings.library-favourite-add;
+                                mode: Player.favourite ? GlyphMode.fill : GlyphMode.stroke;
+                                size: IconButtonSize.medium;
+                                tone: IconButtonTone.muted;
+                                active: Player.favourite;
+                                clicked => { Player.favourite-toggled(); }
+                            }
+                        }
                     }
                 }
 

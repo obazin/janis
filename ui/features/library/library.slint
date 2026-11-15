@@ -23,6 +23,8 @@ export struct LibraryTrack {
     format: string,
     duration: string,
     gradient-index: int,
+    // The listener starred it.
+    favourite: bool,
 }
 
 // A watched folder, as the Local Files screen lists it.
@@ -35,7 +37,7 @@ export struct WatchedFolderRow {
 export global Library {
     // True when the library holds no track at all.
     in property <bool> empty: true;
-    // The open tab: playlists, artists, albums or songs.
+    // The open tab: playlists, artists, albums, songs or favourites.
     in property <string> tab: "albums";
 
     // What the search kept.
@@ -43,6 +45,9 @@ export global Library {
     in property <[LibraryCard]> artists;
     in property <[LibraryTrack]> songs;
     in property <[LibraryTrack]> recent;
+    in property <[LibraryTrack]> favourites;
+    // True when no song is starred at all, whatever the search keeps.
+    in property <bool> favourites-empty: true;
 
     // The album or artist browsed in place: its place among the cards of the
     // open tab, or -1 when nothing is selected or the search hides it.
@@ -85,6 +90,9 @@ export global Library {
     callback artist-clicked(index: int);
     callback song-clicked(index: int);
     callback recent-clicked(index: int);
+    callback favourite-clicked(index: int);
+    // Stars the song of a row, or takes its star away.
+    callback favourite-toggled(track-id: int);
     callback selection-track-clicked(index: int);
     callback selection-closed();
     // Pick audio files to add.
