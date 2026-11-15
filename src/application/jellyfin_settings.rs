@@ -1,6 +1,7 @@
 //! The controller's side of the Jellyfin card in Settings: signing in,
-//! reading the server's songs into the library, signing out, and where the
-//! engine and the cover loader find a server song.
+//! reading the server's songs into the library, showing or hiding each of its
+//! libraries, signing out, and where the engine and the cover loader find a
+//! server song.
 //!
 //! Every call to the server runs on the server worker, one after another, so
 //! a sign-out queued behind a sync runs after it and the library ends without
@@ -12,7 +13,7 @@ use std::sync::Arc;
 use slint::ComponentHandle;
 
 use super::library_screens::LibrarySnapshot;
-use super::{post, Application};
+use super::{list_place, post, Application};
 use crate::audio::Location;
 use crate::effects::Secret;
 use crate::jellyfin::{self, Failure, Session};
@@ -33,6 +34,30 @@ impl Application {
             let effects = application.media_server.borrow_mut().sign_out();
             application.run(effects);
             application.refresh_jellyfin();
+        }));
+        view.set_libraries(self.jellyfin_libraries.clone().into());
+        view.on_library_toggled(self.handler(|application, index: i32| {
+            let library_id = list_place(index).and_then(|place| {
+                application
+                    .jellyfin_library_ids
+                    .borrow()
+                    .get(place)
+                    .copied()
+            });
+            let Some(library_id) = library_id else {
+                return;
+            };
+            let effects = application
+                .media_server
+                .borrow_mut()
+                .toggle_library(library_id);
+            if effects.is_empty() {
+                return;
+            }
+            application.run(effects);
+            // What every screen shows changes with the library's songs.
+            application.group_library();
+            application.refresh_everything();
         }));
     }
 
@@ -82,9 +107,15 @@ impl Application {
         let database = Arc::clone(&self.database);
         let session = Session::new(&server, &self.device_identifier);
         self.server_worker.run(move || {
-            let outcome = jellyfin::songs(&session, &server.server_identifier)
-                .and_then(|songs| {
-                    library::sync_server_tracks(&database, server.id, songs).map_err(Failure::Other)
+            let outcome = jellyfin::listing(&session, &server.server_identifier)
+                .and_then(|listing| {
+                    library::sync_server_tracks(
+                        &database,
+                        server.id,
+                        &listing.libraries,
+                        listing.songs,
+                    )
+                    .map_err(Failure::Other)
                 })
                 .and_then(|report| {
                     persistence::set_last_sync(&database, server.id).map_err(Failure::Other)?;
@@ -180,7 +211,7 @@ impl Application {
 
     /// Pushes the Jellyfin card's state to the window.
     pub(super) fn refresh_jellyfin(&self) {
-        let card = self.media_server.borrow().card(&self.tracks.borrow());
+        let card = self.media_server.borrow().card(&self.all_tracks.borrow());
         let translations = self.translations.borrow();
         let view = self.window.global::<user_interface::Jellyfin>();
 
@@ -204,6 +235,23 @@ impl Application {
                 })
                 .unwrap_or_default()
                 .into(),
+        );
+        *self.jellyfin_library_ids.borrow_mut() = card
+            .libraries
+            .iter()
+            .map(|library| library.library_id)
+            .collect();
+        self.jellyfin_libraries.set_vec(
+            card.libraries
+                .into_iter()
+                .map(|library| user_interface::JellyfinLibrary {
+                    name: library.name.into(),
+                    detail: translations
+                        .count("jellyfin.librarySongs", library.song_count)
+                        .into(),
+                    shown: library.shown,
+                })
+                .collect::<Vec<_>>(),
         );
         // What the listener already typed is kept.
         if let Some((address, user_name)) = card.prefill {

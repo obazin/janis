@@ -5,11 +5,16 @@
 //! answer comes back with the epoch it was asked under, and an answer to a
 //! request the listener has since overtaken (a sign-out during a sync, a
 //! second sign-in) is dropped.
+//!
+//! Every library of the server is synced; the listener chooses which of them
+//! show their songs in Janis, and the state keeps that choice.
+
+use std::collections::HashSet;
 
 use crate::effects::{Effect, Secret};
 use crate::jellyfin::Failure;
 use crate::library::{ScanReport, Track};
-use crate::persistence::MediaServer;
+use crate::persistence::{MediaServer, ServerLibrary};
 
 /// The Settings card, as the state has it.
 #[derive(Clone, Debug, PartialEq)]
@@ -22,6 +27,20 @@ pub struct Card {
     pub summary: Option<Summary>,
     /// The address and user name the form starts from.
     pub prefill: Option<(String, String)>,
+    /// The server's libraries that hold songs, in its order, each with its
+    /// switch.
+    pub libraries: Vec<LibraryRow>,
+}
+
+/// A library of the server, as the card lists it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct LibraryRow {
+    /// Its row in `server_libraries`, which its switch names.
+    pub library_id: i64,
+    pub name: String,
+    /// The songs listed in it, shown or not.
+    pub song_count: usize,
+    pub shown: bool,
 }
 
 /// The server signed in to, as the card sums it up.
@@ -61,6 +80,8 @@ pub struct MediaServerState {
     epoch: u64,
     /// Where a sign-in started from, which is where a failed one returns.
     signing_in_from: Phase,
+    /// The server's libraries, in its order.
+    libraries: Vec<ServerLibrary>,
 }
 
 impl MediaServerState {
@@ -82,6 +103,52 @@ impl MediaServerState {
 
     pub fn server(&self) -> Option<&MediaServer> {
         self.server.as_ref()
+    }
+
+    /// Takes the libraries as `janis.db` lists them: at boot, and after every
+    /// read of the library. A library already known keeps the switch the
+    /// listener last set — that write may have landed after the read — and a
+    /// new one comes as read, shown.
+    pub fn set_libraries(&mut self, libraries: Vec<ServerLibrary>) {
+        let known: Vec<(i64, bool)> = self
+            .libraries
+            .iter()
+            .map(|library| (library.id, library.shown))
+            .collect();
+        self.libraries = libraries
+            .into_iter()
+            .map(|mut library| {
+                if let Some((_, shown)) = known.iter().find(|(id, _)| *id == library.id) {
+                    library.shown = *shown;
+                }
+                library
+            })
+            .collect();
+    }
+
+    /// The libraries whose songs the listener hid.
+    pub fn hidden_libraries(&self) -> HashSet<i64> {
+        self.libraries
+            .iter()
+            .filter(|library| !library.shown)
+            .map(|library| library.id)
+            .collect()
+    }
+
+    /// The listener flipped the switch of a library.
+    pub fn toggle_library(&mut self, library_id: i64) -> Vec<Effect> {
+        let Some(library) = self
+            .libraries
+            .iter_mut()
+            .find(|library| library.id == library_id)
+        else {
+            return Vec::new();
+        };
+        library.shown = !library.shown;
+        vec![Effect::PersistServerLibraryShown {
+            library_id: library.id,
+            shown: library.shown,
+        }]
     }
 
     #[cfg(test)]
@@ -117,6 +184,22 @@ impl MediaServerState {
                 .as_ref()
                 .filter(|_| self.phase == Phase::SignInAgain)
                 .map(|server| (server.address.clone(), server.user_name.clone())),
+            // A library listing no songs has nothing to show or hide; it is
+            // kept, with its switch, for when its songs come back.
+            libraries: self
+                .libraries
+                .iter()
+                .map(|library| LibraryRow {
+                    library_id: library.id,
+                    name: library.name.clone(),
+                    song_count: tracks
+                        .iter()
+                        .filter(|track| track.server_libraries.contains(&library.id))
+                        .count(),
+                    shown: library.shown,
+                })
+                .filter(|row| row.song_count > 0)
+                .collect(),
         }
     }
 
@@ -161,6 +244,16 @@ impl MediaServerState {
         }
         match outcome {
             Ok(server) => {
+                // Another server or user replaces the one before, libraries
+                // included; the read after the sync lists the new ones. The
+                // row's id says nothing here: the replacing row may reuse it.
+                let same_account = self.server.as_ref().is_some_and(|current| {
+                    current.server_identifier == server.server_identifier
+                        && current.user_identifier == server.user_identifier
+                });
+                if !same_account {
+                    self.libraries.clear();
+                }
                 self.server = Some(server);
                 self.phase = Phase::SignedIn;
                 self.message_key = None;
@@ -242,6 +335,7 @@ impl MediaServerState {
         };
         self.phase = Phase::SignedOut;
         self.message_key = None;
+        self.libraries.clear();
         self.epoch += 1;
         vec![Effect::SignOutMediaServer { server }]
     }
@@ -554,6 +648,134 @@ mod tests {
                 "http://jellyfin.local:8096".to_owned(),
                 "listener".to_owned()
             ))
+        );
+    }
+
+    fn library(id: i64, name: &str, shown: bool) -> ServerLibrary {
+        ServerLibrary {
+            id,
+            name: name.to_owned(),
+            shown,
+        }
+    }
+
+    #[test]
+    fn the_card_lists_each_library_with_its_songs_and_its_switch() {
+        let mut state = signed_in();
+        state.set_libraries(vec![
+            library(10, "Music", true),
+            library(11, "Kids", false),
+            library(12, "Films", true),
+        ]);
+        let songs = [
+            crate::library::test_support::track(1, "a")
+                .server(1, "a")
+                .in_libraries(&[10]),
+            crate::library::test_support::track(2, "b")
+                .server(1, "b")
+                .in_libraries(&[10, 11]),
+            crate::library::test_support::track(3, "c"),
+        ];
+        assert_eq!(
+            state.card(&songs).libraries,
+            [
+                LibraryRow {
+                    library_id: 10,
+                    name: "Music".to_owned(),
+                    song_count: 2,
+                    shown: true,
+                },
+                LibraryRow {
+                    library_id: 11,
+                    name: "Kids".to_owned(),
+                    song_count: 1,
+                    shown: false,
+                },
+            ],
+            "a library without songs is not listed"
+        );
+        assert_eq!(state.hidden_libraries(), HashSet::from([11]));
+    }
+
+    #[test]
+    fn a_switch_flips_its_library_and_is_saved() {
+        let mut state = signed_in();
+        state.set_libraries(vec![library(10, "Music", true), library(11, "Kids", true)]);
+
+        assert_eq!(
+            state.toggle_library(11),
+            [Effect::PersistServerLibraryShown {
+                library_id: 11,
+                shown: false,
+            }]
+        );
+        assert_eq!(state.hidden_libraries(), HashSet::from([11]));
+        assert_eq!(
+            state.toggle_library(11),
+            [Effect::PersistServerLibraryShown {
+                library_id: 11,
+                shown: true,
+            }]
+        );
+        assert!(state.hidden_libraries().is_empty());
+        assert!(state.toggle_library(99).is_empty(), "no such library");
+    }
+
+    #[test]
+    fn a_read_from_before_a_switch_does_not_undo_it() {
+        let mut state = signed_in();
+        state.set_libraries(vec![library(10, "Music", true)]);
+        state.toggle_library(10);
+
+        // A sync read the libraries before the switch was saved, and found a
+        // new one.
+        state.set_libraries(vec![library(10, "Music", true), library(12, "Talk", true)]);
+
+        assert_eq!(state.hidden_libraries(), HashSet::from([10]));
+        let songs = [crate::library::test_support::track(1, "a")
+            .server(1, "a")
+            .in_libraries(&[10, 12])];
+        assert_eq!(state.card(&songs).libraries.len(), 2);
+    }
+
+    #[test]
+    fn signing_out_or_in_elsewhere_forgets_the_libraries() {
+        let mut state = signed_in();
+        state.set_libraries(vec![library(10, "Music", false)]);
+        state.sign_out();
+        assert!(state.card(&[]).libraries.is_empty());
+        assert!(state.hidden_libraries().is_empty());
+
+        // The replacing row reuses the id of the one it replaces.
+        let mut state = signed_in();
+        state.set_libraries(vec![library(10, "Music", false)]);
+        let epoch = sign_in_epoch(&state.sign_in("http://jellyfin.local:8096", "someone", "x"));
+        let someone = MediaServer {
+            user_identifier: "someone".to_owned(),
+            user_name: "someone".to_owned(),
+            ..server()
+        };
+        state.sign_in_finished(epoch, Ok(someone));
+        assert!(state.hidden_libraries().is_empty(), "another user");
+
+        let mut state = signed_in();
+        state.set_libraries(vec![library(10, "Music", false)]);
+        let epoch = sign_in_epoch(&state.sign_in("http://other.local", "listener", "x"));
+        let elsewhere = MediaServer {
+            server_identifier: "other".to_owned(),
+            ..server()
+        };
+        state.sign_in_finished(epoch, Ok(elsewhere));
+        assert!(state.hidden_libraries().is_empty(), "another server");
+
+        let mut state = signed_in();
+        state.set_libraries(vec![library(10, "Music", false)]);
+        let epoch = sign_in_epoch(&state.sign_in("http://jellyfin.local:8096", "listener", "x"));
+        state.sign_in_finished(epoch, Ok(server()));
+        assert_eq!(
+            state.hidden_libraries(),
+            HashSet::from([10]),
+            "signing in again as the same user keeps them"
         );
     }
 

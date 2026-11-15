@@ -2,11 +2,14 @@ import { Tokens, Typography, Metrics } from "../../tokens.slint";
 import { Strings } from "strings.slint";
 import { GhostButton } from "../../atoms/ghost_button.slint";
 import { PrimaryButton } from "../../atoms/primary_button.slint";
+import { SectionLabel } from "../../atoms/section_label.slint";
 import { TextField, TextFieldKind } from "../../atoms/text_field.slint";
+import { ToggleRow } from "../../molecules/toggle_row.slint";
 import { Jellyfin } from "jellyfin.slint";
 
 // The Jellyfin server: the sign-in form, or the server signed in to with
-// its Sync and Sign out buttons, and a status line under either.
+// its Sync and Sign out buttons and a switch per library, and a status line
+// under either.
 export component JellyfinCard inherits Rectangle {
     border-radius: Metrics.radius-card;
     border-width: 1px;
@@ -98,6 +101,35 @@ export component JellyfinCard inherits Rectangle {
                 GhostButton {
                     label: Strings.jellyfin-sign-out;
                     clicked => { Jellyfin.sign-out-clicked(); }
+                }
+            }
+        }
+
+        if Jellyfin.signed-in && Jellyfin.libraries.length > 0: VerticalLayout {
+            spacing: 8px;
+            SectionLabel {
+                label: Strings.jellyfin-libraries;
+            }
+            Text {
+                text: Strings.jellyfin-libraries-description;
+                font-size: Typography.caption;
+                color: Tokens.text-muted;
+                horizontal-alignment: left;
+                wrap: word-wrap;
+            }
+            Rectangle {
+                border-radius: Metrics.radius-inset;
+                border-width: 1px;
+                border-color: Tokens.border;
+                background: Tokens.panel;
+                VerticalLayout {
+                    for library[index] in Jellyfin.libraries: ToggleRow {
+                        label: library.name;
+                        description: library.detail;
+                        checked: library.shown;
+                        last: index == Jellyfin.libraries.length - 1;
+                        toggled => { Jellyfin.library-toggled(index); }
+                    }
                 }
             }
         }

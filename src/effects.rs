@@ -59,6 +59,11 @@ pub enum Effect {
         option: PlaybackOption,
         enabled: bool,
     },
+    /// Remember whether a media server library's songs appear in Janis.
+    PersistServerLibraryShown {
+        library_id: i64,
+        shown: bool,
+    },
     /// Remember that a station is, or stopped being, a favourite.
     PersistFavouriteStation {
         station_id: String,

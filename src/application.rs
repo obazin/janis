@@ -87,6 +87,11 @@ pub struct Application {
     playback_options: RefCell<PlaybackOptions>,
     notifications: RefCell<Notifications>,
     visualizer: RefCell<Visualizer>,
+    /// Every track in `janis.db`, the songs of hidden server libraries
+    /// included.
+    all_tracks: RefCell<Vec<Track>>,
+    /// The tracks the screens show: `all_tracks` less the songs of the
+    /// server libraries the listener hid.
     tracks: RefCell<Vec<Track>>,
     albums: RefCell<Vec<AlbumGroup>>,
     artists: RefCell<Vec<ArtistGroup>>,
@@ -139,6 +144,9 @@ pub struct Application {
     favourite_stations: RefCell<FavouriteStations>,
     /// The Jellyfin server the listener signed in to, as Settings shows it.
     media_server: RefCell<MediaServerState>,
+    /// The Jellyfin card's library rows, and the library each stands for.
+    jellyfin_libraries: Rc<VecModel<user_interface::JellyfinLibrary>>,
+    jellyfin_library_ids: RefCell<Vec<i64>>,
     /// Where the calls to the media server run, one after another.
     server_worker: Worker,
     /// How this installation names itself to a media server.
@@ -171,14 +179,17 @@ impl Application {
     pub fn start(window: AppWindow) -> Result<Rc<Self>, String> {
         let database = Arc::new(persistence::init(platform::data_directory()?)?);
         let preferences = persistence::get_preferences(&database)?;
-        let tracks = library::list_tracks(&database)?;
+        let all_tracks = library::list_tracks(&database)?;
+        let mut media_server = MediaServerState::default();
+        media_server.set_libraries(persistence::server_libraries(&database)?);
+        let tracks = library_view::shown_tracks(&all_tracks, &media_server.hidden_libraries());
         let albums = library_view::albums(&tracks);
         let artists = library_view::artists(&tracks);
         let library_order = library_view::LibraryOrder::new(&tracks, &albums, &artists);
         let folders = library::list_watched_folders(&database)?;
         let mut favourite_stations = FavouriteStations::default();
         favourite_stations.restore(persistence::favourite_station_ids(&database)?);
-        let media_server = persistence::media_server(&database)?;
+        let kept_server = persistence::media_server(&database)?;
         let device_identifier = persistence::device_identifier(&database)?;
 
         let bridge = Arc::new(EngineBridge::new(|event| {
@@ -212,7 +223,8 @@ impl Application {
             albums: RefCell::new(albums),
             artists: RefCell::new(artists),
             library_order: RefCell::new(library_order),
-            cover_keys: RefCell::new(covers::CoverKeys::new(&tracks)),
+            cover_keys: RefCell::new(covers::CoverKeys::new(&all_tracks)),
+            all_tracks: RefCell::new(all_tracks),
             tracks: RefCell::new(tracks),
             current_art: RefCell::new(CurrentArt::default()),
             thumbnails: RefCell::new(covers::BoundedCache::new(covers::THUMBNAIL_LIMIT)),
@@ -250,7 +262,9 @@ impl Application {
             loudness: loudness::LoudnessMeasurement::new()?,
             track_overview: RefCell::new(OverviewReads::default()),
             favourite_stations: RefCell::new(favourite_stations),
-            media_server: RefCell::new(MediaServerState::default()),
+            media_server: RefCell::new(media_server),
+            jellyfin_libraries: Rc::new(VecModel::default()),
+            jellyfin_library_ids: RefCell::new(Vec::new()),
             server_worker: Worker::new("janis media server")?,
             device_identifier,
             radio_screen: RefCell::new(radio_screen::RadioScreen::default()),
@@ -282,7 +296,7 @@ impl Application {
         application.restore(&preferences);
         // A server kept from the last run is read again in the background;
         // the window opens on the songs already in the library.
-        let effects = application.media_server.borrow_mut().restore(media_server);
+        let effects = application.media_server.borrow_mut().restore(kept_server);
         application.run(effects);
         // The engine answers with its current state, as events.
         application.engine.describe();
@@ -546,6 +560,10 @@ impl Application {
                 Effect::PersistPlaybackOption { option, enabled } => self.saved(
                     "playback-option",
                     persistence::set_playback_option(&self.database, option, enabled),
+                ),
+                Effect::PersistServerLibraryShown { library_id, shown } => self.saved(
+                    "server-library",
+                    persistence::set_server_library_shown(&self.database, library_id, shown),
                 ),
                 Effect::PersistFavouriteStation {
                     station_id,

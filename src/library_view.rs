@@ -73,6 +73,23 @@ fn album_key(album: Option<&str>, artist: Option<&str>) -> String {
     format!("{}:{album}{}", album.len(), artist.unwrap_or(""))
 }
 
+/// The tracks the screens show: every file, and every server song listed in
+/// at least one library the listener shows. A server song filed in no library
+/// yet — kept from before libraries were read, until the next sync — shows.
+pub fn shown_tracks(tracks: &[Track], hidden_libraries: &HashSet<i64>) -> Vec<Track> {
+    tracks
+        .iter()
+        .filter(|track| {
+            track.server_libraries.is_empty()
+                || track
+                    .server_libraries
+                    .iter()
+                    .any(|library| !hidden_libraries.contains(library))
+        })
+        .cloned()
+        .collect()
+}
+
 /// Albums, newest addition first, each in its own running order.
 ///
 /// Grouped by album + album artist so a compilation stays one album instead
@@ -1745,5 +1762,33 @@ mod tests {
                 .collect();
             proptest::prop_assert_eq!(places, expected);
         }
+    }
+
+    #[test]
+    fn hiding_a_library_hides_only_the_songs_no_shown_library_holds() {
+        let file = track(1, "file");
+        let music = track(2, "music").server(1, "a").in_libraries(&[10]);
+        let shared = track(3, "shared").server(1, "b").in_libraries(&[10, 11]);
+        let kids = track(4, "kids").server(1, "c").in_libraries(&[11]);
+        let unfiled = track(5, "unfiled").server(1, "d");
+        let tracks = [file, music, shared, kids, unfiled];
+        let titles = |hidden: &[i64]| -> Vec<String> {
+            shown_tracks(&tracks, &hidden.iter().copied().collect())
+                .into_iter()
+                .map(|track| track.title)
+                .collect()
+        };
+
+        assert_eq!(titles(&[]), ["file", "music", "shared", "kids", "unfiled"]);
+        assert_eq!(
+            titles(&[11]),
+            ["file", "music", "shared", "unfiled"],
+            "a song another shown library holds stays"
+        );
+        assert_eq!(
+            titles(&[10, 11]),
+            ["file", "unfiled"],
+            "files always show, and so does a song filed in no library yet"
+        );
     }
 }

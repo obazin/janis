@@ -17,7 +17,7 @@ use crate::library::{self, ScanError, ScanReport, Track, WatchedFolder};
 use crate::library_view::{
     self, AlbumGroup, ArtistGroup, LibraryTab, Selection, SelectionKind, SHELF_TILE_COUNT,
 };
-use crate::persistence::DbState;
+use crate::persistence::{self, DbState, ServerLibrary};
 use crate::text;
 use crate::translations::Translations;
 use crate::user_interface::{self, LibraryCard, LibraryTrack};
@@ -49,6 +49,7 @@ pub(super) struct LibraryScreen {
 pub(super) struct LibrarySnapshot {
     tracks: Vec<Track>,
     folders: Vec<WatchedFolder>,
+    libraries: Vec<ServerLibrary>,
 }
 
 impl LibrarySnapshot {
@@ -56,6 +57,7 @@ impl LibrarySnapshot {
         Ok(Self {
             tracks: library::list_tracks(database)?,
             folders: library::list_watched_folders(database)?,
+            libraries: persistence::server_libraries(database)?,
         })
     }
 }
@@ -491,15 +493,33 @@ impl Application {
 
     /// Replaces the library the screens are built from.
     pub(super) fn take_library(&self, snapshot: LibrarySnapshot) {
-        let albums = library_view::albums(&snapshot.tracks);
-        let artists = library_view::artists(&snapshot.tracks);
+        self.media_server
+            .borrow_mut()
+            .set_libraries(snapshot.libraries);
+        *self.cover_keys.borrow_mut() = covers::CoverKeys::new(&snapshot.tracks);
+        *self.all_tracks.borrow_mut() = snapshot.tracks;
+        *self.folders.borrow_mut() = snapshot.folders;
+        self.group_library();
+        // A rescan may have changed any file's art.
+        self.thumbnails.borrow_mut().clear();
+        self.cover_requests.borrow_mut().clear();
+        self.bump_cover_revision();
+    }
+
+    /// Builds the tracks, albums and artists the screens show from the whole
+    /// library, less the songs of the server libraries the listener hid.
+    pub(super) fn group_library(&self) {
+        let tracks = library_view::shown_tracks(
+            &self.all_tracks.borrow(),
+            &self.media_server.borrow().hidden_libraries(),
+        );
+        let albums = library_view::albums(&tracks);
+        let artists = library_view::artists(&tracks);
         *self.library_order.borrow_mut() =
-            library_view::LibraryOrder::new(&snapshot.tracks, &albums, &artists);
+            library_view::LibraryOrder::new(&tracks, &albums, &artists);
         *self.albums.borrow_mut() = albums;
         *self.artists.borrow_mut() = artists;
-        *self.cover_keys.borrow_mut() = covers::CoverKeys::new(&snapshot.tracks);
-        *self.tracks.borrow_mut() = snapshot.tracks;
-        *self.folders.borrow_mut() = snapshot.folders;
+        *self.tracks.borrow_mut() = tracks;
         {
             let mut screen = self.library_screen.borrow_mut();
             screen.selection = screen.selection.take().and_then(|selection| {
@@ -510,10 +530,6 @@ impl Application {
                 )
             });
         }
-        // A rescan may have changed any file's art.
-        self.thumbnails.borrow_mut().clear();
-        self.cover_requests.borrow_mut().clear();
-        self.bump_cover_revision();
     }
 }
 

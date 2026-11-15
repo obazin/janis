@@ -29,6 +29,9 @@ pub struct Track {
     /// The server item whose picture is the song's cover — its own, or its
     /// album's. `None` for a file, and for a server song with no picture.
     pub artwork_item: Option<String>,
+    /// The server libraries the song is listed in, by their row in
+    /// `server_libraries`. Empty for a file.
+    pub server_libraries: Vec<i64>,
     pub path: String,
     pub title: String,
     pub artist: Option<String>,
@@ -85,14 +88,21 @@ enum Origin<'a> {
     },
 }
 
-/// Upserts one scanned file or server song. Returns `true` when the row was
-/// newly inserted.
+/// The row an upsert wrote.
+#[derive(Clone, Copy, Debug)]
+struct Upserted {
+    track_id: i64,
+    /// The row was newly inserted rather than updated.
+    added: bool,
+}
+
+/// Upserts one scanned file or server song.
 fn upsert_track(
     conn: &rusqlite::Connection,
     origin: Origin<'_>,
     path: &str,
     meta: &Metadata,
-) -> Result<bool, String> {
+) -> Result<Upserted, String> {
     let (folder_id, server_id, artwork_item) = match origin {
         Origin::File { folder_id } => (folder_id, None, None),
         Origin::Server {
@@ -109,8 +119,9 @@ fn upsert_track(
         })
         .map_err(|e| format!("probe track row: {}", e))?;
 
-    conn.execute(
-        "INSERT INTO tracks (folder_id, path, title, artist, album, composer, duration_secs,
+    let track_id: i64 = conn
+        .query_row(
+            "INSERT INTO tracks (folder_id, path, title, artist, album, composer, duration_secs,
                              format, sample_rate, bit_depth, channels, lossless,
                              track_number, track_total, disc_number, disc_total,
                              year, genre, album_artist,
@@ -145,37 +156,42 @@ fn upsert_track(
              rg_album_gain_db = excluded.rg_album_gain_db,
              rg_album_peak = excluded.rg_album_peak,
              server_id = excluded.server_id,
-             artwork_item = excluded.artwork_item",
-        rusqlite::params![
-            folder_id,
-            path,
-            meta.title,
-            meta.artist,
-            meta.album,
-            meta.composer,
-            meta.duration_secs,
-            meta.format,
-            meta.sample_rate,
-            meta.bit_depth,
-            meta.channels,
-            meta.lossless as i64,
-            meta.track_number,
-            meta.track_total,
-            meta.disc_number,
-            meta.disc_total,
-            meta.year,
-            meta.genre,
-            meta.album_artist,
-            meta.rg_track_gain_db,
-            meta.rg_track_peak,
-            meta.rg_album_gain_db,
-            meta.rg_album_peak,
-            server_id,
-            artwork_item,
-        ],
-    )
-    .map_err(|e| format!("upsert track {}: {}", path, e))?;
-    Ok(!existed)
+             artwork_item = excluded.artwork_item
+         RETURNING id",
+            rusqlite::params![
+                folder_id,
+                path,
+                meta.title,
+                meta.artist,
+                meta.album,
+                meta.composer,
+                meta.duration_secs,
+                meta.format,
+                meta.sample_rate,
+                meta.bit_depth,
+                meta.channels,
+                meta.lossless as i64,
+                meta.track_number,
+                meta.track_total,
+                meta.disc_number,
+                meta.disc_total,
+                meta.year,
+                meta.genre,
+                meta.album_artist,
+                meta.rg_track_gain_db,
+                meta.rg_track_peak,
+                meta.rg_album_gain_db,
+                meta.rg_album_peak,
+                server_id,
+                artwork_item,
+            ],
+            |row| row.get(0),
+        )
+        .map_err(|e| format!("upsert track {}: {}", path, e))?;
+    Ok(Upserted {
+        track_id,
+        added: !existed,
+    })
 }
 
 /// Files read per database visit during a scan. The walk and the tag probes
@@ -261,8 +277,8 @@ fn flush_batch(
     let mut written = ScanReport::default();
     for (path, meta) in batch.drain(..) {
         match upsert_track(&tx, Origin::File { folder_id }, &path, &meta) {
-            Ok(true) => written.added += 1,
-            Ok(false) => written.updated += 1,
+            Ok(Upserted { added: true, .. }) => written.added += 1,
+            Ok(Upserted { added: false, .. }) => written.updated += 1,
             Err(e) => {
                 log::warn!("{}", e);
                 written.skipped += 1;
@@ -345,6 +361,22 @@ fn prune_missing(db: &DbState) -> Result<usize, String> {
 
 pub fn list_tracks(db: &DbState) -> Result<Vec<Track>, String> {
     let conn = db.lock();
+    let mut libraries_of_track: std::collections::HashMap<i64, Vec<i64>> =
+        std::collections::HashMap::new();
+    conn.prepare("SELECT track_id, library_id FROM track_libraries ORDER BY library_id")
+        .and_then(|mut statement| {
+            for membership in
+                statement.query_map([], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)))?
+            {
+                let (track_id, library_id) = membership?;
+                libraries_of_track
+                    .entry(track_id)
+                    .or_default()
+                    .push(library_id);
+            }
+            Ok(())
+        })
+        .map_err(|error| format!("read the songs' libraries: {error}"))?;
     let mut stmt = conn
         .prepare(
             "SELECT id, folder_id, path, title, artist, album, composer, duration_secs,
@@ -363,6 +395,7 @@ pub fn list_tracks(db: &DbState) -> Result<Vec<Track>, String> {
                 folder_id: row.get(1)?,
                 server_id: row.get(25)?,
                 artwork_item: row.get(26)?,
+                server_libraries: Vec::new(),
                 path: row.get(2)?,
                 title: row.get(3)?,
                 artist: row.get(4)?,
@@ -396,6 +429,15 @@ pub fn list_tracks(db: &DbState) -> Result<Vec<Track>, String> {
         })
         .and_then(|rows| rows.collect::<Result<Vec<_>, _>>())
         .map_err(|e| format!("read tracks: {}", e))?;
+    let tracks = tracks
+        .into_iter()
+        .map(|mut track| {
+            if let Some(libraries) = libraries_of_track.remove(&track.id) {
+                track.server_libraries = libraries;
+            }
+            track
+        })
+        .collect();
     Ok(tracks)
 }
 
@@ -553,38 +595,47 @@ pub struct ServerSong {
     pub metadata: Metadata,
     /// The item whose picture is the song's cover, when the server has one.
     pub artwork_item: Option<String>,
+    /// The server's identifiers of the libraries the song is listed in.
+    pub libraries: Vec<String>,
 }
 
-/// Brings the server's songs in the library in line with a complete listing
-/// of them: every listed song is upserted, and every song of this server
-/// missing from the listing is removed — the listing is complete, so missing
-/// means gone from the server. A listing that could not be read whole must
-/// not reach here: it would read as songs deleted.
+/// One library of a media server, as its listing names it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ListedLibrary {
+    /// The server's own identifier of the library.
+    pub identifier: String,
+    pub name: String,
+}
+
+/// Brings the server's libraries and songs in the library in line with a
+/// complete listing of them: every listed library and song is upserted, and
+/// every library or song of this server missing from the listing is removed
+/// — the listing is complete, so missing means gone from the server. A
+/// listing that could not be read whole must not reach here: it would read as
+/// songs deleted. A library keeps whether the listener shows it.
 ///
 /// Same lock discipline as a folder scan: bursts of `SCAN_BATCH` upserts, one
 /// transaction each, so the engine's loudness reads are never starved.
 pub fn sync_server_tracks(
     database: &DbState,
     server_id: i64,
+    libraries: &[ListedLibrary],
     songs: Vec<ServerSong>,
 ) -> Result<ScanReport, String> {
+    let library_rows = sync_server_libraries(database, server_id, libraries)?;
     let mut report = ScanReport::default();
     let listed: std::collections::HashSet<String> =
         songs.iter().map(|song| song.address.clone()).collect();
     for burst in songs.chunks(SCAN_BATCH) {
         let connection = database.lock();
-        let transaction = connection
+        let mut transaction = connection
             .unchecked_transaction()
             .map_err(|error| format!("server sync transaction: {error}"))?;
         let mut written = ScanReport::default();
         for song in burst {
-            let origin = Origin::Server {
-                server_id,
-                artwork_item: song.artwork_item.as_deref(),
-            };
-            match upsert_track(&transaction, origin, &song.address, &song.metadata) {
-                Ok(true) => written.added += 1,
-                Ok(false) => written.updated += 1,
+            match write_server_song(&mut transaction, server_id, song, &library_rows) {
+                Ok(Upserted { added: true, .. }) => written.added += 1,
+                Ok(Upserted { added: false, .. }) => written.updated += 1,
                 Err(error) => {
                     log::warn!("{error}");
                     written.skipped += 1;
@@ -623,6 +674,116 @@ pub fn sync_server_tracks(
         .commit()
         .map_err(|error| format!("server prune commit: {error}"))?;
     Ok(report)
+}
+
+/// Upserts the server's listed libraries, in the order listed, and removes
+/// those it no longer lists. Returns each listed library's row, by the
+/// server's identifier.
+fn sync_server_libraries(
+    database: &DbState,
+    server_id: i64,
+    libraries: &[ListedLibrary],
+) -> Result<std::collections::HashMap<String, i64>, String> {
+    let connection = database.lock();
+    let transaction = connection
+        .unchecked_transaction()
+        .map_err(|error| format!("library sync transaction: {error}"))?;
+    let mut rows = std::collections::HashMap::new();
+    for (position, library) in libraries.iter().enumerate() {
+        let row: i64 = transaction
+            .query_row(
+                "INSERT INTO server_libraries (server_id, library_identifier, name, position)
+                 VALUES (?1, ?2, ?3, ?4)
+                 ON CONFLICT(server_id, library_identifier) DO UPDATE SET
+                     name = excluded.name,
+                     position = excluded.position
+                 RETURNING id",
+                rusqlite::params![server_id, library.identifier, library.name, position as i64],
+                |row| row.get(0),
+            )
+            .map_err(|error| format!("keep library {}: {error}", library.name))?;
+        rows.insert(library.identifier.clone(), row);
+    }
+    let stored: Vec<i64> = transaction
+        .prepare("SELECT id FROM server_libraries WHERE server_id = ?1")
+        .and_then(|mut statement| {
+            statement
+                .query_map([server_id], |row| row.get(0))?
+                .collect()
+        })
+        .map_err(|error| format!("list the server's libraries: {error}"))?;
+    let kept: std::collections::HashSet<i64> = rows.values().copied().collect();
+    for library_id in stored {
+        if !kept.contains(&library_id) {
+            transaction
+                .execute("DELETE FROM server_libraries WHERE id = ?1", [library_id])
+                .map_err(|error| format!("remove library {library_id}: {error}"))?;
+        }
+    }
+    transaction
+        .commit()
+        .map_err(|error| format!("library sync commit: {error}"))?;
+    Ok(rows)
+}
+
+/// Upserts one server song and files it in the libraries that list it, as
+/// one step: should filing fail, the song is left as it was, so it never
+/// ends up in no library — which would show it whatever the switches say.
+fn write_server_song(
+    transaction: &mut rusqlite::Transaction<'_>,
+    server_id: i64,
+    song: &ServerSong,
+    library_rows: &std::collections::HashMap<String, i64>,
+) -> Result<Upserted, String> {
+    // Dropped without a commit, the savepoint rolls this song's writes back.
+    let savepoint = transaction
+        .savepoint()
+        .map_err(|error| format!("start writing {}: {error}", song.address))?;
+    let origin = Origin::Server {
+        server_id,
+        artwork_item: song.artwork_item.as_deref(),
+    };
+    let upserted = upsert_track(&savepoint, origin, &song.address, &song.metadata)?;
+    set_track_libraries(
+        &savepoint,
+        upserted.track_id,
+        &song.address,
+        &song.libraries,
+        library_rows,
+    )?;
+    savepoint
+        .commit()
+        .map_err(|error| format!("finish writing {}: {error}", song.address))?;
+    Ok(upserted)
+}
+
+/// Records the libraries a server song is listed in, in place of those it was
+/// listed in before.
+fn set_track_libraries(
+    connection: &rusqlite::Connection,
+    track_id: i64,
+    address: &str,
+    libraries: &[String],
+    library_rows: &std::collections::HashMap<String, i64>,
+) -> Result<(), String> {
+    connection
+        .execute(
+            "DELETE FROM track_libraries WHERE track_id = ?1",
+            [track_id],
+        )
+        .map_err(|error| format!("clear the libraries of {address}: {error}"))?;
+    for library in libraries {
+        let Some(library_id) = library_rows.get(library) else {
+            continue;
+        };
+        connection
+            .execute(
+                "INSERT OR IGNORE INTO track_libraries (track_id, library_id) VALUES (?1, ?2)",
+                [track_id, *library_id],
+            )
+            .map_err(|error| format!("file {address} in a library: {error}"))?;
+    }
+    Ok(())
 }
 
 /// Where a track's cover comes from.
@@ -893,6 +1054,7 @@ pub mod test_support {
             folder_id: None,
             server_id: None,
             artwork_item: None,
+            server_libraries: Vec::new(),
             path: format!("/music/{id}.flac"),
             title: title.to_owned(),
             artist: None,
@@ -982,6 +1144,12 @@ pub mod test_support {
             self.artwork_item = Some(item.to_owned());
             self
         }
+
+        /// Listed in these libraries of its server, by their row.
+        pub fn in_libraries(mut self, libraries: &[i64]) -> Self {
+            self.server_libraries = libraries.to_vec();
+            self
+        }
     }
 }
 
@@ -1063,6 +1231,7 @@ mod tests {
                 rg_album_peak: None,
             },
             artwork_item: Some(format!("album-of-{item}")),
+            libraries: Vec::new(),
         }
     }
 
@@ -1091,6 +1260,7 @@ mod tests {
         let first = sync_server_tracks(
             &db,
             server_id,
+            &[],
             vec![server_song("a", "One"), server_song("b", "Two")],
         )
         .expect("first sync");
@@ -1103,7 +1273,7 @@ mod tests {
             .id;
         store_loudness(&db, a_id, -14.0, 0.9);
 
-        let second = sync_server_tracks(&db, server_id, vec![server_song("a", "One again")])
+        let second = sync_server_tracks(&db, server_id, &[], vec![server_song("a", "One again")])
             .expect("second sync");
         assert_eq!((second.added, second.updated, second.removed), (0, 1, 1));
 
@@ -1126,12 +1296,166 @@ mod tests {
         );
     }
 
+    fn library(identifier: &str, name: &str) -> ListedLibrary {
+        ListedLibrary {
+            identifier: identifier.to_owned(),
+            name: name.to_owned(),
+        }
+    }
+
+    fn listed_in(mut song: ServerSong, libraries: &[&str]) -> ServerSong {
+        song.libraries = libraries
+            .iter()
+            .map(|library| (*library).to_owned())
+            .collect();
+        song
+    }
+
+    #[test]
+    fn a_sync_files_each_song_in_its_libraries_and_keeps_which_are_shown() {
+        let directory = tempfile::tempdir().expect("a temporary directory");
+        let database = crate::persistence::init(directory.path().to_path_buf()).expect("db");
+        let server_id = signed_in(&database);
+
+        sync_server_tracks(
+            &database,
+            server_id,
+            &[library("music", "Music"), library("kids", "Kids")],
+            vec![
+                listed_in(server_song("a", "One"), &["music"]),
+                listed_in(server_song("b", "Two"), &["music", "kids"]),
+            ],
+        )
+        .expect("first sync");
+        let libraries = crate::persistence::server_libraries(&database).expect("libraries");
+        let names: Vec<&str> = libraries
+            .iter()
+            .map(|library| library.name.as_str())
+            .collect();
+        assert_eq!(names, ["Music", "Kids"], "in the server's order");
+        assert!(
+            libraries.iter().all(|library| library.shown),
+            "shown at first"
+        );
+        let (music, kids) = (libraries[0].id, libraries[1].id);
+        let libraries_of = |title: &str| {
+            list_tracks(&database)
+                .expect("tracks")
+                .into_iter()
+                .find(|track| track.title == title)
+                .map(|track| track.server_libraries)
+        };
+        assert_eq!(libraries_of("One"), Some(vec![music]));
+        assert_eq!(
+            libraries_of("Two"),
+            Some(vec![music, kids]),
+            "a song two libraries share is in both"
+        );
+
+        crate::persistence::set_server_library_shown(&database, kids, false).expect("hide");
+        sync_server_tracks(
+            &database,
+            server_id,
+            &[library("kids", "Children"), library("talk", "Talk")],
+            vec![
+                listed_in(server_song("b", "Two"), &["kids"]),
+                listed_in(server_song("c", "Three"), &["talk"]),
+            ],
+        )
+        .expect("second sync");
+        let libraries = crate::persistence::server_libraries(&database).expect("libraries");
+        assert_eq!(
+            libraries,
+            [
+                crate::persistence::ServerLibrary {
+                    id: kids,
+                    name: "Children".to_owned(),
+                    shown: false,
+                },
+                crate::persistence::ServerLibrary {
+                    id: libraries[1].id,
+                    name: "Talk".to_owned(),
+                    shown: true,
+                },
+            ],
+            "a renamed library keeps its row and its choice; one no longer listed goes"
+        );
+        assert_eq!(libraries_of("Two"), Some(vec![kids]));
+        assert_eq!(libraries_of("One"), None, "gone from the server");
+    }
+
+    #[test]
+    fn a_song_that_cannot_be_filed_keeps_what_it_had_and_is_counted() {
+        let directory = tempfile::tempdir().expect("a temporary directory");
+        let database = crate::persistence::init(directory.path().to_path_buf()).expect("db");
+        let server_id = signed_in(&database);
+        let libraries = [library("music", "Music"), library("kids", "Kids")];
+        sync_server_tracks(
+            &database,
+            server_id,
+            &libraries,
+            vec![listed_in(server_song("a", "One"), &["kids"])],
+        )
+        .expect("first sync");
+        // Filing this song anywhere now fails half-way: after its old
+        // libraries are cleared, at the first new one.
+        database
+            .lock()
+            .execute_batch(
+                "CREATE TEMP TRIGGER refuse BEFORE INSERT ON track_libraries
+                 BEGIN SELECT RAISE(ABORT, 'refused'); END;",
+            )
+            .expect("a trigger");
+
+        let report = sync_server_tracks(
+            &database,
+            server_id,
+            &libraries,
+            vec![listed_in(server_song("a", "One renamed"), &["music"])],
+        )
+        .expect("second sync");
+
+        assert_eq!(report.skipped, 1);
+        let tracks = list_tracks(&database).expect("tracks");
+        let kids = crate::persistence::server_libraries(&database).expect("libraries")[1].id;
+        assert_eq!(
+            (
+                tracks[0].title.as_str(),
+                tracks[0].server_libraries.as_slice()
+            ),
+            ("One", [kids].as_slice()),
+            "neither its new tags nor an empty filing were kept"
+        );
+    }
+
+    #[test]
+    fn signing_out_takes_the_libraries_away_with_the_songs() {
+        let directory = tempfile::tempdir().expect("a temporary directory");
+        let database = crate::persistence::init(directory.path().to_path_buf()).expect("db");
+        let server_id = signed_in(&database);
+        sync_server_tracks(
+            &database,
+            server_id,
+            &[library("music", "Music")],
+            vec![listed_in(server_song("a", "One"), &["music"])],
+        )
+        .expect("sync");
+
+        crate::persistence::remove_media_server(&database, server_id).expect("sign out");
+
+        assert_eq!(
+            crate::persistence::server_libraries(&database),
+            Ok(Vec::new())
+        );
+        assert_eq!(list_tracks(&database).map(|tracks| tracks.len()), Ok(0));
+    }
+
     #[test]
     fn a_rescan_never_touches_a_servers_songs() {
         let directory = tempfile::tempdir().expect("a temporary directory");
         let db = crate::persistence::init(directory.path().to_path_buf()).expect("db");
         let server_id = signed_in(&db);
-        sync_server_tracks(&db, server_id, vec![server_song("a", "One")]).expect("sync");
+        sync_server_tracks(&db, server_id, &[], vec![server_song("a", "One")]).expect("sync");
 
         let report = rescan_library(&db).expect("rescan");
 
@@ -1244,7 +1568,7 @@ mod tests {
         write_wav(&folder.join("second.wav"));
         add_watched_folder(&database, &folder.to_string_lossy()).expect("scan");
         let server_id = signed_in(&database);
-        sync_server_tracks(&database, server_id, vec![server_song("a", "One")]).expect("sync");
+        sync_server_tracks(&database, server_id, &[], vec![server_song("a", "One")]).expect("sync");
 
         let pending = tracks_needing_loudness(&database).expect("pending");
         assert_eq!(pending.len(), 2, "the server's song is not a file here");
@@ -1264,7 +1588,7 @@ mod tests {
         let mut song = server_song("a", "One");
         song.metadata.rg_track_gain_db = Some(-7.0);
         song.metadata.rg_album_gain_db = Some(-4.0);
-        sync_server_tracks(&database, server_id, vec![song]).expect("sync");
+        sync_server_tracks(&database, server_id, &[], vec![song]).expect("sync");
 
         let tracks = list_tracks(&database).expect("tracks");
         assert_eq!(tracks[0].gain_db, -4.0, "the album's gain");

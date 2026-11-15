@@ -1,6 +1,15 @@
 // The Jellyfin server as the Settings card shows it. Filled by the
 // application; the callbacks are the listener's choices.
 
+// One library of the server, with its switch.
+export struct JellyfinLibrary {
+    name: string,
+    // "2,904 songs"
+    detail: string,
+    // Its songs appear in Janis.
+    shown: bool,
+}
+
 export global Jellyfin {
     // The form. The application clears the password as soon as it has sent it.
     in-out property <string> address;
@@ -15,8 +24,12 @@ export global Jellyfin {
     // Progress, or what went wrong last; empty when there is nothing to say.
     in property <string> status;
     in property <bool> status-failed;
+    // The server's libraries, in its order, while signed in.
+    in property <[JellyfinLibrary]> libraries;
 
     callback sign-in-clicked();
     callback sync-clicked();
     callback sign-out-clicked();
+    // The switch of the library at this place was flipped.
+    callback library-toggled(index: int);
 }

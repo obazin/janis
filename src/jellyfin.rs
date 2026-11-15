@@ -1,5 +1,5 @@
-//! The Jellyfin client: signing in, listing the server's songs, and the
-//! addresses Janis plays and draws them from.
+//! The Jellyfin client: signing in, listing the server's libraries and their
+//! songs, and the addresses Janis plays and draws them from.
 //!
 //! Every call here waits on the network, so it runs on the server worker,
 //! never on the interface thread. What the server answers is mapped into the
@@ -13,7 +13,7 @@ use std::time::Duration;
 use serde::Deserialize;
 
 use crate::audio::{Location, Metadata, RemoteFile, LOSSLESS_EXTENSIONS};
-use crate::library::{ServerSong, Track};
+use crate::library::{ListedLibrary, ServerSong, Track};
 use crate::persistence::{MediaServer, NewMediaServer};
 
 /// How Janis names itself to the server. No personal detail: the device is
@@ -32,6 +32,11 @@ const REQUEST_TIMEOUT: Duration = Duration::from_millis(500);
 const DEFAULT_PORT: u16 = 8096;
 /// How a server song's library key starts; the rest is `<server>/<item>`.
 const SONG_ADDRESS_SCHEME: &str = "jellyfin://";
+/// What a user view's `CollectionType` says when its items are not songs of
+/// its own: a playlist lists songs of other libraries, a collection groups
+/// items, live TV holds none, and the folder view (shown when the user turns
+/// on "Display folder view") holds the songs of every other library again.
+const NOT_SONG_LIBRARIES: &[&str] = &["playlists", "boxsets", "livetv", "folders"];
 /// Bits per second of the transcode an overview is read from: plenty for a
 /// shape, and about half a megabyte for a minute.
 const OVERVIEW_BIT_RATE: &str = "64000";
@@ -337,7 +342,17 @@ pub fn item_song(item: &Item, server_identifier: &str) -> ServerSong {
             rg_album_peak: None,
         },
         artwork_item,
+        libraries: Vec::new(),
     }
+}
+
+/// Whether a user view can hold songs of its own: a music library, a mixed
+/// one (no collection type), or any other that may list audio items.
+fn holds_songs(view: &View) -> bool {
+    !view
+        .collection_type
+        .as_deref()
+        .is_some_and(|kind| NOT_SONG_LIBRARIES.contains(&kind))
 }
 
 // ── Calls ───────────────────────────────────────────────────────────────────
@@ -405,6 +420,34 @@ struct AuthenticatedUser {
     name: String,
 }
 
+/// A library as the server lists the user's views.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+struct View {
+    id: String,
+    #[serde(default)]
+    name: String,
+    /// `music`, `movies`, `playlists`…; absent on a library of mixed content.
+    collection_type: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "PascalCase")]
+struct ViewsPage {
+    #[serde(default)]
+    items: Vec<View>,
+}
+
+/// What a sync reads from the server: every library that may hold songs, in
+/// the order the user sees them — one that lists none this time is still
+/// there, so it keeps the listener's switch — and every song in them, each
+/// once, naming the libraries it is listed in.
+#[derive(Debug, Default)]
+pub struct Listing {
+    pub libraries: Vec<ListedLibrary>,
+    pub songs: Vec<ServerSong>,
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "PascalCase")]
 struct ItemsPage {
@@ -462,36 +505,79 @@ pub fn sign_in(
     })
 }
 
-/// Every song the user can see on the server, read page by page. Either the
-/// whole listing or a failure: a partial one would read as deleted songs.
-pub fn songs(session: &Session, server_identifier: &str) -> Result<Vec<ServerSong>, Failure> {
-    let client = client()?;
+/// Sends a signed-in GET.
+fn signed_in_send(
+    session: &Session,
+    url: reqwest::Url,
+) -> Result<reqwest::blocking::Response, Failure> {
+    client()?
+        .get(url)
+        .header(
+            "Authorization",
+            authorization(&session.device_identifier, Some(&session.access_token)),
+        )
+        .send()
+        .map_err(transport_failure)
+}
+
+/// Reads the JSON of a signed-in call's answer.
+fn signed_in_answer<T: serde::de::DeserializeOwned>(
+    response: reqwest::blocking::Response,
+) -> Result<T, Failure> {
+    if !response.status().is_success() {
+        return Err(status_failure(response.status(), false));
+    }
+    response
+        .json()
+        .map_err(|error| Failure::Other(error.without_url().to_string()))
+}
+
+/// The user's views — their libraries — in the order the user set, those
+/// left out of the home screen's "My Media" included: their songs are the
+/// user's all the same. A server older than Jellyfin 10.9 answers them at
+/// `/Users/{user}/Views` only.
+fn views(session: &Session) -> Result<Vec<View>, Failure> {
+    let parse = |path: &str| {
+        reqwest::Url::parse(&format!("{}{path}", session.address))
+            .map_err(|error| Failure::Other(error.to_string()))
+    };
+    let mut url = parse("/UserViews")?;
+    url.query_pairs_mut()
+        .append_pair("userId", &session.user_identifier)
+        .append_pair("includeExternalContent", "false")
+        .append_pair("includeHidden", "true");
+    let mut response = signed_in_send(session, url)?;
+    if response.status() == reqwest::StatusCode::NOT_FOUND {
+        response = signed_in_send(session, {
+            let mut url = parse(&format!("/Users/{}/Views", session.user_identifier))?;
+            url.query_pairs_mut().append_pair("includeHidden", "true");
+            url
+        })?;
+    }
+    signed_in_answer::<ViewsPage>(response).map(|page| page.items)
+}
+
+/// Every song of one library, read page by page. Either the whole listing or
+/// a failure: a partial one would read as deleted songs.
+fn library_songs(
+    session: &Session,
+    server_identifier: &str,
+    library: &str,
+) -> Result<Vec<ServerSong>, Failure> {
     let mut songs = Vec::new();
     loop {
         let mut url = reqwest::Url::parse(&format!("{}/Items", session.address))
             .map_err(|error| Failure::Other(error.to_string()))?;
         url.query_pairs_mut()
             .append_pair("userId", &session.user_identifier)
+            .append_pair("ParentId", library)
             .append_pair("IncludeItemTypes", "Audio")
             .append_pair("Recursive", "true")
             .append_pair("Fields", "MediaSources,Genres,People")
             .append_pair("SortBy", "SortName")
             .append_pair("StartIndex", &songs.len().to_string())
             .append_pair("Limit", &PAGE_SIZE.to_string());
-        let response = client
-            .get(url)
-            .header(
-                "Authorization",
-                authorization(&session.device_identifier, Some(&session.access_token)),
-            )
-            .send()
-            .map_err(transport_failure)?;
-        if !response.status().is_success() {
-            return Err(status_failure(response.status(), false));
-        }
-        let page: ItemsPage = response
-            .json()
-            .map_err(|error| Failure::Other(error.without_url().to_string()))?;
+        let page: ItemsPage = signed_in_answer(signed_in_send(session, url)?)?;
         let received = page.items.len();
         songs.extend(
             page.items
@@ -512,6 +598,31 @@ pub fn songs(session: &Session, server_identifier: &str) -> Result<Vec<ServerSon
             _ => {}
         }
     }
+}
+
+/// The user's libraries and every song in them. Either the whole listing or
+/// a failure: a library that could not be read whole would read as deleted
+/// songs. A song two libraries share is listed once, in both.
+pub fn listing(session: &Session, server_identifier: &str) -> Result<Listing, Failure> {
+    let mut listing = Listing::default();
+    let mut place_of_song = std::collections::HashMap::new();
+    for view in views(session)?.into_iter().filter(holds_songs) {
+        for mut song in library_songs(session, server_identifier, &view.id)? {
+            if let Some(&place) = place_of_song.get(&song.address) {
+                let listed: &mut ServerSong = &mut listing.songs[place];
+                listed.libraries.push(view.id.clone());
+            } else {
+                song.libraries = vec![view.id.clone()];
+                place_of_song.insert(song.address.clone(), listing.songs.len());
+                listing.songs.push(song);
+            }
+        }
+        listing.libraries.push(ListedLibrary {
+            identifier: view.id,
+            name: view.name,
+        });
+    }
+    Ok(listing)
 }
 
 /// The session of the signed-in `server`, when the song is one of its own.
@@ -635,8 +746,10 @@ mod tests {
     }
 
     /// The routes of a working server: public info, a sign-in that takes one
-    /// password, and a listing of `song_count` songs, `page_size` at a time,
-    /// announcing `announced_total`, to whoever presents the token.
+    /// password, one music library the user left out of "My Media", and a
+    /// listing of `song_count` songs,
+    /// `page_size` at a time, announcing `announced_total`, to whoever
+    /// presents the token.
     fn jellyfin_routes(
         song_count: usize,
         page_size: usize,
@@ -659,6 +772,18 @@ mod tests {
                 } else {
                     ("401 Unauthorized", String::new())
                 }
+            }),
+            route("/UserViews?", |request| {
+                if !request.signed_in {
+                    return ("401 Unauthorized", String::new());
+                }
+                // The user left their only library out of "My Media".
+                let items = if query_value(&request.target, "includeHidden") == Some("true") {
+                    r#"{"Id": "music", "Name": "Music", "CollectionType": "music"}"#
+                } else {
+                    ""
+                };
+                ("200 OK", format!(r#"{{"Items": [{items}]}}"#))
             }),
             route("/Items?", move |request| {
                 if !request.signed_in {
@@ -763,6 +888,18 @@ mod tests {
         let mut routes = overrides;
         routes.extend(jellyfin_routes(3, 2, Some(3)));
         serve(routes)
+    }
+
+    /// The songs of a listing, for the tests about reading them whole.
+    fn songs(session: &Session, server_identifier: &str) -> Result<Vec<ServerSong>, Failure> {
+        listing(session, server_identifier).map(|listing| listing.songs)
+    }
+
+    /// The value of `name` in a request target's query.
+    fn query_value<'a>(target: &'a str, name: &str) -> Option<&'a str> {
+        target
+            .split(['?', '&'])
+            .find_map(|pair| pair.strip_prefix(name)?.strip_prefix('='))
     }
 
     fn signed_in_session(server: NewMediaServer) -> Session {
@@ -1226,6 +1363,138 @@ mod tests {
         )
         .expect("an item parses");
         assert!(item_song(&item, "server").metadata.lossless);
+    }
+
+    /// A server with a music library, a mixed one, a playlist, a film
+    /// library holding no songs, the folder view, and a song the first two
+    /// share.
+    fn server_with_libraries() -> String {
+        fake_server_with(vec![
+            route("/UserViews?", |_| {
+                (
+                    "200 OK",
+                    r#"{"Items": [
+                        {"Id": "music", "Name": "Music", "CollectionType": "music"},
+                        {"Id": "mixed", "Name": "Everything"},
+                        {"Id": "lists", "Name": "Playlists", "CollectionType": "playlists"},
+                        {"Id": "films", "Name": "Films", "CollectionType": "movies"},
+                        {"Id": "folders", "Name": "Folders", "CollectionType": "folders"}
+                    ]}"#
+                    .to_owned(),
+                )
+            }),
+            route("/Items?", |request| {
+                let (items, count) = match query_value(&request.target, "ParentId") {
+                    Some("music") => (r#"{"Id": "a"}, {"Id": "shared"}"#, 2),
+                    Some("mixed") => (r#"{"Id": "shared"}, {"Id": "b"}"#, 2),
+                    Some("lists") => (r#"{"Id": "a"}"#, 1),
+                    Some("folders") => (r#"{"Id": "a"}, {"Id": "shared"}, {"Id": "b"}"#, 3),
+                    _ => ("", 0),
+                };
+                (
+                    "200 OK",
+                    format!(r#"{{"Items": [{items}], "TotalRecordCount": {count}}}"#),
+                )
+            }),
+        ])
+    }
+
+    #[test]
+    fn a_listing_names_each_library_and_files_a_shared_song_in_both() {
+        let listing =
+            listing(&signed_in_to(&server_with_libraries()), "server").expect("the listing");
+
+        assert_eq!(
+            listing.libraries,
+            [
+                ListedLibrary {
+                    identifier: "music".to_owned(),
+                    name: "Music".to_owned(),
+                },
+                ListedLibrary {
+                    identifier: "mixed".to_owned(),
+                    name: "Everything".to_owned(),
+                },
+                ListedLibrary {
+                    identifier: "films".to_owned(),
+                    name: "Films".to_owned(),
+                },
+            ],
+            "neither a playlist nor the folder view is a library; one without songs still is"
+        );
+        let songs: Vec<(&str, Vec<&str>)> = listing
+            .songs
+            .iter()
+            .map(|song| {
+                (
+                    song.address.as_str(),
+                    song.libraries.iter().map(String::as_str).collect(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            songs,
+            [
+                ("jellyfin://server/a", vec!["music"]),
+                ("jellyfin://server/shared", vec!["music", "mixed"]),
+                ("jellyfin://server/b", vec!["mixed"]),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_library_left_out_of_my_media_is_still_read() {
+        let listing = listing(&signed_in_to(&fake_server()), "server").expect("the listing");
+        assert_eq!(listing.libraries.len(), 1);
+        assert_eq!(listing.songs.len(), 3);
+    }
+
+    #[test]
+    fn a_server_before_user_views_lists_its_libraries_under_the_user() {
+        let address = fake_server_with(vec![
+            route("/UserViews?", |_| ("404 Not Found", String::new())),
+            route("/Users/user/Views", |request| {
+                if !request.signed_in
+                    || query_value(&request.target, "includeHidden") != Some("true")
+                {
+                    return ("401 Unauthorized", String::new());
+                }
+                (
+                    "200 OK",
+                    r#"{"Items": [{"Id": "music", "Name": "Music", "CollectionType": "music"}]}"#
+                        .to_owned(),
+                )
+            }),
+        ]);
+        let listing = listing(&signed_in_to(&address), "server").expect("the listing");
+        assert_eq!(listing.libraries.len(), 1);
+        assert_eq!(listing.songs.len(), 3);
+    }
+
+    #[test]
+    fn a_library_that_fails_to_list_fails_the_whole_listing() {
+        let address = fake_server_with(vec![
+            route("/UserViews?", |_| {
+                (
+                    "200 OK",
+                    r#"{"Items": [{"Id": "music", "Name": "Music"}, {"Id": "broken", "Name": "Broken"}]}"#
+                        .to_owned(),
+                )
+            }),
+            route("/Items?", |request| {
+                match query_value(&request.target, "ParentId") {
+                    Some("music") => (
+                        "200 OK",
+                        r#"{"Items": [{"Id": "a"}], "TotalRecordCount": 1}"#.to_owned(),
+                    ),
+                    _ => ("500 Internal Server Error", String::new()),
+                }
+            }),
+        ]);
+        assert!(matches!(
+            listing(&signed_in_to(&address), "server"),
+            Err(Failure::Other(_))
+        ));
     }
 
     fn signed_in_server() -> MediaServer {

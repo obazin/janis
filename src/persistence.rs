@@ -67,7 +67,7 @@ CREATE INDEX IF NOT EXISTS idx_tracks_added ON tracks(added_at DESC);
 /// `SCHEMA` above is frozen at version 1 — it only ever creates a fresh file.
 /// Every change since is a migration, so a new database and an existing one
 /// converge on the same shape.
-const SCHEMA_VERSION: i64 = 6;
+const SCHEMA_VERSION: i64 = 7;
 
 // The migrations reach the version a fresh database is stamped with.
 const _: () = assert!(MIGRATIONS.len() as i64 + 1 == SCHEMA_VERSION);
@@ -127,6 +127,26 @@ const MIGRATIONS: &[&str] = &[
      ALTER TABLE tracks ADD COLUMN artwork_item TEXT;
      ALTER TABLE user_preferences ADD COLUMN device_identifier TEXT;
      CREATE INDEX IF NOT EXISTS idx_tracks_server ON tracks(server_id);",
+    // → 7: the libraries a media server shows its songs in, and which songs
+    //      each holds. Every library is synced; `shown` is the listener's
+    //      choice of the ones whose songs appear in Janis, on by default. A
+    //      song may sit in more than one library when they share a folder,
+    //      hence the join table. Both cascade from the server and the song.
+    "CREATE TABLE IF NOT EXISTS server_libraries (
+         id INTEGER PRIMARY KEY,
+         server_id INTEGER NOT NULL REFERENCES media_servers(id) ON DELETE CASCADE,
+         library_identifier TEXT NOT NULL,
+         name TEXT NOT NULL DEFAULT '',
+         position INTEGER NOT NULL DEFAULT 0,
+         shown INTEGER NOT NULL DEFAULT 1,
+         UNIQUE (server_id, library_identifier)
+     );
+     CREATE TABLE IF NOT EXISTS track_libraries (
+         track_id INTEGER NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
+         library_id INTEGER NOT NULL REFERENCES server_libraries(id) ON DELETE CASCADE,
+         PRIMARY KEY (track_id, library_id)
+     ) WITHOUT ROWID;
+     CREATE INDEX IF NOT EXISTS idx_track_libraries_library ON track_libraries(library_id);",
 ];
 
 /// Opens (creating if needed) `janis.db` under the app-data directory and
@@ -538,6 +558,53 @@ pub fn set_last_sync(database: &DbState, server_id: i64) -> Result<(), String> {
     Ok(())
 }
 
+/// One library of the signed-in server, as `janis.db` keeps it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ServerLibrary {
+    pub id: i64,
+    pub name: String,
+    /// Whether its songs appear in Janis. Every library is synced either way.
+    pub shown: bool,
+}
+
+/// The libraries of the kept servers, in the order the server lists them.
+pub fn server_libraries(database: &DbState) -> Result<Vec<ServerLibrary>, String> {
+    let connection = database.lock();
+    connection
+        .prepare(
+            "SELECT id, name, shown FROM server_libraries
+             ORDER BY server_id, position, id",
+        )
+        .and_then(|mut statement| {
+            statement
+                .query_map([], |row| {
+                    Ok(ServerLibrary {
+                        id: row.get(0)?,
+                        name: row.get(1)?,
+                        shown: row.get::<_, i64>(2)? != 0,
+                    })
+                })?
+                .collect()
+        })
+        .map_err(|error| format!("read the server's libraries: {error}"))
+}
+
+/// Remembers whether a library's songs appear in Janis.
+pub fn set_server_library_shown(
+    database: &DbState,
+    library_id: i64,
+    shown: bool,
+) -> Result<(), String> {
+    let connection = database.lock();
+    connection
+        .execute(
+            "UPDATE server_libraries SET shown = ?1 WHERE id = ?2",
+            rusqlite::params![shown as i64, library_id],
+        )
+        .map_err(|error| format!("show or hide a library: {error}"))?;
+    Ok(())
+}
+
 /// The identifier this installation gives itself when it talks to a server:
 /// random, made once, and the same on every launch after.
 pub fn device_identifier(database: &DbState) -> Result<String, String> {
@@ -742,6 +809,7 @@ mod tests {
             );
             assert_eq!(favourite_station_ids(&database), Ok(Vec::new()));
             assert_eq!(media_server(&database), Ok(None));
+            assert_eq!(server_libraries(&database), Ok(Vec::new()));
             let connection = database.lock();
             let (title, server_id): (String, Option<i64>) = connection
                 .query_row(
