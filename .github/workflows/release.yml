@@ -5,8 +5,10 @@
 # per-platform first-launch steps this implies are documented in README.md.
 #
 # Trigger: push a tag `vX.Y.Z` whose version matches the one declared in
-# Cargo.toml and flake.nix. A manual run (workflow_dispatch) builds the same
-# bundles and keeps them as workflow artifacts without touching releases.
+# Cargo.toml and flake.nix — `just release <level>` makes both and pushes the
+# tag. The draft's notes are the install steps and the tag's CHANGELOG.md
+# section. A manual run (workflow_dispatch) builds the same bundles and keeps
+# them as workflow artifacts without touching releases.
 name: release
 
 on:
@@ -55,9 +57,21 @@ jobs:
                   - **Linux**: \`.AppImage\`, \`.deb\` or \`.rpm\`, x86_64 and arm64
                   - **Nix** (Linux and macOS): \`nix profile install github:obazin/janis\`, or \`nix run github:obazin/janis\` to try it
                   EOF
+                  # Then what changed: the tag's section of CHANGELOG.md, which
+                  # `just release` wrote with git-cliff, without its heading.
+                  changes="$(awk -v heading="## [$GITHUB_REF_NAME]" '
+                    index($0, heading) == 1 { found = 1; next }
+                    found && /^## \[/ { exit }
+                    found
+                  ' CHANGELOG.md)"
+                  if [ -n "$(printf '%s' "$changes" | tr -d '[:space:]')" ]; then
+                    printf '\n## What changed\n%s\n' "$changes" >> notes.md
+                  else
+                    echo "::warning::CHANGELOG.md has no section for $GITHUB_REF_NAME"
+                  fi
                   gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 ||
                     gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
-                      --draft --title "Janis $version" --notes-file notes.md --generate-notes
+                      --draft --title "Janis $version" --notes-file notes.md
 
     build:
         needs: prepare

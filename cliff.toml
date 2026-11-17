@@ -1,0 +1,77 @@
+# git-cliff configuration for Janis — https://git-cliff.org
+#
+# CHANGELOG.md is generated from the commit messages: edit commits, not the
+# file. Commits follow Conventional Commits (`feat:`, `fix:`, …) and are
+# grouped by type; one that slips through without a type lands under "Other
+# changes" rather than vanishing. Only the subject line is kept: the bodies
+# say why, which the changelog does not need.
+
+[changelog]
+header = """
+# Changelog
+
+All notable changes to **Janis** are documented in this file. It is generated from the commit messages ([Conventional Commits](https://www.conventionalcommits.org)) by [git-cliff](https://git-cliff.org): edit commit messages, not this file.\n
+"""
+# One release section. `.github/workflows/release.yml` copies the section of
+# the tag it builds into the draft release's notes.
+body = """
+{% if version %}\
+## [{{ version }}](https://github.com/obazin/janis/releases/tag/{{ version }}) — {{ timestamp | date(format="%Y-%m-%d") }}
+{% else %}\
+## [unreleased]
+{% endif %}\
+{% if previous.version %}
+Changes since [{{ previous.version }}](https://github.com/obazin/janis/releases/tag/{{ previous.version }}).
+{% endif %}\
+{% set breaking = commits | filter(attribute="breaking", value=true) %}\
+{% if breaking | length > 0 %}
+### Breaking changes
+
+{% for commit in breaking %}\
+- {% if commit.scope %}**{{ commit.scope }}:** {% endif %}{{ commit.breaking_description | default(value=commit.message) | split(pat="\n") | first | upper_first | trim }}
+{% endfor %}\
+{% endif %}\
+{% for group, commits in commits | group_by(attribute="group") %}\
+{# A commit without a type has no `breaking` field, so breaking commits are
+   counted and skipped rather than the others filtered in. #}\
+{% set breaking_here = commits | filter(attribute="breaking", value=true) %}\
+{% if commits | length > breaking_here | length %}
+### {{ group | striptags | trim | upper_first }}
+
+{% for commit in commits %}\
+{% if not commit.breaking | default(value=false) %}\
+- {% if commit.scope %}**{{ commit.scope }}:** {% endif %}{{ commit.message | split(pat="\n") | first | upper_first | trim }}
+{% endif %}\
+{% endfor %}\
+{% endif %}\
+{% endfor %}\n
+"""
+footer = ""
+trim = true
+
+[git]
+conventional_commits = true
+# A commit without a type stays, under "Other changes".
+filter_unconventional = false
+filter_commits = false
+split_commits = false
+# Keep a `feat!:` / `BREAKING CHANGE:` commit even if its type would be skipped.
+protect_breaking_commits = true
+tag_pattern = "v[0-9].*"
+topo_order = false
+sort_commits = "newest"
+
+# First matching rule wins. The `<!-- N -->` prefixes force the section order
+# (Tera's `group_by` sorts keys alphabetically); the body template strips them.
+commit_parsers = [
+  { message = "^feat",                       group = "<!-- 0 -->Features" },
+  { message = "^fix",                        group = "<!-- 1 -->Fixes" },
+  { message = "^perf",                       group = "<!-- 2 -->Performance" },
+  { message = "^(refacto|refactor)",         group = "<!-- 3 -->Refactor" },
+  { message = "^docs",                       group = "<!-- 4 -->Documentation" },
+  { message = "^(chore|build)\\(deps",       group = "<!-- 5 -->Dependencies" },
+  { message = "^(chore|build)(\\(.*\\))?!?: bump ", group = "<!-- 5 -->Dependencies" },
+  { message = "^chore\\(release\\)",         skip = true },
+  { message = "^(test|ci|style|build|chore)(\\(.*\\))?!?:", skip = true },
+  { message = ".*",                          group = "<!-- 6 -->Other changes" },
+]

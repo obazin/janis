@@ -202,6 +202,10 @@ An embedded agreement makes mounting the image wait for a click. The install scr
 `just release-macos`, `release-linux` and `release-windows` are gated to their system; `install-macos` builds, asks a running Janis to quit, and swaps the new bundle into `/Applications` after verifying its signature. The shape comes from the sibling project super8.
 Superseded: one `just release` for whichever platform it ran on (D26a).
 
+**D62 · `just release <level>` cuts a version; the workflow drafts it with the changelog** — *current* (2026-11-17)
+`just release patch|minor|major`, run in the dev shell from a clean `main`, bumps `Cargo.toml` and `Cargo.lock` (`cargo set-version`) and the flake's janis version, writes `CHANGELOG.md` with git-cliff, shows that version's notes and waits for a yes; then it asks Nix for the new vendor hash (the lock file carries the package's own version), builds the Nix package, commits `chore(release): vX.Y.Z`, makes an annotated tag and pushes both. A no, or a failure before the commit, restores the four files. The recipe does not create the GitHub release: the tag's workflow already opens a draft and attaches every platform's installers to it, so a release made by the recipe would race that step and be public before any installer exists. The draft's notes are the install steps followed by the tag's section of `CHANGELOG.md`, in place of GitHub's generated list. `just release-preview <level>` shows the next notes and changes nothing; `just changelog` rewrites the file. The recipe and `cliff.toml` come from the sibling project litchee, which publishes its release from the recipe since it has no installers to wait for.
+Superseded: bumping `Cargo.toml` and `flake.nix` by hand and pushing the tag, with GitHub's generated notes (D62a).
+
 ## Working on the project
 
 **D27 · Instructions for coding agents in `CLAUDE.md` and path-scoped rules** — *current*
@@ -210,6 +214,10 @@ Superseded: one `just release` for whichever platform it ran on (D26a).
 **D28 · History goes in this log** — *current*
 Living documentation describes the present; a decision that is made or changes gets an entry here, and a superseded choice becomes a lettered sub-entry.
 Superseded: commit messages as the only decision record (D28a, first version).
+
+**D63 · Conventional Commits, from which the changelog is written** — *current* (2026-11-17)
+A commit's subject starts with its type, and a scope when one fits: `feat(library): …`, `fix: …`, `perf`, `refactor`, `docs`, `test`, `build`, `ci`, `chore`, with `!` or a `BREAKING CHANGE:` footer for a breaking one. git-cliff (`cliff.toml`) groups the subjects into Breaking changes, Features, Fixes, Performance, Refactor, Documentation and Dependencies, and leaves out tests, builds, CI, style, chores and release commits. The subject still says what changed in a sentence and the body why. The whole history follows it: on 2026-11-17 every earlier commit, written as a plain sentence, was given its type and scope by rewriting the history (subjects only; trees, bodies, authors and dates unchanged), and the tags moved to the rewritten commits, so the changelog groups every release since 0.1.0. A commit that slips through without a type lands under "Other changes" rather than vanishing.
+Superseded: plain-sentence subjects with no type (D63a, until 0.3.0).
 
 **D29 · Atomic commits on the rewrite branch** — *current*
 Each step of the rewrite was committed as it passed `just check`, so any step can be returned to.

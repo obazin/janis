@@ -50,7 +50,14 @@
             doCheck = false;
           });
 
-          releaseTools = pkgs.lib.optionals pkgs.stdenv.isDarwin [ cargoPackager ];
+          # `just release <level>` bumps the version with cargo-edit's
+          # `set-version` and writes CHANGELOG.md with git-cliff; the
+          # installers come from cargo-packager, on macOS only.
+          releaseTools = [
+            pkgs.cargo-edit
+            pkgs.git-cliff
+          ]
+          ++ pkgs.lib.optionals pkgs.stdenv.isDarwin [ cargoPackager ];
 
           # The language server for `.slint` files: diagnostics, completion,
           # go-to-definition and a live preview in the editor. Its version is

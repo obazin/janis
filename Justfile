@@ -1,5 +1,12 @@
 # Janis tasks. `just` lists them; `run` in the dev shell forwards to `just run`.
 #
+# `just release <level>` cuts a version: it bumps Cargo.toml, Cargo.lock and
+# flake.nix (and the flake's vendor hash), writes CHANGELOG.md with git-cliff
+# from the commit messages, then commits, tags and pushes. The tag starts the
+# `release` workflow, which builds every platform and opens a draft release
+# with that version's changelog section; publishing the draft stays manual.
+# Run it inside the Nix dev shell, which carries git-cliff and cargo-edit.
+#
 # Release recipes build the installers of one platform into dist/, with
 # `cargo packager`: the Nix dev shell provides it on macOS, the other systems
 # install it with `cargo install cargo-packager --locked`. Each is tied to its
@@ -161,3 +168,122 @@ release-linux:
 release-windows:
     cargo build --release --locked
     cargo packager --release
+
+# --- Versioned releases ------------------------------------------------------
+
+# LEVEL is `patch`, `minor` or `major`:
+#   just release patch     # 0.3.0 -> 0.3.1
+#   just release minor     # 0.3.0 -> 0.4.0
+#   just release major     # 0.3.0 -> 1.0.0
+# Shows the notes and waits for a yes before anything leaves the machine; a no,
+# or a failure before the commit, puts the four files back as they were.
+#
+# Bump the version, write the changelog, commit, tag and push (the workflow drafts the release)
+release level: _require-clean
+    #!/usr/bin/env bash
+    set -euo pipefail
+    case "{{ level }}" in
+      patch|minor|major) ;;
+      *) echo "error: level must be patch, minor or major (got '{{ level }}')" >&2; exit 2 ;;
+    esac
+    for tool in git-cliff nix; do
+      command -v "$tool" >/dev/null || { echo "error: $tool missing: enter the Nix dev shell (direnv allow, or nix develop)" >&2; exit 1; }
+    done
+    cargo set-version --help >/dev/null 2>&1 || { echo "error: cargo set-version missing: enter the Nix dev shell" >&2; exit 1; }
+
+    # Releases are cut from main: the workflow builds the tag, and the
+    # changelog reads the history behind it.
+    branch="$(git rev-parse --abbrev-ref HEAD)"
+    if [ "$branch" != "main" ] && [ "${ALLOW_RELEASE_BRANCH:-}" != "1" ]; then
+      echo "error: refusing to release from '$branch' (expected main); set ALLOW_RELEASE_BRANCH=1 to override" >&2
+      exit 1
+    fi
+
+    restore() {
+      git checkout -- Cargo.toml Cargo.lock flake.nix CHANGELOG.md 2>/dev/null || true
+    }
+    trap 'echo "Failed: the version bump is undone." >&2; restore' ERR
+
+    # 1. The version, in Cargo.toml and Cargo.lock, then in the flake's
+    #    janis package (the release workflow refuses a tag either disagrees with).
+    cargo set-version --bump "{{ level }}"
+    version="$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -1)"
+    tag="v${version}"
+    # Values reach perl through the environment: a base64 hash holds slashes.
+    VALUE="$version" perl -0pi -e 's/(pname = "janis";\s*version = ")[^"]*"/$1$ENV{VALUE}"/' flake.nix
+    flake_version="$(awk '/pname = "janis";/ { found = 1 } found && /version = "/ { gsub(/.*version = "|";.*/, ""); print; exit }' flake.nix)"
+    [ "$flake_version" = "$version" ] || { echo "error: flake.nix still says $flake_version" >&2; false; }
+    echo "▶ Preparing $tag on $branch"
+
+    # 2. The changelog, whole; the notes are this version's section without
+    #    its heading, which the release title already carries.
+    git cliff --tag "$tag" --output CHANGELOG.md 2>/dev/null
+    notes="$(git cliff --tag "$tag" --unreleased --strip all 2>/dev/null | grep -v '^## \[' | sed '/./,$!d')"
+
+    echo "──────── release notes for $tag ────────"
+    echo "$notes"
+    echo "────────────────────────────────────────"
+    reply=""
+    read -r -p "Release $tag with these notes? [y/N] " reply || true
+    if [[ "$reply" != "y" && "$reply" != "Y" ]]; then
+      echo "Aborted: the version bump is undone."
+      trap - ERR
+      restore
+      exit 1
+    fi
+
+    # 3. Cargo.lock carries the package's own version, so the flake's vendor
+    #    hash moves with it: ask Nix for the new one, then build the package
+    #    with it.
+    echo "▶ Computing the flake's vendor hash (nix build)"
+    fake_hash="sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+    VALUE="$fake_hash" perl -0pi -e 's/(pname = "janis";.*?cargoHash = ")[^"]*"/$1$ENV{VALUE}"/s' flake.nix
+    cargo_hash="$(nix build .#janis.cargoDeps --no-link 2>&1 | sed -n 's/^ *got: *\(sha256-[^ ]*\)$/\1/p' | head -1 || true)"
+    [ -n "$cargo_hash" ] || { echo "error: Nix reported no vendor hash" >&2; false; }
+    VALUE="$cargo_hash" perl -0pi -e 's/(pname = "janis";.*?cargoHash = ")[^"]*"/$1$ENV{VALUE}"/s' flake.nix
+    echo "▶ Building the Nix package"
+    nix build .#janis --no-link
+
+    # 4. Commit and an annotated tag; nothing can fail back into the trap
+    #    after this.
+    trap - ERR
+    git add Cargo.toml Cargo.lock flake.nix CHANGELOG.md
+    git commit -q -m "chore(release): $tag"
+    git tag -a "$tag" -m "Janis $version"
+
+    # 5. Push the branch and the tag: the tag starts the release workflow.
+    git push --follow-tags
+    echo "✔ Pushed $tag. The release workflow builds the installers and opens a draft:"
+    echo "    https://github.com/obazin/janis/actions/workflows/release.yml"
+    echo "  Publish it from https://github.com/obazin/janis/releases once every installer is attached."
+
+#   just release-preview minor
+#
+# Preview the notes of the next release at LEVEL, changing nothing
+release-preview level:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    current="$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -1)"
+    IFS='.' read -r major minor patch <<< "$current"
+    case "{{ level }}" in
+      patch) patch=$((patch + 1)) ;;
+      minor) minor=$((minor + 1)); patch=0 ;;
+      major) major=$((major + 1)); minor=0; patch=0 ;;
+      *) echo "error: level must be patch, minor or major (got '{{ level }}')" >&2; exit 2 ;;
+    esac
+    next="${major}.${minor}.${patch}"
+    echo "Next {{ level }} version: $next (from $current)"
+    git cliff --tag "v$next" --unreleased --strip all 2>/dev/null | grep -v '^## \[' | sed '/./,$!d'
+
+# Regenerate CHANGELOG.md from the whole history (no bump, no release).
+changelog:
+    git cliff --output CHANGELOG.md
+
+# Fail when the working tree has uncommitted changes.
+_require-clean:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ -n "$(git status --porcelain)" ]; then
+      echo "error: the working tree is not clean: commit or stash first" >&2
+      exit 1
+    fi

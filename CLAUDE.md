@@ -20,6 +20,10 @@ A native application: Rust throughout, with a [Slint](https://slint.dev) interfa
 12. **Cross-platform by default.** macOS, Windows and Linux. What differs by system lives in `src/platform.rs` behind a neutral name; platform names stay out of shared interfaces and `.slint` files.
 13. **No regressions.** Before completing any task, verify the features of `docs/specs.md` it could have touched.
 
+## Commits
+
+Conventional Commits: `type(scope): subject`, the type one of `feat`, `fix`, `perf`, `refactor`, `docs`, `test`, `build`, `ci`, `chore` (`!` when breaking). The subject is what `CHANGELOG.md` lists, so it says what changed for the listener or the developer; the body says why. `CHANGELOG.md` is generated: never edit it by hand.
+
 ## Quick reference
 
 ```sh
@@ -29,6 +33,7 @@ just check                   # fmt check, clippy -D warnings, cargo test (the ca
 just stations                # rebuild data/stations.json from scripts/radio (network)
 just release-macos           # dist/Janis.app + .dmg (other systems: release-linux, release-windows)
 just install-macos           # release-macos, then replace /Applications/Janis.app with the .dmg's
+just release <level>         # patch|minor|major: bump, CHANGELOG.md (git-cliff), commit, tag, push
 nix run                      # build + launch the release app, no dev shell
 JANIS_LOG=debug cargo run    # what the standard-error logger shows
 ```
@@ -109,7 +114,7 @@ a new track       → Effect::LoadOverview → overview thread → AudioEngine::
 - **Interface:** Slint 1.18 (winit backend, FemtoVG renderer), compiled from `ui/app.slint` by `build.rs`, fully custom components.
 - **Audio:** `audio-stack-rs` (MIT, a git dependency pinned to a tag; `Cargo.lock` records the commit). Janis injects `EventSink` and `Store` and drives the `AudioEngine` facade.
 - **Persistence:** SQLite (`rusqlite`, bundled): `janis.db` in the per-user data directory holds preferences and the track library.
-- **Releases:** pushing a `vX.Y.Z` tag runs `.github/workflows/release.yml`, which builds every platform's installers with `cargo packager` (and the rpm with `cargo generate-rpm`) and attaches them to a draft release; the tag must match `Cargo.toml` and `flake.nix`. No signing certificate exists: macOS is ad-hoc signed, the others unsigned. Nix users install from the flake. Details: `.claude/rules/packaging.md`.
+- **Releases:** `just release <level>` bumps the version, writes `CHANGELOG.md` with git-cliff and pushes a `vX.Y.Z` tag; the tag runs `.github/workflows/release.yml`, which builds every platform's installers with `cargo packager` (and the rpm with `cargo generate-rpm`) and attaches them to a draft release whose notes are the tag's changelog section; the tag must match `Cargo.toml` and `flake.nix`. No signing certificate exists: macOS is ad-hoc signed, the others unsigned. Nix users install from the flake. Details: `.claude/rules/packaging.md`.
 
 ## Tools
 
