@@ -726,8 +726,9 @@ fn mark_favourite(
     }
 }
 
-/// Rows for a track list. An album's rows are numbered by their place on
-/// the record, an artist's are titled album first; `None` is a plain list.
+/// Rows for a track list. An album's rows are numbered and titled by their
+/// place on the record, an artist's are titled album first; `None` is a
+/// plain list.
 pub(super) fn track_rows(
     tracks: &[Track],
     browsed: Option<SelectionKind>,
@@ -747,8 +748,9 @@ pub(super) fn track_rows(
             )
             .into(),
             title: match browsed {
+                Some(SelectionKind::Album) => library_view::album_row_title(track, index).into(),
                 Some(SelectionKind::Artist) => library_view::artist_row_title(track).into(),
-                _ => track.title.as_str().into(),
+                None => track.title.as_str().into(),
             },
             artist: track.artist.as_deref().unwrap_or(&unknown_artist).into(),
             composer: track.composer.as_deref().unwrap_or_default().into(),

@@ -185,6 +185,14 @@ pub fn artist_row_title(track: &Track) -> String {
     }
 }
 
+/// A row title in an album panel: the position on the record, in at least
+/// two digits, then the song, as "03 - So What". The position is the one
+/// `row_number` gives the row, so a song without a track number takes its
+/// place in the list.
+pub fn album_row_title(track: &Track, index: usize) -> String {
+    format!("{:02} - {}", row_number(track, index, true), track.title)
+}
+
 /// The search field's text as the filters compare it.
 pub fn normalized_query(search: &str) -> String {
     fold(search.trim())
@@ -1413,6 +1421,19 @@ mod tests {
         assert_eq!(row_number(&tagged, 0, false), 1);
         assert_eq!(row_number(&tagged, 0, true), 7);
         assert_eq!(row_number(&track(2, "b"), 4, true), 5);
+    }
+
+    #[test]
+    fn album_rows_are_titled_by_their_two_digit_position_then_the_song() {
+        assert_eq!(
+            album_row_title(&track(1, "So What").number(1), 0),
+            "01 - So What"
+        );
+        assert_eq!(
+            album_row_title(&track(2, "Blue in Green").number(12), 0),
+            "12 - Blue in Green"
+        );
+        assert_eq!(album_row_title(&track(3, "Untagged"), 4), "05 - Untagged");
     }
 
     #[test]
