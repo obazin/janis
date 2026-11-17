@@ -20,6 +20,7 @@ use crate::cover_requests::{self, Direction};
 use crate::covers::{self, CoverKey, CoverRequest, CurrentArtRequests, Pixels};
 use crate::jellyfin::{self, Session};
 use crate::library::{self, CoverSource};
+use crate::media_controls::Artwork;
 use crate::persistence::DbState;
 use crate::user_interface::{CoverList, Covers};
 
@@ -60,6 +61,8 @@ pub(super) struct CurrentArt {
     pub(super) requests: CurrentArtRequests,
     pub(super) track_cover: Option<Image>,
     pub(super) stream_cover: Option<Image>,
+    pub(super) track_media_cover: Option<Arc<Artwork>>,
+    pub(super) stream_media_cover: Option<Arc<Artwork>>,
 }
 
 /// A cover for a list or grid tile.
@@ -199,6 +202,7 @@ impl Application {
                 return;
             };
             art.track_cover = None;
+            art.track_media_cover = None;
             load
         };
         let (Some(epoch), Some(track_id)) = (load, track_id) else {
@@ -219,7 +223,13 @@ impl Application {
                 return;
             }
             match loaded {
-                Ok(pixels) => art.track_cover = pixels.map(Image::from_rgba8),
+                Ok(pixels) => {
+                    art.track_media_cover = pixels
+                        .as_ref()
+                        .filter(|_| self.media_controls.borrow().is_some())
+                        .map(media_artwork);
+                    art.track_cover = pixels.map(Image::from_rgba8);
+                }
                 Err(error) => log::error!("current cover: {error}"),
             }
             art.requests.failed()
@@ -233,7 +243,9 @@ impl Application {
     pub(super) fn show_stream_cover(&self, url: Option<String>) {
         let epoch = self.current_art.borrow_mut().requests.request_stream();
         let Some(url) = url else {
-            self.current_art.borrow_mut().stream_cover = None;
+            let mut art = self.current_art.borrow_mut();
+            art.stream_cover = None;
+            art.stream_media_cover = None;
             return;
         };
         self.picture_worker.run(move || {
@@ -248,12 +260,21 @@ impl Application {
         }
         match decoded {
             Ok(pixels) => {
-                self.current_art.borrow_mut().stream_cover = Some(Image::from_rgba8(pixels));
+                let mut art = self.current_art.borrow_mut();
+                art.stream_media_cover = self
+                    .media_controls
+                    .borrow()
+                    .as_ref()
+                    .map(|_| media_artwork(&pixels));
+                art.stream_cover = Some(Image::from_rgba8(pixels));
             }
             Err(error) => {
                 log::error!("station cover: {error}");
                 // The art announced before belongs to what played before.
-                self.current_art.borrow_mut().stream_cover = None;
+                let mut art = self.current_art.borrow_mut();
+                art.stream_cover = None;
+                art.stream_media_cover = None;
+                drop(art);
                 self.notify_cover_unavailable();
             }
         }
@@ -351,6 +372,14 @@ impl Application {
     pub(super) fn notify_cover_unavailable(&self) {
         self.notify_error("error.cover", Vec::new(), Some("cover-unavailable"));
     }
+}
+
+fn media_artwork(pixels: &Pixels) -> Arc<Artwork> {
+    Arc::new(Artwork {
+        width: pixels.width(),
+        height: pixels.height(),
+        rgba: Arc::from(pixels.as_bytes()),
+    })
 }
 
 /// The cover a key names: a track's, found as `library_cover` finds it, or a

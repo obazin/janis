@@ -25,11 +25,17 @@ pub enum Effect {
         epoch: u64,
     },
     Toggle,
+    Play,
+    Pause,
+    Stop,
     Next,
     Previous,
     JumpTo(usize),
-    /// Seek to a position in seconds.
-    Seek(f64),
+    /// Seek only if this track is still current when the command executes.
+    Seek {
+        track_id: i64,
+        position_seconds: f64,
+    },
     SetShuffle(bool),
     SetRepeat(bool),
 

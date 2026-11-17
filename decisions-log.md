@@ -10,8 +10,11 @@ All entries date from 2026-11-11 unless stated. Entries marked "first version" w
 One process and one language. The interface is Slint 1.18 on winit, compiled from `ui/app.slint`; everything else is one Rust crate. Measured against the previous build on the same machine, playing a local track: about 9–14 % of a processor core against 30 %, and 240–305 MB against 352 MB; idle with the window visible, 0.2 % and 136 MB against 25 % and 276 MB. The costs are a larger download (30 MB bundle against 23 MB, because the renderer, the text stack and the fonts ship in the binary where the webview was the system's), no backdrop blur, and an installer pipeline to maintain.
 Superseded: Tauri v2 with a Svelte 5 / SvelteKit 2 / Tailwind v4 webview frontend (D1a, first version). Its Rust backend was already thin and Tauri-free in substance, which is what made the rewrite a port rather than a redesign.
 
-**D2 · The whole audio path lives in the `audio-stack-rs` crate** — *current* (first version)
-Decoding, the EQ, the analyser, output-device management, the transport, web radio and audio-file metadata are a standalone MIT crate, consumed as a git dependency pinned to a tag and reached only through its facade, which `src/audio.rs` re-exports. Janis injects two traits (`EventSink`, `Store`). No audio or metadata crate is a direct dependency. The crate has no Tauri reference, so the rewrite did not touch it.
+**D2 · The whole audio path lives in the `audio-stack-rs` crate** — *current*
+Decoding, the EQ, the analyser, output-device management, the transport, web radio and audio-file metadata are a standalone MIT crate, consumed as a git dependency pinned to a reviewed revision and reached only through its facade, which `src/audio.rs` re-exports. Janis injects two traits (`EventSink`, `Store`). No audio or metadata crate is a direct dependency. The revision supplies confirmed position changes, queue capabilities and identity-guarded seeks for desktop controls.
+
+**D2a · Tag-pinned audio dependency** — *superseded*
+The audio dependency was pinned to a tag. A reviewed revision supplies the transport reporting APIs required by desktop controls.
 
 **D3 · FemtoVG renderer; Skia measured and set aside** — *current*
 FemtoVG (OpenGL) on the winit backend. Skia was tried for its partial repaint: on the same screens it used no less of the graphics processor (8.8–13.7 %, and more with partial repaint on Now Playing), three times the processor time (25–30 %), and added about 10 MB to the binary.
@@ -28,6 +31,9 @@ Superseded: the `tauriShell` bundle with Node, pnpm and the webkit stack (D6a, f
 
 **D47 · `reqwest` for the Jellyfin calls** — *current*
 The Jellyfin client uses `reqwest`'s blocking client with rustls: the same version and TLS stack `audio-stack-rs` already links for web radio, so nothing new is built. It is a JSON client, not an audio crate, so it stays outside the facade. The calls run on the server worker, never on the interface thread. Every call goes through one client, built on first use and kept for the process, so its connections stay open between calls: a grid filling with covers asks for picture after picture over the same few connections rather than connecting for each. Measured on a Jellyfin server over the network, the songs list made 22 picture requests over at least 5 connections in its first ten seconds with a client per call, and the same 22 over 2 with the shared one.
+
+**D64 · Desktop media controls use the platform protocol, not key grabs** — *current* (2026-11-17)
+Linux uses MPRIS on the user's session D-Bus, so `playerctl` and desktop media widgets control Janis and the desktop decides which player receives media keys. Commands return to the same controller and pure playback state as window actions. A latest-value snapshot carries status and metadata to a worker; D-Bus calls, notifications and artwork-file encoding never block the interface or audio threads. Position is queried against an anchored clock rather than emitted on every animation frame. Capabilities describe the current source, and unsupported operations fail explicitly. A missing session bus leaves ordinary playback available. The platform-specific transport stays behind neutral interfaces in `platform.rs`; no keyboard hooks are installed.
 
 ## Architecture
 

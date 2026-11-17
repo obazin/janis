@@ -15,6 +15,7 @@ A native application written in **Rust**, with a **[Slint](https://slint.dev)** 
 - **Local Files** — drop zone (real OS drag-and-drop), scanned-library table with format badges, watched-folder management, rescan.
 - **10-band EQ** — bottom-sheet graphic equalizer with presets (Rock, Jazz, Bass Boost, …), applied live to playback, persisted across launches.
 - **Settings** — playback switches (gapless, crossfade and normalization are live in the engine and on by default; exclusive output is persisted only), output info, the Jellyfin server, language (English / Français).
+- **Desktop media controls (Linux)** — MPRIS integration for `playerctl`, desktop media widgets and standard media-key routing, with playback controls, metadata, artwork and position reporting. Janis does not grab keys.
 
 Playlists and user-added stations are on the roadmap.
 
@@ -41,6 +42,21 @@ Every release on the [releases page](https://github.com/obazin/janis/releases) c
     ```
 
     In a NixOS, nix-darwin or Home Manager configuration, add `janis.url = "github:obazin/janis";` to the flake inputs and either list `inputs.janis.packages.${pkgs.system}.default` in the packages, or add `inputs.janis.overlays.default` to `nixpkgs.overlays` and use `pkgs.janis`. On macOS the package carries `Applications/Janis.app` next to the `Janis` command, which nix-darwin and Home Manager link where Spotlight finds it.
+
+## Desktop controls on Linux
+
+While Janis is running in your desktop session:
+
+```sh
+playerctl --player=janis status
+playerctl --player=janis play-pause
+playerctl --player=janis next
+playerctl --player=janis position 30
+playerctl --player=janis volume 0.5
+playerctl --player=janis metadata
+```
+
+The desktop decides which player receives media keys. Radio has no seekable timeline, and playback speed stays fixed at 1. MPRIS uses your session bus; local playback also works when that bus is unavailable.
 
 ## Development
 

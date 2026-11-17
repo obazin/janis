@@ -102,6 +102,7 @@ impl Session {
         Some(Location::Remote(RemoteFile {
             url: url.into(),
             extension,
+            bounded_range: None,
         }))
     }
 
@@ -121,6 +122,7 @@ impl Session {
         Some(Location::Remote(RemoteFile {
             url: url.into(),
             extension: Some("mp3".to_owned()),
+            bounded_range: None,
         }))
     }
 }
@@ -1127,6 +1129,7 @@ mod tests {
                 url: "http://jellyfin.local:8096/Audio/item/stream?static=true&api_key=token"
                     .to_owned(),
                 extension: Some("flac".to_owned()),
+                bounded_range: None,
             })
         );
         assert_eq!(session().stream_location("/music/a.flac", "FLAC"), None);
@@ -1140,6 +1143,7 @@ mod tests {
                 url: "http://jellyfin.local:8096/Audio/item/stream.mp3?audioCodec=mp3&audioBitRate=64000&audioChannels=1&api_key=token"
                     .to_owned(),
                 extension: Some("mp3".to_owned()),
+                bounded_range: None,
             }))
         );
         assert_eq!(session().overview_location("/music/a.flac"), None);

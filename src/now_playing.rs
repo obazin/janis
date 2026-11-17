@@ -169,6 +169,7 @@ mod tests {
         player.play_station(station());
         player.apply(
             EngineEvent::State {
+                has_next: false,
                 playing: true,
                 mode: Mode::Radio,
                 index: 0,

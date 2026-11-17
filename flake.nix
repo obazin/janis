@@ -136,7 +136,7 @@
 
             src = ./.;
 
-            cargoHash = "sha256-mvSXSA5SFTZ3pjAxHUs8/F+TldeytVqZ4/rkvmK+w4Y=";
+            cargoHash = "sha256-5NqBTigRPLfKrKBbDazhWaOMGoNq6qEK02DSXvQ2lZA=";
 
             nativeBuildInputs = [
               pkgs.cmake

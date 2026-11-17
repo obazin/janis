@@ -10,8 +10,8 @@ paths:
 
 # The audio engine
 
-- **Boundary.** The whole audio path — decode, DSP, output, transport, web radio, and audio-file metadata — lives in the `audio-stack-rs` crate, a git dependency pinned to a tag. `audio.rs` re-exports the facade items Janis uses; nothing else names `audio_stack_rs`, and no audio or metadata crate (cpal, symphonia, lofty, …) is ever a direct dependency. A behaviour the engine lacks is a change to that crate, not a workaround here.
-- **Bumping the crate** means changing the tag in `Cargo.toml`, running `cargo update -p audio-stack-rs`, and regenerating `cargoHash` in `flake.nix`.
+- **Boundary.** The whole audio path — decode, DSP, output, transport, web radio, and audio-file metadata — lives in the `audio-stack-rs` crate, a git dependency pinned to a revision. `audio.rs` re-exports the facade items Janis uses; nothing else names `audio_stack_rs`, and no audio or metadata crate (cpal, symphonia, lofty, …) is ever a direct dependency. A behaviour the engine lacks is a change to that crate, not a workaround here.
+- **Bumping the crate** means changing the revision in `Cargo.toml`, running `cargo update -p audio-stack-rs`, and regenerating `cargoHash` in `flake.nix`.
 - **Events.** The engine calls `EngineBridge` from its own thread. `send_event` posts to the interface thread, where `Player::apply` takes the event into the mirror; `send_frame` only keeps the latest visual frame and never waits (a dropped frame is invisible, a stalled engine thread is audible).
 - **The mirror is optimistic.** A click updates `Player` at once and the engine's next `State` event confirms or corrects it. The engine stays the authority: on radio, the station is recovered from the id the engine names.
 - **Parameters are immediate, persistence is not.** Volume and EQ gains go straight to the engine so a slider is audible on the next buffer; the database write is a separate, debounced effect.

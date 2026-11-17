@@ -76,6 +76,7 @@ Development hooks, debug builds only:
 | `src/translations.rs`, `src/text.rs` | The catalogs and lookups; label ordering and formatting | `library` (types) |
 | `src/library.rs`, `src/persistence.rs` | The scanner, watched folders, cover lookup; the database, its migrations, the preferences. The only SQL | `audio` (facade functions), rusqlite, walkdir |
 | `src/audio.rs` | The `audio-stack-rs` facade re-exports and the `EngineBridge` event sink | `audio_stack_rs` — the only module that names it |
+| `src/media_controls.rs` | Neutral desktop media commands and latest-value playback snapshots; the platform worker implements the desktop protocol | std, tokio (watch channel) |
 | `src/background.rs`, `src/instance.rs`, `src/logging.rs`, `src/platform.rs` | Worker threads and pools; the one-instance guard; the logger; what differs by operating system | std, `log`, Slint's winit window |
 | `ui/` | The Slint interface in atomic tiers (see `.claude/rules/slint-ui.md`) | tokens and lower tiers |
 
@@ -112,7 +113,7 @@ a new track       → Effect::LoadOverview → overview thread → AudioEngine::
 ## Stack and distribution
 
 - **Interface:** Slint 1.18 (winit backend, FemtoVG renderer), compiled from `ui/app.slint` by `build.rs`, fully custom components.
-- **Audio:** `audio-stack-rs` (MIT, a git dependency pinned to a tag; `Cargo.lock` records the commit). Janis injects `EventSink` and `Store` and drives the `AudioEngine` facade.
+- **Audio:** `audio-stack-rs` (MIT, a git dependency pinned to a revision; `Cargo.lock` records the commit). Janis injects `EventSink` and `Store` and drives the `AudioEngine` facade.
 - **Persistence:** SQLite (`rusqlite`, bundled): `janis.db` in the per-user data directory holds preferences and the track library.
 - **Releases:** `just release <level>` bumps the version, writes `CHANGELOG.md` with git-cliff and pushes a `vX.Y.Z` tag; the tag runs `.github/workflows/release.yml`, which builds every platform's installers with `cargo packager` (and the rpm with `cargo generate-rpm`) and attaches them to a draft release whose notes are the tag's changelog section; the tag must match `Cargo.toml` and `flake.nix`. No signing certificate exists: macOS is ad-hoc signed, the others unsigned. Nix users install from the flake. Details: `.claude/rules/packaging.md`.
 

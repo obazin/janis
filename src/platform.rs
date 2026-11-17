@@ -2,6 +2,25 @@
 
 use std::path::PathBuf;
 
+#[cfg(target_os = "linux")]
+#[path = "platform/media_controls.rs"]
+mod desktop_media_controls;
+
+/// Exposes desktop playback controls without claiming keyboard shortcuts.
+pub fn media_controls(
+    handler: impl Fn(crate::media_controls::Command) + Send + Sync + 'static,
+) -> Option<crate::media_controls::Controls> {
+    #[cfg(target_os = "linux")]
+    {
+        desktop_media_controls::start(handler)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = handler;
+        None
+    }
+}
+
 /// The application's identifier, which names its per-user data directory.
 pub const APPLICATION_IDENTIFIER: &str = "com.olivierbazin.janis";
 

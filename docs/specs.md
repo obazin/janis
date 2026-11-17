@@ -23,6 +23,13 @@ The canonical description of user-facing behavior. Every new feature lands here 
 - **Queue card** — three-way segmented toggle: **Up Next** (remaining queue after the current track, wrapping once; with shuffle on, the same tracks unnumbered under a "shuffled" heading, since the order they will play in is drawn by the engine), **Playlist** (the full play queue, current track highlighted), **Album** (the current track's album from the library grouping). Rows show art, title/artist and duration; clicking a row plays from it. An "EQ" pill in the card header opens the equalizer overlay. The toggle survives navigating away and back.
 - **Artist spotlight** (local tracks with library matches) — two columns under the queue card: up to 4 more tracks by the current artist (click plays within the artist's tracks) and up to 4 of their albums (click plays the album).
 
+## Desktop media controls
+
+- **Linux integration** — Janis exposes `org.mpris.MediaPlayer2.janis` on the session D-Bus. `playerctl`, desktop media widgets and lock-screen controls use the same playback decisions as the window. Janis does not capture media keys; the desktop owns key routing and player selection.
+- **Transport** — play, pause, play/pause, stop, next, previous, volume, shuffle and playlist repeat. Track seeking uses seconds through `playerctl` and the standard microsecond D-Bus interface; requests for a stale track identity are ignored. Radio exposes no seeking or queue navigation. Playback speed remains fixed at 1, and unsupported operations report that they are unavailable.
+- **Reporting** — playback status, title, artist, album, duration, available cover art, position and current capabilities follow local files, Jellyfin and radio. Position is interpolated between engine reports; ordinary progress does not emit property-change floods. Confirmed seeks and same-track position resets emit `Seeked`, and queue navigation availability comes from the engine's playback order. Signed playback addresses and credentials are not published.
+- **Lifecycle** — the service starts with Janis and releases its name and private temporary cover files before process exit. A missing session bus does not stop the application, and shutdown cancels connection startup. D-Bus and artwork-file work run off the interface and audio threads. The desktop service is Linux-only.
+
 ## Library
 
 - Header: violet eyebrow, title, gradient "Add music" button (multi-file picker).

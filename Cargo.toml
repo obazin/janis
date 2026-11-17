@@ -37,9 +37,8 @@ rfd = "0.15"
 # Cover art reaches Janis base64-encoded, from the audio facade and from
 # stations alike.
 base64 = "0.22"
-# Drives the one asynchronous facade call, connecting to a station. The
-# runtime outlives the call: the station's download keeps running on it.
-tokio = { version = "1", features = ["rt-multi-thread"] }
+# Station downloads and desktop media controls keep their own worker runtimes.
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "macros", "time"] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
 log = "0.4.29"
@@ -65,15 +64,14 @@ walkdir = "2"
 # lives in this standalone MIT crate (https://github.com/obazin/audio-stack-rs).
 # Janis imports only its facade: none of the audio/metadata crates (cpal,
 # symphonia, lofty, stream-download, opus, …) are direct dependencies here.
-# Pinned to a tag; `Cargo.lock` records the exact commit. The dev-profile
-# `opt-level = 2` override below still applies to it (and its transitive
-# deps), so realtime DSP stays fast.
+# The fork supplies confirmed transport positions and identity-guarded seeks.
+# `Cargo.lock` records the revision; the dev-profile override keeps DSP fast.
 #
 # `fir-eq` opts into the linear-phase EQ: the same ten bands with no
 # inter-band phase distortion, offered by the equalizer sheet as a quality
 # mode. Pure code in the crate — it reuses the `realfft` the analyser already
 # links — so it pulls in no new dependency.
-audio-stack-rs = { git = "https://github.com/obazin/audio-stack-rs", tag = "daw-overview", features = [
+audio-stack-rs = { git = "https://github.com/calops/audio-stack-rs", rev = "f20c778da51d60484637f6bc62c4f44204c29003", features = [
     "fir-eq",
 ] }
 
@@ -83,6 +81,11 @@ audio-stack-rs = { git = "https://github.com/obazin/audio-stack-rs", tag = "daw-
 # The calls `platform` makes to lower a thread's priority.
 [target.'cfg(any(target_os = "macos", target_os = "linux"))'.dependencies]
 libc = "0.2"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# Session-bus media controls run on a dedicated Tokio worker.
+mpris-server = { version = "0.11", features = ["tokio"] }
+tempfile = "3"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Threading"] }
