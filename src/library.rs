@@ -1308,10 +1308,15 @@ mod tests {
     }
 
     fn signed_in(database: &DbState) -> i64 {
+        signed_in_from(database, "http://server")
+    }
+
+    /// Signs in to the same server as the same user, reached at `address`.
+    fn signed_in_from(database: &DbState, address: &str) -> i64 {
         crate::persistence::save_media_server(
             database,
             &crate::persistence::NewMediaServer {
-                address: "http://server".to_owned(),
+                address: address.to_owned(),
                 server_identifier: "server".to_owned(),
                 server_name: "Home".to_owned(),
                 user_identifier: "user".to_owned(),
@@ -1366,6 +1371,83 @@ mod tests {
                 artwork_item: Some("album-of-a".to_owned())
             }
         );
+    }
+
+    /// Every server item, with the number of rows that point at it.
+    fn rows_per_item(database: &DbState) -> Vec<(String, i64)> {
+        database
+            .lock()
+            .prepare(
+                "SELECT path, count(*) FROM tracks WHERE server_id IS NOT NULL
+                 GROUP BY path ORDER BY path",
+            )
+            .and_then(|mut statement| {
+                statement
+                    .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+                    .collect()
+            })
+            .expect("the rows per item")
+    }
+
+    #[test]
+    fn a_server_item_is_one_row_however_often_and_from_wherever_it_is_listed() {
+        let directory = tempfile::tempdir().expect("a temporary directory");
+        let database = crate::persistence::init(directory.path().to_path_buf()).expect("db");
+        let server_id = signed_in(&database);
+        let libraries = [library("music", "Music"), library("kids", "Kids")];
+        // The listing files an item two libraries share in both; should it
+        // still name the item twice, the second is the same item again.
+        let listed = || {
+            vec![
+                listed_in(server_song("a", "One"), &["music", "kids"]),
+                listed_in(server_song("b", "Two"), &["music"]),
+                listed_in(server_song("a", "One"), &["music", "kids"]),
+            ]
+        };
+        let rows = |database: &DbState| -> Vec<(i64, String, Vec<i64>)> {
+            let mut rows: Vec<_> = list_tracks(database)
+                .expect("tracks")
+                .into_iter()
+                .map(|mut track| {
+                    track.server_libraries.sort_unstable();
+                    (track.id, track.path, track.server_libraries)
+                })
+                .collect();
+            rows.sort();
+            rows
+        };
+
+        sync_server_tracks(&database, server_id, &libraries, listed()).expect("first sync");
+        let first = rows(&database);
+        assert_eq!(
+            rows_per_item(&database),
+            [
+                ("jellyfin://server/a".to_owned(), 1),
+                ("jellyfin://server/b".to_owned(), 1),
+            ]
+        );
+        let mut library_rows: Vec<i64> = crate::persistence::server_libraries(&database)
+            .expect("libraries")
+            .iter()
+            .map(|library| library.id)
+            .collect();
+        library_rows.sort_unstable();
+        assert_eq!(
+            first[0].2, library_rows,
+            "an item listed in two places is filed in both, once each"
+        );
+
+        // Synced again, then again after signing in from another address —
+        // the same server and user reached another way.
+        sync_server_tracks(&database, server_id, &libraries, listed()).expect("second sync");
+        assert_eq!(
+            signed_in_from(&database, "http://100.64.0.1:8096"),
+            server_id,
+            "the same server and user keep their row"
+        );
+        sync_server_tracks(&database, server_id, &libraries, listed()).expect("third sync");
+
+        assert_eq!(rows(&database), first, "no row is added, every row is kept");
     }
 
     fn library(identifier: &str, name: &str) -> ListedLibrary {

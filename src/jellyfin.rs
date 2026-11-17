@@ -622,8 +622,12 @@ pub fn listing(session: &Session, server_identifier: &str) -> Result<Listing, Fa
     for view in views(session)?.into_iter().filter(holds_songs) {
         for mut song in library_songs(session, server_identifier, &view.id)? {
             if let Some(&place) = place_of_song.get(&song.address) {
+                // The same library names a song twice when its pages shift
+                // while they are read.
                 let listed: &mut ServerSong = &mut listing.songs[place];
-                listed.libraries.push(view.id.clone());
+                if !listed.libraries.contains(&view.id) {
+                    listed.libraries.push(view.id.clone());
+                }
             } else {
                 song.libraries = vec![view.id.clone()];
                 place_of_song.insert(song.address.clone(), listing.songs.len());
@@ -1624,6 +1628,51 @@ mod tests {
                 ("jellyfin://server/a", vec!["music"]),
                 ("jellyfin://server/shared", vec!["music", "mixed"]),
                 ("jellyfin://server/b", vec!["mixed"]),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_song_named_on_two_pages_of_its_library_is_listed_once() {
+        // A song was added at the head of the library between the two pages,
+        // so the second starts with the song that ended the first.
+        let address = fake_server_with(vec![
+            route("/UserViews?", |_| {
+                (
+                    "200 OK",
+                    r#"{"Items": [{"Id": "music", "Name": "Music"}]}"#.to_owned(),
+                )
+            }),
+            route("/Items?", |request| {
+                let items = match query_value(&request.target, "StartIndex") {
+                    Some("0") => r#"{"Id": "a"}, {"Id": "b"}"#,
+                    _ => r#"{"Id": "b"}, {"Id": "c"}"#,
+                };
+                (
+                    "200 OK",
+                    format!(r#"{{"Items": [{items}], "TotalRecordCount": 4}}"#),
+                )
+            }),
+        ]);
+
+        let listing = listing(&signed_in_to(&address), "server").expect("the listing");
+
+        let songs: Vec<(&str, Vec<&str>)> = listing
+            .songs
+            .iter()
+            .map(|song| {
+                (
+                    song.address.as_str(),
+                    song.libraries.iter().map(String::as_str).collect(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            songs,
+            [
+                ("jellyfin://server/a", vec!["music"]),
+                ("jellyfin://server/b", vec!["music"]),
+                ("jellyfin://server/c", vec!["music"]),
             ]
         );
     }
