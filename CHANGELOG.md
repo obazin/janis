@@ -2,7 +2,7 @@
 
 All notable changes to **Janis** are documented in this file. It is generated from the commit messages ([Conventional Commits](https://www.conventionalcommits.org)) by [git-cliff](https://git-cliff.org): edit commit messages, not this file.
 
-## [unreleased]
+## [v0.3.1](https://github.com/obazin/janis/releases/tag/v0.3.1) — 2026-11-17
 
 Changes since [v0.3.0](https://github.com/obazin/janis/releases/tag/v0.3.0).
 
