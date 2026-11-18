@@ -149,6 +149,12 @@
             # them need a loopback socket the build sandbox does not give.
             doCheck = false;
 
+            # The `*-sys` crates build their bundled sources (aws-lc, SQLite),
+            # as `cargo build` does outside Nix. Recent nixpkgs would otherwise
+            # point them at system libraries this package does not provide,
+            # which matters when a consumer swaps in its own nixpkgs.
+            dontCargoUseSystemLibs = true;
+
             # The binary finds the libraries it loads at run time.
             postFixup = pkgs.lib.optionalString pkgs.stdenv.isLinux ''
               patchelf --add-rpath "${pkgs.lib.makeLibraryPath windowLibs}" $out/bin/Janis
