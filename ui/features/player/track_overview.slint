@@ -84,7 +84,7 @@ export component TrackOverview inherits Rectangle {
         to-maximum => { root.seek-to(1); }
     }
 
-    if keys.has-focus: Rectangle {
+    if keys.focus-visible: Rectangle {
         border-width: 1px;
         border-color: Tokens.accent-ring;
     }

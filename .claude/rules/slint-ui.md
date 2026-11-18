@@ -38,7 +38,7 @@ Dependencies run one way. The design system (atoms, molecules, organisms) import
 
 ## Accessibility
 
-- Every interactive component has an `accessible-role`, an `accessible-label` and an `accessible-action-default` that does what a click does. Selectable ones (`Chip`, `NavItem`, `Toggle`, the queue tabs) also say `accessible-checkable` and `accessible-checked`; sliders give their minimum, maximum, value and step, the increment, decrement and set-value actions, and take the arrow keys through `SliderKeys`, outlined in `accent-ring` while focused.
+- Every interactive component has an `accessible-role`, an `accessible-label` and an `accessible-action-default` that does what a click does. Selectable ones (`Chip`, `NavItem`, `Toggle`, the queue tabs) also say `accessible-checkable` and `accessible-checked`; sliders give their minimum, maximum, value and step, the increment, decrement and set-value actions, and take the arrow keys through `SliderKeys`, outlined in `accent-ring` while `SliderKeys.focus-visible` (focused by Tab, not by a click).
 - An icon-only button carries its `IconButtonIdentifier` as `accessible-id`. Adding one means adding its entry to the registry.
 - The `accessibility` Slint feature must stay enabled in `Cargo.toml`.
 

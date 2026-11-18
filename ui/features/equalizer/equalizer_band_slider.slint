@@ -81,7 +81,7 @@ export component EqualizerBandSlider inherits VerticalLayout {
                 background: Tokens.text;
             }
 
-            if keys.has-focus: Rectangle {
+            if keys.focus-visible: Rectangle {
                 border-radius: self.width / 2;
                 border-width: 1px;
                 border-color: Tokens.accent-ring;

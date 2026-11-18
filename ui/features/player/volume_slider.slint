@@ -37,7 +37,7 @@ export component VolumeSlider inherits Rectangle {
         to-maximum => { Player.volume-changed(1); }
     }
 
-    if keys.has-focus: Rectangle {
+    if keys.focus-visible: Rectangle {
         border-radius: self.height / 2;
         border-width: 1px;
         border-color: Tokens.accent-ring;
