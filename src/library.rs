@@ -265,7 +265,7 @@ fn flush_batch(
     if batch.is_empty() {
         return;
     }
-    let conn = db.lock();
+    let conn = db.lock_for_library_change();
     let tx = match conn.unchecked_transaction() {
         Ok(tx) => tx,
         Err(e) => {
@@ -350,7 +350,7 @@ fn prune_missing(db: &DbState) -> Result<usize, String> {
         .map(|(id, _, _)| id)
         .collect();
 
-    let conn = db.lock();
+    let conn = db.lock_for_library_change();
     let tx = conn
         .unchecked_transaction()
         .map_err(|e| format!("prune transaction: {}", e))?;
@@ -362,8 +362,48 @@ fn prune_missing(db: &DbState) -> Result<usize, String> {
     Ok(doomed.len())
 }
 
+/// A read of the whole library — songs, folders, the server's libraries,
+/// favourites, playlists and groups — as one state of the database, with
+/// the revision it was read at. Taken off the interface thread.
+#[derive(Debug)]
+pub struct LibrarySnapshot {
+    pub revision: u64,
+    pub tracks: Vec<Track>,
+    pub folders: Vec<WatchedFolder>,
+    pub libraries: Vec<crate::persistence::ServerLibrary>,
+    pub favourite_track_ids: Vec<i64>,
+    pub playlists: Vec<crate::persistence::SavedPlaylist>,
+    pub playlist_groups: Vec<crate::persistence::PlaylistGroup>,
+}
+
+impl LibrarySnapshot {
+    /// Reads every part under one lock, so no change lands between two of
+    /// them, and the revision with them.
+    pub fn read(database: &DbState) -> Result<Self, String> {
+        let connection = database.lock();
+        Ok(Self {
+            revision: database.library_revision(),
+            tracks: list_tracks_in(&connection)?,
+            folders: list_watched_folders_in(&connection)?,
+            libraries: crate::persistence::server_libraries_in(&connection)?,
+            favourite_track_ids: crate::persistence::favourite_track_ids_in(&connection)?,
+            playlists: crate::persistence::playlists_in(&connection)?,
+            playlist_groups: crate::persistence::playlist_groups_in(&connection)?,
+        })
+    }
+
+    /// True while nothing has changed the library since this was read.
+    pub fn is_current(&self, database: &DbState) -> bool {
+        self.revision == database.library_revision()
+    }
+}
+
 pub fn list_tracks(db: &DbState) -> Result<Vec<Track>, String> {
-    let conn = db.lock();
+    list_tracks_in(&db.lock())
+}
+
+/// [`list_tracks`], on a connection the caller holds.
+pub(crate) fn list_tracks_in(conn: &rusqlite::Connection) -> Result<Vec<Track>, String> {
     let mut libraries_of_track: std::collections::HashMap<i64, Vec<i64>> =
         std::collections::HashMap::new();
     conn.prepare("SELECT track_id, library_id FROM track_libraries ORDER BY library_id")
@@ -445,7 +485,13 @@ pub fn list_tracks(db: &DbState) -> Result<Vec<Track>, String> {
 }
 
 pub fn list_watched_folders(db: &DbState) -> Result<Vec<WatchedFolder>, String> {
-    let conn = db.lock();
+    list_watched_folders_in(&db.lock())
+}
+
+/// [`list_watched_folders`], on a connection the caller holds.
+pub(crate) fn list_watched_folders_in(
+    conn: &rusqlite::Connection,
+) -> Result<Vec<WatchedFolder>, String> {
     let mut stmt = conn
         .prepare(
             "SELECT f.id, f.path, COUNT(t.id) FROM watched_folders f
@@ -490,7 +536,7 @@ pub fn add_watched_folder(db: &DbState, path: &str) -> Result<ScanReport, ScanEr
     // The lock covers only the registration; the walk itself runs unlocked
     // (see `scan_folder`).
     let folder_id: i64 = {
-        let connection = db.lock();
+        let connection = db.lock_for_library_change();
         let watched: Vec<(i64, String)> = connection
             .prepare("SELECT id, path FROM watched_folders")
             .and_then(|mut statement| {
@@ -558,7 +604,7 @@ fn strictly_inside(outer: &Path, inner: &Path) -> bool {
 }
 
 pub fn remove_watched_folder(db: &DbState, folder_id: i64) -> Result<(), String> {
-    let conn = db.lock();
+    let conn = db.lock_for_library_change();
     conn.execute("DELETE FROM watched_folders WHERE id = ?1", [folder_id])
         .map_err(|e| format!("remove folder: {}", e))?;
     Ok(())
@@ -634,7 +680,7 @@ pub fn sync_server_playlists(
     server_id: i64,
     playlists: &[ListedPlaylist],
 ) -> Result<(), String> {
-    let connection = database.lock();
+    let connection = database.lock_for_library_change();
     let transaction = connection
         .unchecked_transaction()
         .map_err(|error| format!("playlist sync transaction: {error}"))?;
@@ -722,7 +768,7 @@ pub fn sync_server_tracks(
     let listed: std::collections::HashSet<String> =
         songs.iter().map(|song| song.address.clone()).collect();
     for burst in songs.chunks(SCAN_BATCH) {
-        let connection = database.lock();
+        let connection = database.lock_for_library_change();
         let mut transaction = connection
             .unchecked_transaction()
             .map_err(|error| format!("server sync transaction: {error}"))?;
@@ -745,7 +791,7 @@ pub fn sync_server_tracks(
         report.skipped += written.skipped;
     }
 
-    let connection = database.lock();
+    let connection = database.lock_for_library_change();
     let stored: Vec<(i64, String)> = connection
         .prepare("SELECT id, path FROM tracks WHERE server_id = ?1")
         .and_then(|mut statement| {
@@ -779,7 +825,7 @@ fn sync_server_libraries(
     server_id: i64,
     libraries: &[ListedLibrary],
 ) -> Result<std::collections::HashMap<String, i64>, String> {
-    let connection = database.lock();
+    let connection = database.lock_for_library_change();
     let transaction = connection
         .unchecked_transaction()
         .map_err(|error| format!("library sync transaction: {error}"))?;
@@ -2430,6 +2476,30 @@ mod tests {
             crate::persistence::favourite_track_ids(&database),
             Ok(vec![song])
         );
+    }
+
+    #[test]
+    fn a_snapshot_read_before_a_star_is_overtaken_by_it() {
+        let directory = tempfile::tempdir().expect("a temporary directory");
+        let database = crate::persistence::init(directory.path().join("data")).expect("a database");
+        let music = directory.path().join("music");
+        write_wav(&music.join("song.wav"));
+        watch(&database, &music).expect("watched");
+        let before = LibrarySnapshot::read(&database).expect("a snapshot");
+        let song = before.tracks[0].id;
+        assert!(before.is_current(&database));
+
+        // Neither a measurement nor a preference changes what it read.
+        store_loudness(&database, song, -14.0, 0.9);
+        crate::persistence::set_volume(&database, 0.5).expect("a volume");
+        assert!(before.is_current(&database));
+
+        crate::persistence::set_favourite_track(&database, song, true).expect("star the song");
+        assert!(!before.is_current(&database), "the star is not in it");
+
+        let after = LibrarySnapshot::read(&database).expect("a snapshot");
+        assert!(after.is_current(&database));
+        assert_eq!(after.favourite_track_ids, vec![song]);
     }
 
     #[test]

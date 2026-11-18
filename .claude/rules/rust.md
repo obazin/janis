@@ -19,7 +19,7 @@ paths:
 
 - The controller lives on the interface thread and is reached from other threads only through `application::post`. Nothing that belongs to the window crosses a thread.
 - File reads, picture decoding and scans run on a `background::Worker` (`picture_worker`, `library_worker`), list and grid thumbnails on the `thumbnail_workers` pool once `cover_requests` lets them start, the Jellyfin calls on `server_worker`, each track overview read on a thread of its own; the station connect runs on `station_runtime`, which stays alive because the stream goes on downloading on it. A job ends by posting its result.
-- A result that may arrive after the state moved on is recognised and dropped: it carries the epoch it was asked under (the current cover, a station's art, thumbnails, a station connection), a loudness measurement the row and path it read.
+- A result that may arrive after the state moved on is recognised and dropped: it carries the epoch it was asked under (the current cover, a station's art, thumbnails, a station connection), a library snapshot its revision, a loudness measurement the row and path it read.
 - Short SQLite writes of one preference are the one thing allowed on the interface thread.
 
 ## Window boundary

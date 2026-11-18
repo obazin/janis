@@ -12,12 +12,11 @@ use std::sync::Arc;
 
 use slint::ComponentHandle;
 
-use super::library_screens::LibrarySnapshot;
 use super::{list_place, post, Application};
 use crate::audio::Location;
 use crate::effects::Secret;
 use crate::jellyfin::{self, Failure, Session};
-use crate::library::{self, ScanReport, Track};
+use crate::library::{self, LibrarySnapshot, ScanReport, Track};
 use crate::persistence::{self, MediaServer};
 use crate::user_interface;
 

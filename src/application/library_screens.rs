@@ -13,11 +13,11 @@ use super::{
 };
 use crate::audio;
 use crate::covers;
-use crate::library::{self, ScanError, ScanReport, Track, WatchedFolder};
+use crate::library::{self, LibrarySnapshot, ScanError, ScanReport, Track};
 use crate::library_view::{
     self, AlbumGroup, ArtistGroup, LibraryTab, Selection, SelectionKind, SHELF_TILE_COUNT,
 };
-use crate::persistence::{self, DbState, PlaylistGroup, SavedPlaylist, ServerLibrary};
+use crate::persistence::DbState;
 use crate::text;
 use crate::translations::Translations;
 use crate::user_interface::{self, LibraryCard, LibraryTrack};
@@ -48,29 +48,6 @@ pub(super) struct LibraryScreen {
     recent_albums: Vec<AlbumGroup>,
     rediscover_albums: Vec<AlbumGroup>,
     shelf_artists: Vec<ArtistGroup>,
-}
-
-/// A fresh read of the library, taken off the interface thread.
-pub(super) struct LibrarySnapshot {
-    tracks: Vec<Track>,
-    folders: Vec<WatchedFolder>,
-    libraries: Vec<ServerLibrary>,
-    favourite_track_ids: Vec<i64>,
-    playlists: Vec<SavedPlaylist>,
-    playlist_groups: Vec<PlaylistGroup>,
-}
-
-impl LibrarySnapshot {
-    pub fn read(database: &DbState) -> Result<Self, String> {
-        Ok(Self {
-            tracks: library::list_tracks(database)?,
-            folders: library::list_watched_folders(database)?,
-            libraries: persistence::server_libraries(database)?,
-            favourite_track_ids: persistence::favourite_track_ids(database)?,
-            playlists: persistence::playlists(database)?,
-            playlist_groups: persistence::playlist_groups(database)?,
-        })
-    }
 }
 
 impl Application {
@@ -637,8 +614,16 @@ impl Application {
         self.measure_loudness();
     }
 
-    /// Replaces the library the screens are built from.
+    /// Replaces the library the screens are built from — unless something
+    /// changed it after the snapshot was read: a star, a playlist edit, the
+    /// answer to a push, another job's writes. Taken, that snapshot would
+    /// undo them on screen, so the library is read again instead, and the
+    /// screens keep what they show until then.
     pub(super) fn take_library(&self, snapshot: LibrarySnapshot) {
+        if !snapshot.is_current(&self.database) {
+            self.read_library_again();
+            return;
+        }
         self.media_server
             .borrow_mut()
             .set_libraries(snapshot.libraries);
@@ -656,6 +641,24 @@ impl Application {
         self.thumbnails.borrow_mut().clear();
         self.cover_requests.borrow_mut().clear();
         self.bump_cover_revision();
+    }
+
+    /// Reads the library on the library thread, then takes it.
+    fn read_library_again(&self) {
+        let database = Arc::clone(&self.database);
+        self.library_worker.run(move || {
+            let outcome = LibrarySnapshot::read(&database);
+            post(move |application| match outcome {
+                Ok(snapshot) => {
+                    application.take_library(snapshot);
+                    application.refresh_everything();
+                }
+                Err(error) => {
+                    log::error!("read the library: {error}");
+                    application.notify_error("error.library", vec![("message", error)], None);
+                }
+            });
+        });
     }
 
     /// Builds the tracks, albums and artists the screens show from the whole

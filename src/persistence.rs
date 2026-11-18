@@ -6,6 +6,7 @@
 
 use rusqlite::Connection;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, MutexGuard};
 
 use crate::audio::EQ_BAND_COUNT;
@@ -13,11 +14,70 @@ use crate::audio::EQ_BAND_COUNT;
 /// The file `init` opens in the data directory.
 const DATABASE_FILE: &str = "janis.db";
 
-pub struct DbState(Mutex<Connection>);
+pub struct DbState {
+    connection: Mutex<Connection>,
+    /// Counts the changes to what a library snapshot reads — the songs, the
+    /// folders, the server's libraries, the favourites, the playlists and
+    /// their groups — so a snapshot can tell it was overtaken by one.
+    library_revision: AtomicU64,
+}
 
 impl DbState {
+    fn new(connection: Connection) -> Self {
+        Self {
+            connection: Mutex::new(connection),
+            library_revision: AtomicU64::new(0),
+        }
+    }
+
+    /// The connection, for a read or for a write that leaves the library as
+    /// it was (a preference, a loudness measurement).
     pub fn lock(&self) -> MutexGuard<'_, Connection> {
-        self.0.lock().expect("janis.db mutex poisoned")
+        self.connection.lock().expect("janis.db mutex poisoned")
+    }
+
+    /// The connection, for a write that changes what a library snapshot
+    /// reads: the revision moves on when the guard goes, before the lock is
+    /// released.
+    pub fn lock_for_library_change(&self) -> LibraryChange<'_> {
+        LibraryChange {
+            connection: self.lock(),
+            revision: &self.library_revision,
+        }
+    }
+
+    /// The library's revision now. Read under the lock, it is the revision
+    /// of what that lock's reads see.
+    pub fn library_revision(&self) -> u64 {
+        self.library_revision.load(Ordering::Acquire)
+    }
+}
+
+/// The connection held for a change to the library; see
+/// [`DbState::lock_for_library_change`].
+pub struct LibraryChange<'database> {
+    connection: MutexGuard<'database, Connection>,
+    revision: &'database AtomicU64,
+}
+
+impl std::ops::Deref for LibraryChange<'_> {
+    type Target = Connection;
+
+    fn deref(&self) -> &Connection {
+        &self.connection
+    }
+}
+
+impl std::ops::DerefMut for LibraryChange<'_> {
+    fn deref_mut(&mut self) -> &mut Connection {
+        &mut self.connection
+    }
+}
+
+impl Drop for LibraryChange<'_> {
+    fn drop(&mut self) {
+        // The guard's fields, the lock among them, are dropped after this.
+        self.revision.fetch_add(1, Ordering::AcqRel);
     }
 }
 
@@ -204,7 +264,7 @@ pub fn init(app_data_dir: PathBuf) -> Result<DbState, String> {
     migrate(&conn)?;
     conn.execute("INSERT OR IGNORE INTO user_preferences (id) VALUES (1)", [])
         .map_err(|e| format!("seed preferences row: {}", e))?;
-    Ok(DbState(Mutex::new(conn)))
+    Ok(DbState::new(conn))
 }
 
 /// Applies any migration the file has not seen, tracked in SQLite's own
@@ -442,7 +502,13 @@ pub fn set_favourite_station(
 
 /// The ids of the songs the listener starred, the newest favourite first.
 pub fn favourite_track_ids(database: &DbState) -> Result<Vec<i64>, String> {
-    let connection = database.lock();
+    favourite_track_ids_in(&database.lock())
+}
+
+/// [`favourite_track_ids`], on a connection the caller holds.
+pub(crate) fn favourite_track_ids_in(
+    connection: &rusqlite::Connection,
+) -> Result<Vec<i64>, String> {
     connection
         .prepare("SELECT track_id FROM favourite_tracks ORDER BY added_at DESC, id DESC")
         .and_then(|mut statement| statement.query_map([], |row| row.get(0))?.collect())
@@ -457,7 +523,7 @@ pub fn set_favourite_track(
     track_id: i64,
     favourite: bool,
 ) -> Result<(), String> {
-    let connection = database.lock();
+    let connection = database.lock_for_library_change();
     let statement = if favourite {
         "INSERT OR IGNORE INTO favourite_tracks (track_id) SELECT id FROM tracks WHERE id = ?1"
     } else {
@@ -494,7 +560,13 @@ pub struct PlaylistGroup {
 
 /// Every playlist, the oldest first, each with its songs in order.
 pub fn playlists(database: &DbState) -> Result<Vec<SavedPlaylist>, String> {
-    let connection = database.lock();
+    playlists_in(&database.lock())
+}
+
+/// [`playlists`], on a connection the caller holds.
+pub(crate) fn playlists_in(
+    connection: &rusqlite::Connection,
+) -> Result<Vec<SavedPlaylist>, String> {
     let mut playlists: Vec<SavedPlaylist> = connection
         .prepare(
             "SELECT id, name, server_id, server_item, server_picture, group_id,
@@ -544,7 +616,13 @@ pub fn playlists(database: &DbState) -> Result<Vec<SavedPlaylist>, String> {
 
 /// The groups, in the order the listener gave them.
 pub fn playlist_groups(database: &DbState) -> Result<Vec<PlaylistGroup>, String> {
-    let connection = database.lock();
+    playlist_groups_in(&database.lock())
+}
+
+/// [`playlist_groups`], on a connection the caller holds.
+pub(crate) fn playlist_groups_in(
+    connection: &rusqlite::Connection,
+) -> Result<Vec<PlaylistGroup>, String> {
     connection
         .prepare("SELECT id, name FROM playlist_groups ORDER BY position, id")
         .and_then(|mut statement| {
@@ -569,7 +647,7 @@ pub fn create_playlist(
     server: Option<(i64, &str)>,
     track_ids: &[i64],
 ) -> Result<Option<i64>, String> {
-    let mut connection = database.lock();
+    let mut connection = database.lock_for_library_change();
     let transaction = connection
         .transaction()
         .map_err(|error| format!("create a playlist: {error}"))?;
@@ -628,7 +706,7 @@ pub fn set_playlist_entry(
     track_id: i64,
     present: bool,
 ) -> Result<(), String> {
-    let connection = database.lock();
+    let connection = database.lock_for_library_change();
     let result = if present {
         add_entry(&connection, playlist_id, track_id)
     } else {
@@ -643,7 +721,7 @@ pub fn set_playlist_entry(
 }
 
 pub fn rename_playlist(database: &DbState, playlist_id: i64, name: &str) -> Result<(), String> {
-    let connection = database.lock();
+    let connection = database.lock_for_library_change();
     connection
         .execute(
             "UPDATE playlists SET name = ?1 WHERE id = ?2",
@@ -654,7 +732,7 @@ pub fn rename_playlist(database: &DbState, playlist_id: i64, name: &str) -> Resu
 }
 
 pub fn remove_playlist(database: &DbState, playlist_id: i64) -> Result<(), String> {
-    let connection = database.lock();
+    let connection = database.lock_for_library_change();
     connection
         .execute("DELETE FROM playlists WHERE id = ?1", [playlist_id])
         .map(|_| ())
@@ -667,7 +745,7 @@ pub fn set_playlist_group(
     playlist_id: i64,
     group_id: Option<i64>,
 ) -> Result<(), String> {
-    let connection = database.lock();
+    let connection = database.lock_for_library_change();
     connection
         .execute(
             "UPDATE playlists SET group_id = (SELECT id FROM playlist_groups WHERE id = ?1)
@@ -684,7 +762,7 @@ pub fn set_playlist_picture(
     playlist_id: i64,
     picture: Option<&[u8]>,
 ) -> Result<(), String> {
-    let connection = database.lock();
+    let connection = database.lock_for_library_change();
     connection
         .execute(
             "UPDATE playlists SET picture = ?1 WHERE id = ?2",
@@ -712,7 +790,7 @@ pub fn playlist_picture(database: &DbState, playlist_id: i64) -> Result<Option<V
 
 /// Saves a new group after the others and gives its row.
 pub fn create_playlist_group(database: &DbState, name: &str) -> Result<i64, String> {
-    let connection = database.lock();
+    let connection = database.lock_for_library_change();
     connection
         .query_row(
             "INSERT INTO playlist_groups (name, position)
@@ -725,7 +803,7 @@ pub fn create_playlist_group(database: &DbState, name: &str) -> Result<i64, Stri
 }
 
 pub fn rename_playlist_group(database: &DbState, group_id: i64, name: &str) -> Result<(), String> {
-    let connection = database.lock();
+    let connection = database.lock_for_library_change();
     connection
         .execute(
             "UPDATE playlist_groups SET name = ?1 WHERE id = ?2",
@@ -737,7 +815,7 @@ pub fn rename_playlist_group(database: &DbState, group_id: i64, name: &str) -> R
 
 /// Removes a group; its playlists are then in none.
 pub fn remove_playlist_group(database: &DbState, group_id: i64) -> Result<(), String> {
-    let connection = database.lock();
+    let connection = database.lock_for_library_change();
     connection
         .execute("DELETE FROM playlist_groups WHERE id = ?1", [group_id])
         .map(|_| ())
@@ -746,7 +824,7 @@ pub fn remove_playlist_group(database: &DbState, group_id: i64) -> Result<(), St
 
 /// Puts the groups in the order given.
 pub fn set_playlist_group_order(database: &DbState, group_ids: &[i64]) -> Result<(), String> {
-    let mut connection = database.lock();
+    let mut connection = database.lock_for_library_change();
     let transaction = connection
         .transaction()
         .map_err(|error| format!("order the playlist groups: {error}"))?;
@@ -854,7 +932,7 @@ pub fn save_media_server(
     server: &NewMediaServer,
 ) -> Result<MediaServer, String> {
     {
-        let connection = database.lock();
+        let connection = database.lock_for_library_change();
         let transaction = connection
             .unchecked_transaction()
             .map_err(|error| format!("save media server: {error}"))?;
@@ -902,7 +980,7 @@ pub fn save_media_server(
 
 /// Forgets the server, and with it every song it brought.
 pub fn remove_media_server(database: &DbState, server_id: i64) -> Result<(), String> {
-    let connection = database.lock();
+    let connection = database.lock_for_library_change();
     connection
         .execute("DELETE FROM media_servers WHERE id = ?1", [server_id])
         .map_err(|error| format!("remove media server: {error}"))?;
@@ -932,7 +1010,13 @@ pub struct ServerLibrary {
 
 /// The libraries of the kept servers, in the order the server lists them.
 pub fn server_libraries(database: &DbState) -> Result<Vec<ServerLibrary>, String> {
-    let connection = database.lock();
+    server_libraries_in(&database.lock())
+}
+
+/// [`server_libraries`], on a connection the caller holds.
+pub(crate) fn server_libraries_in(
+    connection: &rusqlite::Connection,
+) -> Result<Vec<ServerLibrary>, String> {
     connection
         .prepare(
             "SELECT id, name, shown FROM server_libraries
@@ -958,7 +1042,7 @@ pub fn set_server_library_shown(
     library_id: i64,
     shown: bool,
 ) -> Result<(), String> {
-    let connection = database.lock();
+    let connection = database.lock_for_library_change();
     connection
         .execute(
             "UPDATE server_libraries SET shown = ?1 WHERE id = ?2",
