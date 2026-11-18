@@ -238,6 +238,10 @@ Superseded: one `just release` for whichever platform it ran on (D26a).
 `just release patch|minor|major`, run in the dev shell from a clean `main`, bumps `Cargo.toml` and `Cargo.lock` (`cargo set-version`) and the flake's janis version, writes `CHANGELOG.md` with git-cliff, shows that version's notes and waits for a yes; then it asks Nix for the new vendor hash (the lock file carries the package's own version), builds the Nix package, commits `chore(release): vX.Y.Z`, makes an annotated tag and pushes both. A no, or a failure before the commit, restores the four files. The recipe does not create the GitHub release: the tag's workflow already opens a draft and attaches every platform's installers to it, so a release made by the recipe would race that step and be public before any installer exists. The draft's notes are the install steps followed by the tag's section of `CHANGELOG.md`, in place of GitHub's generated list. `just release-preview <level>` shows the next notes and changes nothing; `just changelog` rewrites the file. The recipe and `cliff.toml` come from the sibling project litchee, which publishes its release from the recipe since it has no installers to wait for.
 Superseded: bumping `Cargo.toml` and `flake.nix` by hand and pushing the tag, with GitHub's generated notes (D62a).
 
+**D75 · The install script swaps a verified copy into place** — *current* (2026-11-18)
+`scripts/macos/install.sh` copies the new bundle next to the installed one, verifies its signature and clears its quarantine flag before it asks a running Janis to quit; only then does it move the installed copy aside, rename the new one into place and delete the old one, putting the old one back if the rename fails. A failed copy, a full disk or a bad download leaves the working install as it was, as `install-macos` already did.
+Superseded: deleting the installed bundle before copying and checking its replacement (D75a).
+
 ## Working on the project
 
 **D27 · Instructions for coding agents in `CLAUDE.md` and path-scoped rules** — *current*

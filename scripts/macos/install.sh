@@ -10,7 +10,8 @@
 # com.apple.quarantine flag. Janis is ad-hoc signed and not notarized, so a
 # quarantined copy is refused by Gatekeeper on first launch; clearing the
 # flag is exactly what "Open Anyway" in Privacy & Security does, done once
-# here instead. Re-running the script upgrades an existing install in place.
+# here instead. Re-running the script upgrades an existing install: the new
+# copy is staged and verified first, and replaces the old one only then.
 set -eu
 
 repository="obazin/janis"
@@ -55,10 +56,15 @@ mkdir -p "$install_directory" || fail "cannot create $install_directory"
 disk_image_name="${application_name}_${version}_${architecture}.dmg"
 download_url="https://github.com/${repository}/releases/download/v${version}/${disk_image_name}"
 application_path="${install_directory}/${application_name}.app"
+# The new copy is staged, and the old one set aside, next to the install so
+# each swap is a rename on one volume.
+staging_path="${install_directory}/.${application_name}.app.installing"
+previous_path="${install_directory}/.${application_name}.app.previous"
 
 work_directory="$(mktemp -d "${TMPDIR:-/tmp}/janis-install.XXXXXX")"
 mount_point="${work_directory}/mount"
 cleanup() {
+    rm -rf "$staging_path"
     if [ -d "$mount_point" ]; then
         diskutil eject "$mount_point" >/dev/null 2>&1 || hdiutil detach "$mount_point" -force -quiet 2>/dev/null || true
     fi
@@ -84,6 +90,16 @@ if ! { diskutil image attach --help >/dev/null 2>&1 \
 fi
 [ -d "${mount_point}/${application_name}.app" ] || fail "the disk image does not contain ${application_name}.app"
 
+# The installed copy is only touched once its replacement is whole and
+# verified: a failed copy, a full disk or a bad bundle leaves it as it was.
+echo "Copying ${application_name}.app into ${install_directory} ..."
+rm -rf "$staging_path"
+ditto "${mount_point}/${application_name}.app" "$staging_path" \
+    || fail "could not copy ${application_name}.app into ${install_directory}; the installed copy is unchanged"
+codesign --verify --deep --strict "$staging_path" 2>/dev/null \
+    || fail "the downloaded copy fails signature verification; the download may be corrupt, try again (the installed copy is unchanged)"
+xattr -dr com.apple.quarantine "$staging_path" 2>/dev/null || true
+
 # A running instance holds the binary open; ask it to quit first.
 if pgrep -xq "$application_name"; then
     echo "Quitting the running ${application_name} ..."
@@ -97,13 +113,15 @@ if pgrep -xq "$application_name"; then
 fi
 
 echo "Installing into ${install_directory} ..."
-rm -rf "$application_path"
-ditto "${mount_point}/${application_name}.app" "$application_path" || fail "could not copy ${application_name}.app into ${install_directory}"
-
-codesign --verify --deep --strict "$application_path" 2>/dev/null \
-    || fail "the installed copy fails signature verification; the download may be corrupt, try again"
-
-xattr -dr com.apple.quarantine "$application_path" 2>/dev/null || true
+rm -rf "$previous_path"
+if [ -e "$application_path" ]; then
+    mv "$application_path" "$previous_path" || fail "could not move the installed copy aside; it is unchanged"
+fi
+if ! mv "$staging_path" "$application_path"; then
+    [ -e "$previous_path" ] && mv "$previous_path" "$application_path"
+    fail "could not put the new copy in place; the installed copy is restored"
+fi
+rm -rf "$previous_path"
 
 echo "Installed ${application_name} ${version} at ${application_path}."
 echo "Launch it from the Applications folder, Spotlight, or with: open -a ${application_name}"
