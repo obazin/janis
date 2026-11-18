@@ -2,6 +2,36 @@
 
 All notable changes to **Janis** are documented in this file. It is generated from the commit messages ([Conventional Commits](https://www.conventionalcommits.org)) by [git-cliff](https://git-cliff.org): edit commit messages, not this file.
 
+## [v0.3.2](https://github.com/obazin/janis/releases/tag/v0.3.2) — 2026-11-18
+
+Changes since [v0.3.1](https://github.com/obazin/janis/releases/tag/v0.3.1).
+
+### Features
+
+- **player:** Move the volume, the playhead and the equalizer bands from the keyboard
+- **library:** Playlists made from a right-click, grouped, and kept in step with Jellyfin
+
+### Fixes
+
+- **player:** Outline a slider only when Tab gave it the focus
+- **install:** Replace the installed Janis only once its upgrade is verified
+- **radio:** Keep showing what plays when a station fails to connect
+- **jellyfin:** Never play a replaced account's songs with the new account's token
+- **jellyfin:** Offer Sign out while the server asks for the password again
+- **library:** Keep an edit made while a library snapshot was on its way
+- **library:** Store a loudness measurement only on the file it was read from
+- **library:** Keep the songs of a folder a rescan cannot read
+- **nix:** Build the bundled aws-lc and SQLite under recent nixpkgs
+
+### Performance
+
+- **library:** Draw only the rows in view in the sheet that manages the playlists
+- **library:** Let the interface and the engine reach the database during a Jellyfin sync
+
+### Refactor
+
+- **ui:** Take the cover and thumbnail radii from the theme's metrics
+
 ## [v0.3.1](https://github.com/obazin/janis/releases/tag/v0.3.1) — 2026-11-17
 
 Changes since [v0.3.0](https://github.com/obazin/janis/releases/tag/v0.3.0).
