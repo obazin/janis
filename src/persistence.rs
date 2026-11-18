@@ -976,9 +976,9 @@ pub fn save_media_server(
             )
             .map_err(|error| format!("save media server: {error}"))?;
         if updated == 0 {
-            transaction
-                .execute("DELETE FROM media_servers", [])
-                .map_err(|error| format!("replace media server: {error}"))?;
+            // The replacement goes in before the account it replaces goes
+            // out, so it never takes that row's id: what the controller
+            // still holds of the old account cannot pass for the new one's.
             transaction
                 .execute(
                     "INSERT INTO media_servers (address, server_identifier, server_name,
@@ -994,6 +994,12 @@ pub fn save_media_server(
                     ],
                 )
                 .map_err(|error| format!("save media server: {error}"))?;
+            transaction
+                .execute(
+                    "DELETE FROM media_servers WHERE id != ?1",
+                    [transaction.last_insert_rowid()],
+                )
+                .map_err(|error| format!("replace media server: {error}"))?;
         }
         transaction
             .commit()
@@ -1545,6 +1551,7 @@ mod tests {
         let other = save_media_server(&database, &new_server("other", "user", "token"))
             .expect("sign in elsewhere");
         assert_eq!(other.server_identifier, "other");
+        assert_ne!(other.id, first.id, "the replacement has a row of its own");
         assert_eq!(
             track_count(&database),
             0,

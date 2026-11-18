@@ -91,13 +91,30 @@ impl Application {
                         persistence::save_media_server(&database, &signed_in)
                             .map_err(Failure::Other)
                     });
+            // Another account replaces the one before and takes its songs and
+            // playlists with it: the library is read again at once, not
+            // after a sync that may fail.
+            let snapshot = outcome.is_ok().then(|| LibrarySnapshot::read(&database));
             post(move |application| {
                 let effects = application
                     .media_server
                     .borrow_mut()
                     .sign_in_finished(epoch, outcome);
+                let library_read = snapshot.is_some();
+                match snapshot {
+                    Some(Ok(snapshot)) => application.take_library(snapshot),
+                    Some(Err(error)) => {
+                        log::error!("read the library after a sign-in: {error}");
+                        application.notify_error("error.library", vec![("message", error)], None);
+                    }
+                    None => {}
+                }
                 application.run(effects);
-                application.refresh_jellyfin();
+                if library_read {
+                    application.refresh_everything();
+                } else {
+                    application.refresh_jellyfin();
+                }
             });
         });
     }

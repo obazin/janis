@@ -130,6 +130,10 @@ The standard library's mutex is not fair: a thread that releases it and asks aga
 **D70 · A measurement names the file it read, not only its row** — *current* (2026-11-18)
 SQLite gives a new row the largest id plus one, so a song removed while the background measurement runs can hand its id to a file added meanwhile. The measurement carries the row and the path it read (`PendingLoudness`); it is stored only on a row still holding that path (`store_measured_loudness`), and the session's gains and the files already tried are kept by row and path. The engine's own measurement of the playing track records by id alone: its `Store` interface is the engine's.
 
+**D71 · A replacement media server takes a row of its own, and the library is read at once** — *current* (2026-11-18)
+Signing in as another user or to another server inserts the new account before deleting the old one, so the new row never takes the id of the one it replaces: a server song still held from the old account names an id no account has, and is not played with the new account's token. The sign-in then reads the library again straight away, so the old account's songs and playlists leave the screens even if the sync that follows fails. A sign-out waits for a sign-in under way, which would otherwise save its account after the sign-out removed the previous one.
+Superseded: a sign-out allowed during a sign-in, whose answer was dropped (D71a).
+
 **D72 · A pruned file is one the system reports as not there** — *current* (2026-11-18)
 The pruner already required the file's folder root to be reachable. It now also requires the file's own check to answer "not found" (`Path::try_exists`): a folder that denies access answers with an error, and its files, their stars and their places in playlists, are kept.
 Superseded: `Path::exists`, which reads every error as absence (D72a).
