@@ -303,7 +303,8 @@ fn flush_batch(
 ///
 /// "Vanished" requires the place the file lived to still be reachable: a track
 /// is only pruned when its watched folder's root (or, for an ad-hoc import, its
-/// parent directory) is a directory right now and the file is not in it.
+/// parent directory) is a directory right now and the file is confirmed absent
+/// from it — a file beneath a folder that cannot be read is kept.
 /// The guard is what keeps a rescan with an external drive ejected from
 /// reading every row as missing and deleting the whole library — along with
 /// the loudness measurements a rescan can never rebuild.
@@ -342,7 +343,9 @@ fn prune_missing(db: &DbState) -> Result<usize, String> {
                 Some(folder_id) => reachable.get(folder_id).copied().unwrap_or(false),
                 None => path.parent().is_some_and(Path::is_dir),
             };
-            root_reachable && !path.exists()
+            // Only a stat that answers "not found" is absence: a directory
+            // denying access, or any other error, says nothing about the file.
+            root_reachable && matches!(path.try_exists(), Ok(false))
         })
         .map(|(id, _, _)| id)
         .collect();
@@ -2324,6 +2327,33 @@ mod tests {
 
         assert_eq!(prune_missing(&database), Ok(1));
         assert_eq!(list_tracks(&database).map(|tracks| tracks.len()), Ok(2));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_rescan_keeps_the_songs_of_a_folder_it_cannot_read() {
+        use std::os::unix::fs::PermissionsExt;
+        let directory = tempfile::tempdir().expect("a temporary directory");
+        let database = crate::persistence::init(directory.path().join("data")).expect("a database");
+        let music = directory.path().join("music");
+        let album = music.join("album");
+        write_wav(&album.join("song.wav"));
+        watch(&database, &music).expect("watched");
+        let song = list_tracks(&database).expect("tracks")[0].id;
+        crate::persistence::set_favourite_track(&database, song, true).expect("star the song");
+
+        std::fs::set_permissions(&album, std::fs::Permissions::from_mode(0o000))
+            .expect("lock the album folder");
+        let report = rescan_library(&database);
+        std::fs::set_permissions(&album, std::fs::Permissions::from_mode(0o755))
+            .expect("unlock the album folder");
+
+        assert_eq!(report.map(|report| report.removed), Ok(0));
+        assert_eq!(list_tracks(&database).map(|tracks| tracks.len()), Ok(1));
+        assert_eq!(
+            crate::persistence::favourite_track_ids(&database),
+            Ok(vec![song])
+        );
     }
 
     #[test]

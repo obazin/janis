@@ -121,6 +121,10 @@ The scanner follows symbolic links, so a watched folder may link to music on ano
 **D57 · Watched folders do not nest** — *current* (2026-11-14)
 A track belongs to one watched folder, through `folder_id`. A folder inside a watched one used to take the tracks it held from the outer folder, and removing it then deleted tracks the outer folder still covered, until the next rescan. Adding such a folder is now refused (`ScanError::InsideWatched`, an `error.folderInsideWatched` toast naming the outer folder). Adding a folder that holds watched folders takes them over in the registration's transaction: their tracks move to it, keeping their loudness, and their rows go. Paths are compared whole component by whole component with links resolved, so `/music/a` holds `/music/a/b` but not `/music/ab`; adding a watched folder again rescans it.
 
+**D72 · A pruned file is one the system reports as not there** — *current* (2026-11-18)
+The pruner already required the file's folder root to be reachable. It now also requires the file's own check to answer "not found" (`Path::try_exists`): a folder that denies access answers with an error, and its files, their stars and their places in playlists, are kept.
+Superseded: `Path::exists`, which reads every error as absence (D72a).
+
 ## Interface
 
 **D15 · Atomic design in three layers** — *current* (first version)
