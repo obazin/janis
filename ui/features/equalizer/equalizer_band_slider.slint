@@ -1,6 +1,8 @@
 import { Tokens, Fonts, Typography } from "../../tokens.slint";
+import { SliderKeys } from "../../atoms/slider_keys.slint";
 
-// One band of the equalizer: its gain, a column to drag, and its frequency.
+// One band of the equalizer: its gain, a column to drag (or to step with the
+// arrow keys once it has the focus), and its frequency.
 export component EqualizerBandSlider inherits VerticalLayout {
     in property <float> gain;
     in property <float> range: 12;
@@ -9,6 +11,13 @@ export component EqualizerBandSlider inherits VerticalLayout {
 
     // 0 at the bottom of the column, 1 at the top.
     property <float> fraction: (root.gain + root.range) / (root.range * 2);
+    // One step of the keys and of assistive technology, in dB: the half
+    // decibel a band snaps to.
+    property <float> step: 0.5;
+
+    function move-to(gain: float) {
+        root.changed(clamp(gain, -root.range, root.range));
+    }
 
     spacing: 10px;
 
@@ -33,7 +42,22 @@ export component EqualizerBandSlider inherits VerticalLayout {
             accessible-label: root.frequency-label;
             accessible-value-minimum: -root.range;
             accessible-value-maximum: root.range;
+            accessible-value-step: root.step;
             accessible-value: root.gain;
+            accessible-action-increment => { root.move-to(root.gain + root.step); }
+            accessible-action-decrement => { root.move-to(root.gain - root.step); }
+            accessible-action-set-value(value) => {
+                if value.is-float() {
+                    root.move-to(value.to-float());
+                }
+            }
+
+            keys := SliderKeys {
+                increment => { root.move-to(root.gain + root.step); }
+                decrement => { root.move-to(root.gain - root.step); }
+                to-minimum => { root.move-to(-root.range); }
+                to-maximum => { root.move-to(root.range); }
+            }
 
             Rectangle {
                 y: root.gain >= 0 ? column.height * (1 - root.fraction) : column.height / 2;
@@ -57,6 +81,12 @@ export component EqualizerBandSlider inherits VerticalLayout {
                 background: Tokens.text;
             }
 
+            if keys.has-focus: Rectangle {
+                border-radius: self.width / 2;
+                border-width: 1px;
+                border-color: Tokens.accent-ring;
+            }
+
             touch := TouchArea {
                 mouse-cursor: row-resize;
 
@@ -66,6 +96,7 @@ export component EqualizerBandSlider inherits VerticalLayout {
 
                 pointer-event(event) => {
                     if event.kind == PointerEventKind.down {
+                        keys.focus();
                         self.follow();
                     }
                 }

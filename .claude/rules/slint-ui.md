@@ -12,7 +12,7 @@ Each component belongs to exactly one tier and only uses tiers below it. One com
 | Tier | Where | Components |
 |---|---|---|
 | Tokens and data | `tokens.slint`, `icons.slint`, `shell.slint` | `Tokens` (colours, gradients, shadows), `Fonts`, `Typography`, `Metrics` (radii, frame sizes), `Motion` (durations), `Accent`, `Icons`; `Shell` (open screen, search, equalizer sheet, notifications) |
-| Atoms | `atoms/` | `Glyph`, `IconButton` (with the `IconButtonIdentifier` registry), `Chip`, `Badge`, `PrimaryButton`, `GhostButton`, `SectionLabel`, `Eyebrow`, `Toggle`, `TextField` (with `TextFieldKind`), `ArtTile`, `EmptyState`, `MenuItem` |
+| Atoms | `atoms/` | `Glyph`, `IconButton` (with the `IconButtonIdentifier` registry), `Chip`, `Badge`, `PrimaryButton`, `GhostButton`, `SectionLabel`, `Eyebrow`, `Toggle`, `TextField` (with `TextFieldKind`), `ArtTile`, `EmptyState`, `MenuItem`, `SliderKeys` |
 | Molecules | `molecules/` | `NavItem`, `ToggleRow`, `PlayCircle`, `ScreenHeader`, `ScrollArea`, `MenuPanel`, `Dialog` |
 | Organisms | `organisms/` | `SidebarNav`, `Toaster` |
 | Features | `features/<name>/` | player: `MiniPlayer`, `Waveform`, `TrackOverview`, `TransportControls`, `VolumeSlider`, `NowPlayingQueue` · equalizer: `EqualizerOverlay`, `EqualizerBandSlider`, `OpenEqualizerButton` · library: `CoverArt`, `AlbumCard`, `CardGrid`, `TrackRow`, `TrackList`, `LibraryTrackAccordion`, `LocalRow`, `LocalTable`, `ShelfTile`, `Shelf`, `ArtistSpotlight`, `TrackMenu`, `PlaylistGroupMenu`, `PlaylistNameDialog`, `DeletionDialog`, `PlaylistManager` · radio: `StationCard` · jellyfin: `JellyfinCard` |
@@ -38,7 +38,7 @@ Dependencies run one way. The design system (atoms, molecules, organisms) import
 
 ## Accessibility
 
-- Every interactive component has an `accessible-role`, an `accessible-label` and an `accessible-action-default` that does what a click does. Selectable ones (`Chip`, `NavItem`, `Toggle`, the queue tabs) also say `accessible-checkable` and `accessible-checked`; sliders give their minimum, maximum and value.
+- Every interactive component has an `accessible-role`, an `accessible-label` and an `accessible-action-default` that does what a click does. Selectable ones (`Chip`, `NavItem`, `Toggle`, the queue tabs) also say `accessible-checkable` and `accessible-checked`; sliders give their minimum, maximum, value and step, the increment, decrement and set-value actions, and take the arrow keys through `SliderKeys`, outlined in `accent-ring` while focused.
 - An icon-only button carries its `IconButtonIdentifier` as `accessible-id`. Adding one means adding its entry to the registry.
 - The `accessibility` Slint feature must stay enabled in `Cargo.toml`.
 
