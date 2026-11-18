@@ -1,4 +1,4 @@
-import { Tokens, Fonts, Typography, Motion } from "../../tokens.slint";
+import { Tokens, Fonts, Typography, Motion, Metrics } from "../../tokens.slint";
 import { Icons } from "../../icons.slint";
 import { Strings } from "strings.slint";
 import { GlyphMode } from "../../atoms/glyph.slint";
@@ -58,7 +58,7 @@ export component TrackRow inherits Rectangle {
                 CoverArt {
                     width: 38px;
                     height: 38px;
-                    radius: 8px;
+                    radius: Metrics.radius-tile;
                     track-id: root.track.track-id;
                     gradient-index: root.track.gradient-index;
                 }
