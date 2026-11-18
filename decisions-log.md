@@ -138,6 +138,9 @@ Superseded: a sign-out allowed during a sign-in, whose answer was dropped (D71a)
 The pruner already required the file's folder root to be reachable. It now also requires the file's own check to answer "not found" (`Path::try_exists`): a folder that denies access answers with an error, and its files, their stars and their places in playlists, are kept.
 Superseded: `Path::exists`, which reads every error as absence (D72a).
 
+**D73 · A station that will not connect leaves what played on show** — *current* (2026-11-18)
+The engine keeps playing what it played when a new station fails to connect. The player mirror remembers, at the first of a run of station choices, what it showed — the station and what it said it played, or the track's position — and shows it again when the last of them fails, asking again for the track's cover and overview. The mirror used to clear the station, and showed live radio with no station.
+
 ## Interface
 
 **D15 · Atomic design in three layers** — *current* (first version)
