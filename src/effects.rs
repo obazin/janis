@@ -29,8 +29,12 @@ pub enum Effect {
     Next,
     Previous,
     JumpTo(usize),
-    /// Seek to a position in seconds.
-    Seek(f64),
+    /// Seek the track with this id to a position in seconds; ignored by the
+    /// engine when another track plays by the time it gets there.
+    Seek {
+        track_id: i64,
+        position_seconds: f64,
+    },
     SetShuffle(bool),
     SetRepeat(bool),
 

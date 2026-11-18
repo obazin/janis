@@ -200,6 +200,7 @@ impl Player {
                 repeat,
                 station_id,
                 queue_len: _,
+                has_next: _,
             } => {
                 self.mode = mode;
                 self.index = index;
@@ -224,6 +225,20 @@ impl Player {
                 self.position_seconds = position_secs;
                 self.duration_seconds = duration_secs;
                 self.position_at = now;
+                Vec::new()
+            }
+            // Where a seek, a repeat or a restart actually landed: the
+            // playhead jumps there at once instead of waiting for the next
+            // position report. A confirmation for a track no longer current
+            // is stale.
+            EngineEvent::Seeked {
+                track_id,
+                position_secs,
+            } => {
+                if self.current().is_some_and(|track| track.id == track_id) {
+                    self.position_seconds = position_secs;
+                    self.position_at = now;
+                }
                 Vec::new()
             }
             EngineEvent::StreamMetadata {
@@ -392,13 +407,22 @@ impl Player {
     }
 
     /// Seeks to a fraction of the current local track.
+    ///
+    /// The seek names the track it was meant for, so the engine drops it when
+    /// a skip still on its way has already moved playback to another track.
     pub fn seek_to(&mut self, fraction: f64, now: Instant) -> Vec<Effect> {
-        if self.mode != Mode::Local || self.duration_seconds <= 0.0 || fraction.is_nan() {
+        let Some(track_id) = self.current().map(|track| track.id) else {
+            return Vec::new();
+        };
+        if self.duration_seconds <= 0.0 || fraction.is_nan() {
             return Vec::new();
         }
         self.position_seconds = fraction.clamp(0.0, 1.0) * self.duration_seconds;
         self.position_at = now;
-        vec![Effect::Seek(self.position_seconds)]
+        vec![Effect::Seek {
+            track_id,
+            position_seconds: self.position_seconds,
+        }]
     }
 
     pub fn set_volume(&mut self, volume: f64) -> Vec<Effect> {
@@ -459,6 +483,7 @@ mod tests {
             queue_len: 0,
             shuffle: false,
             repeat: false,
+            has_next: false,
             station_id: station_id.map(str::to_owned),
         }
     }
@@ -626,9 +651,13 @@ mod tests {
         assert!(player.seek_to(0.5, now).is_empty());
 
         player.play_queue(vec![timed_track(1, 200.0)], 0, now);
-        assert_eq!(player.seek_to(0.25, now), [Effect::Seek(50.0)]);
-        assert_eq!(player.seek_to(7.0, now), [Effect::Seek(200.0)]);
-        assert_eq!(player.seek_to(-1.0, now), [Effect::Seek(0.0)]);
+        let seek = |position_seconds| Effect::Seek {
+            track_id: 1,
+            position_seconds,
+        };
+        assert_eq!(player.seek_to(0.25, now), [seek(50.0)]);
+        assert_eq!(player.seek_to(7.0, now), [seek(200.0)]);
+        assert_eq!(player.seek_to(-1.0, now), [seek(0.0)]);
     }
 
     #[test]
@@ -882,10 +911,41 @@ mod tests {
         let mut player = playing(vec![timed_track(1, 200.0)], 20.0, now);
         player.toggle(now);
 
-        assert_eq!(player.seek_to(0.5, now), [Effect::Seek(100.0)]);
+        assert_eq!(
+            player.seek_to(0.5, now),
+            [Effect::Seek {
+                track_id: 1,
+                position_seconds: 100.0
+            }]
+        );
 
         assert_eq!(player.live_progress(now), 0.5);
         assert_eq!(player.live_progress(now + Duration::from_secs(30)), 0.5);
+    }
+
+    #[test]
+    fn a_confirmed_landing_moves_the_playhead_only_for_the_current_track() {
+        let now = Instant::now();
+        let mut player = playing(
+            vec![timed_track(1, 200.0), timed_track(2, 200.0)],
+            20.0,
+            now,
+        );
+        player.toggle(now);
+
+        let landed = |track_id| EngineEvent::Seeked {
+            track_id,
+            position_secs: 150.0,
+        };
+        assert!(player.apply(landed(2), now, &no_stations).is_empty());
+        assert_eq!(
+            player.position_seconds(),
+            20.0,
+            "another track's landing is stale"
+        );
+
+        assert!(player.apply(landed(1), now, &no_stations).is_empty());
+        assert_eq!(player.live_progress(now), 0.75);
     }
 
     #[test]
@@ -911,7 +971,10 @@ mod tests {
         assert!(known.seek_to(f64::NAN, now).is_empty());
         assert_eq!(
             known.seek_to(7.0, now),
-            [Effect::Seek(100.0)],
+            [Effect::Seek {
+                track_id: 1,
+                position_seconds: 100.0
+            }],
             "held to the end"
         );
     }
@@ -930,6 +993,7 @@ mod tests {
                 queue_len: 1,
                 shuffle: false,
                 repeat: true,
+                has_next: true,
                 station_id: None,
             },
             now,

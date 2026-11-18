@@ -175,6 +175,7 @@ mod tests {
                 queue_len: 0,
                 shuffle: false,
                 repeat: false,
+                has_next: false,
                 station_id: Some("fip".to_owned()),
             },
             now,

@@ -559,7 +559,10 @@ impl Application {
                 Effect::Next => self.engine.next(),
                 Effect::Previous => self.engine.previous(),
                 Effect::JumpTo(index) => self.engine.jump_to(index),
-                Effect::Seek(position_seconds) => self.engine.seek(position_seconds),
+                Effect::Seek {
+                    track_id,
+                    position_seconds,
+                } => self.engine.seek_track(track_id, position_seconds),
                 Effect::SetShuffle(enabled) => self.engine.set_shuffle(enabled),
                 Effect::SetRepeat(enabled) => self.engine.set_repeat(enabled),
                 Effect::SetVolume(volume) => self.engine.set_volume(volume),
