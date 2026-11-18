@@ -157,7 +157,7 @@ pub struct Application {
     /// Each section's cards, kept so a refresh updates a grid in place.
     playlist_section_cards: RefCell<Vec<Rc<VecModel<user_interface::LibraryCard>>>>,
     menu_playlists: Rc<VecModel<user_interface::MenuChoice>>,
-    managed_groups: Rc<VecModel<user_interface::ManagedGroup>>,
+    managed_rows: Rc<VecModel<user_interface::ManagedRow>>,
     group_menu_choices: Rc<VecModel<user_interface::MenuChoice>>,
     /// The Jellyfin server the listener signed in to, as Settings shows it.
     media_server: RefCell<MediaServerState>,
@@ -293,7 +293,7 @@ impl Application {
             playlist_sections: Rc::new(VecModel::default()),
             playlist_section_cards: RefCell::new(Vec::new()),
             menu_playlists: Rc::new(VecModel::default()),
-            managed_groups: Rc::new(VecModel::default()),
+            managed_rows: Rc::new(VecModel::default()),
             group_menu_choices: Rc::new(VecModel::default()),
             media_server: RefCell::new(media_server),
             jellyfin_libraries: Rc::new(VecModel::default()),

@@ -47,14 +47,28 @@ export struct ManagedPlaylist {
     gradient-index: int,
 }
 
-// A group in the sheet that manages them, or — with an id of 0 — the
-// playlists in none.
-export struct ManagedGroup {
+// What a row of the sheet that manages the playlists is.
+export enum ManagedRowKind {
+    // A group's heading, with what can be done to the group.
+    heading,
+    // Under a heading, the line saying the group holds no playlist.
+    empty,
+    // A playlist of the group above.
+    playlist,
+}
+
+// A row of the sheet that manages the playlists, its groups flattened in
+// order: each group's heading, then its playlists or the line saying it has
+// none. A group with an id of 0 holds the playlists in none.
+export struct ManagedRow {
+    kind: ManagedRowKind,
+    // The group the row is in, and, on a heading, where it sits among them.
     group-id: int,
-    name: string,
+    group-name: string,
     first: bool,
     last: bool,
-    playlists: [ManagedPlaylist],
+    // On a playlist row.
+    playlist: ManagedPlaylist,
 }
 
 // A row of a track list.
@@ -145,7 +159,7 @@ export global Library {
 
     // The sheet that groups the playlists and gives them pictures.
     in property <bool> manager-open;
-    in property <[ManagedGroup]> managed-groups;
+    in property <[ManagedRow]> managed-rows;
     // The menu that files a playlist in a group, where the window was clicked.
     in property <bool> group-menu-open;
     in property <length> group-menu-x;

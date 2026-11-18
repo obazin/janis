@@ -19,7 +19,7 @@ use crate::playlists::{Playlist, PlaylistChange, PlaylistKey};
 use crate::text;
 use crate::translations::Translations;
 use crate::user_interface::{
-    self, LibraryCard, ManagedGroup, ManagedPlaylist, MenuChoice, PlaylistSection,
+    self, LibraryCard, ManagedPlaylist, ManagedRow, ManagedRowKind, MenuChoice, PlaylistSection,
 };
 
 /// What the playlists' menus and dialogs are about, kept so a click on one
@@ -65,7 +65,7 @@ impl Application {
         let view = self.window.global::<user_interface::Library>();
         view.set_playlist_sections(self.playlist_sections.clone().into());
         view.set_menu_playlists(self.menu_playlists.clone().into());
-        view.set_managed_groups(self.managed_groups.clone().into());
+        view.set_managed_rows(self.managed_rows.clone().into());
         view.set_group_menu_choices(self.group_menu_choices.clone().into());
 
         let weak = Rc::downgrade(self);
@@ -836,8 +836,8 @@ impl Application {
                 .is_some_and(|selection| selection.kind == SelectionKind::Playlist),
         );
         if playlist_screen.manager_open {
-            self.managed_groups
-                .set_vec(managed_groups(&playlists, &shown, &translations));
+            self.managed_rows
+                .set_vec(managed_rows(&playlists, &shown, &translations));
         }
         drop(card_models);
         drop(playlist_screen);
@@ -900,55 +900,65 @@ fn playlist_card(
     }
 }
 
-/// The sheet's sections (`library_view::managed_sections`) as its rows.
-fn managed_groups(
+/// The sheet's sections (`library_view::managed_sections`) as its rows, one
+/// list for the sheet to draw only the rows in view of: each group's
+/// heading, then its playlists, or the line saying it holds none.
+fn managed_rows(
     playlists: &crate::playlists::Playlists,
     shown: &HashMap<i64, &Track>,
     translations: &Translations,
-) -> Vec<ManagedGroup> {
+) -> Vec<ManagedRow> {
     let no_group = translations.text("playlists.manage.noGroup");
     let sections = library_view::managed_sections(playlists.playlists(), playlists.groups());
     let group_count = playlists.groups().len();
-    sections
-        .iter()
-        .enumerate()
-        .map(|(place, section)| {
-            let group_name = section
+    let mut rows = Vec::new();
+    for (place, section) in sections.iter().enumerate() {
+        let group_name = section
+            .group
+            .as_ref()
+            .map_or(no_group.as_str(), |group| group.name.as_str());
+        let heading = ManagedRow {
+            kind: ManagedRowKind::Heading,
+            group_id: section
                 .group
                 .as_ref()
-                .map_or(no_group.as_str(), |group| group.name.as_str());
-            let rows: Vec<ManagedPlaylist> = section
-                .playlists
-                .iter()
-                .map(|playlist| {
-                    let songs = library_view::playlist_tracks(playlist, shown);
-                    ManagedPlaylist {
-                        playlist_id: playlist.key.saved().map(interface_id).unwrap_or_default(),
-                        name: playlist.name.as_str().into(),
-                        detail: library_view::playlist_detail(&songs, translations).into(),
-                        group: group_name.into(),
-                        picture: playlist.picture,
-                        track_id: songs
-                            .first()
-                            .map(|track| interface_id(track.id))
-                            .unwrap_or_default(),
-                        gradient_index: playlist_gradient_index(playlist, &songs),
-                    }
-                })
-                .collect();
-            ManagedGroup {
-                group_id: section
-                    .group
-                    .as_ref()
-                    .map(|group| interface_id(group.id))
-                    .unwrap_or_default(),
-                name: group_name.into(),
-                first: place == 0,
-                last: place + 1 >= group_count,
-                playlists: Rc::new(slint::VecModel::from(rows)).into(),
+                .map(|group| interface_id(group.id))
+                .unwrap_or_default(),
+            group_name: group_name.into(),
+            first: place == 0,
+            last: place + 1 >= group_count,
+            playlist: ManagedPlaylist::default(),
+        };
+        if section.playlists.is_empty() {
+            rows.push(heading.clone());
+            rows.push(ManagedRow {
+                kind: ManagedRowKind::Empty,
+                ..heading
+            });
+            continue;
+        }
+        rows.push(heading.clone());
+        rows.extend(section.playlists.iter().map(|playlist| {
+            let songs = library_view::playlist_tracks(playlist, shown);
+            ManagedRow {
+                kind: ManagedRowKind::Playlist,
+                playlist: ManagedPlaylist {
+                    playlist_id: playlist.key.saved().map(interface_id).unwrap_or_default(),
+                    name: playlist.name.as_str().into(),
+                    detail: library_view::playlist_detail(&songs, translations).into(),
+                    group: group_name.into(),
+                    picture: playlist.picture,
+                    track_id: songs
+                        .first()
+                        .map(|track| interface_id(track.id))
+                        .unwrap_or_default(),
+                    gradient_index: playlist_gradient_index(playlist, &songs),
+                },
+                ..heading.clone()
             }
-        })
-        .collect()
+        }));
+    }
+    rows
 }
 
 /// Sends one change to the server. A creation gives the item it made.
