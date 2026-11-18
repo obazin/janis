@@ -6,8 +6,9 @@
 
 use rusqlite::Connection;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Mutex, MutexGuard};
+use std::time::{Duration, Instant};
 
 use crate::audio::EQ_BAND_COUNT;
 
@@ -20,20 +21,43 @@ pub struct DbState {
     /// folders, the server's libraries, the favourites, the playlists and
     /// their groups — so a snapshot can tell it was overtaken by one.
     library_revision: AtomicU64,
+    /// The threads waiting for the connection, so a job writing in bursts
+    /// can let them have it between two.
+    waiting: AtomicUsize,
 }
+
+/// The longest a job writing in bursts waits for the others to have had the
+/// connection, so a stream of waiters cannot hold it up for ever.
+const GIVE_WAY_LIMIT: Duration = Duration::from_millis(20);
 
 impl DbState {
     fn new(connection: Connection) -> Self {
         Self {
             connection: Mutex::new(connection),
             library_revision: AtomicU64::new(0),
+            waiting: AtomicUsize::new(0),
         }
     }
 
     /// The connection, for a read or for a write that leaves the library as
     /// it was (a preference, a loudness measurement).
     pub fn lock(&self) -> MutexGuard<'_, Connection> {
-        self.connection.lock().expect("janis.db mutex poisoned")
+        self.waiting.fetch_add(1, Ordering::AcqRel);
+        let connection = self.connection.lock().expect("janis.db mutex poisoned");
+        self.waiting.fetch_sub(1, Ordering::AcqRel);
+        connection
+    }
+
+    /// Lets the threads waiting for the connection have it first. A job that
+    /// writes in bursts calls it between two, without the lock: the mutex is
+    /// not fair, and the thread that just released it would otherwise take
+    /// it straight back, keeping the interface and the engine waiting for the
+    /// whole job.
+    pub fn give_way(&self) {
+        let deadline = Instant::now() + GIVE_WAY_LIMIT;
+        while self.waiting.load(Ordering::Acquire) > 0 && Instant::now() < deadline {
+            std::thread::yield_now();
+        }
     }
 
     /// The connection, for a write that changes what a library snapshot

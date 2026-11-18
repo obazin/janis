@@ -10,7 +10,7 @@ paths:
 # The library and the database
 
 - **One store.** `janis.db` (SQLite, bundled) in the per-user data directory holds the preferences row and the track library, behind one mutex-guarded connection (`DbState`). SQL lives only in `library.rs` and `persistence.rs`.
-- **The lock is never held across slow work.** The engine thread takes the same mutex for its loudness reads and writes: a scan walks and probes files unlocked and writes in bursts of 64 inside one transaction (`scan_folder`, `flush_batch`). Keep that shape in anything that touches many files.
+- **The lock is never held across slow work.** The engine thread takes the same mutex for its loudness reads and writes: a scan walks and probes files unlocked and writes in bursts of 64 inside one transaction (`scan_folder`, `flush_batch`). Keep that shape in anything that touches many files. The mutex is not fair: a job whose bursts follow each other with nothing slow between (a server's song or playlist sync) calls `DbState::give_way` after each, or the waiting threads never get in.
 - **Paths are stored as text.** A file whose path is not valid Unicode is skipped and counted, never stored altered.
 - **The walk follows links** and counts what it cannot enter (an unreadable folder, a link back up the tree, a dangling link) as skipped; nothing is dropped without a count.
 - **Scans never run on the interface thread.** `add_watched_folder`, `import_files`, `rescan_library` and `remove_watched_folder` go through `Application::scan`, which runs the change on the library worker and comes back with a fresh `LibrarySnapshot`.

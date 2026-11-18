@@ -675,16 +675,18 @@ pub struct ListedPlaylist {
 /// keeps the group and the picture the listener gave it, and holds the
 /// listed songs Janis has, in order, each once at its first place. A
 /// playlist of this server missing from the listing is removed.
+///
+/// Same lock discipline as a scan: the writes go in bursts of
+/// `PLAYLIST_BURST` rows, one transaction each, so a server with many long
+/// playlists never holds the lock the interface's preference writes and the
+/// engine's loudness reads wait on.
 pub fn sync_server_playlists(
     database: &DbState,
     server_id: i64,
     playlists: &[ListedPlaylist],
 ) -> Result<(), String> {
-    let connection = database.lock_for_library_change();
-    let transaction = connection
-        .unchecked_transaction()
-        .map_err(|error| format!("playlist sync transaction: {error}"))?;
-    let tracks: std::collections::HashMap<String, i64> = transaction
+    let tracks: std::collections::HashMap<String, i64> = database
+        .lock()
         .prepare("SELECT path, id FROM tracks WHERE server_id = ?1")
         .and_then(|mut statement| {
             statement
@@ -692,43 +694,82 @@ pub fn sync_server_playlists(
                 .collect()
         })
         .map_err(|error| format!("list the server's songs: {error}"))?;
+    let writes: Vec<PlaylistWrite> = playlists
+        .iter()
+        .flat_map(|playlist| {
+            std::iter::once(PlaylistWrite::Keep(playlist)).chain(
+                playlist
+                    .songs
+                    .iter()
+                    .filter_map(|address| tracks.get(address).copied())
+                    .map(|track_id| PlaylistWrite::Entry { track_id }),
+            )
+        })
+        .collect();
+
     let mut kept = std::collections::HashSet::new();
-    for playlist in playlists {
-        let playlist_id: i64 = transaction
-            .query_row(
-                "INSERT INTO playlists (name, server_id, server_item, server_picture)
-                 VALUES (?1, ?2, ?3, ?4)
-                 ON CONFLICT(server_id, server_item) DO UPDATE SET
-                     name = excluded.name,
-                     server_picture = excluded.server_picture
-                 RETURNING id",
-                rusqlite::params![playlist.name, server_id, playlist.item, playlist.picture],
-                |row| row.get(0),
-            )
-            .map_err(|error| format!("keep playlist {}: {error}", playlist.name))?;
-        kept.insert(playlist_id);
-        transaction
-            .execute(
-                "DELETE FROM playlist_entries WHERE playlist_id = ?1",
-                [playlist_id],
-            )
-            .map_err(|error| format!("empty playlist {}: {error}", playlist.name))?;
-        let mut position = 0_i64;
-        for address in &playlist.songs {
-            let Some(track_id) = tracks.get(address) else {
-                continue;
-            };
-            let added = transaction
-                .execute(
-                    "INSERT OR IGNORE INTO playlist_entries (playlist_id, track_id, position)
-                     VALUES (?1, ?2, ?3)",
-                    rusqlite::params![playlist_id, track_id, position],
-                )
-                .map_err(|error| format!("fill playlist {}: {error}", playlist.name))?;
-            position += added as i64;
+    // The playlist the entries that follow belong to, and the place of its
+    // next song.
+    let mut filling: Option<(i64, &str, i64)> = None;
+    for burst in writes.chunks(PLAYLIST_BURST) {
+        let connection = database.lock_for_library_change();
+        let transaction = connection
+            .unchecked_transaction()
+            .map_err(|error| format!("playlist sync transaction: {error}"))?;
+        for write in burst {
+            match write {
+                PlaylistWrite::Keep(playlist) => {
+                    let playlist_id: i64 = transaction
+                        .query_row(
+                            "INSERT INTO playlists (name, server_id, server_item, server_picture)
+                             VALUES (?1, ?2, ?3, ?4)
+                             ON CONFLICT(server_id, server_item) DO UPDATE SET
+                                 name = excluded.name,
+                                 server_picture = excluded.server_picture
+                             RETURNING id",
+                            rusqlite::params![
+                                playlist.name,
+                                server_id,
+                                playlist.item,
+                                playlist.picture
+                            ],
+                            |row| row.get(0),
+                        )
+                        .map_err(|error| format!("keep playlist {}: {error}", playlist.name))?;
+                    kept.insert(playlist_id);
+                    transaction
+                        .execute(
+                            "DELETE FROM playlist_entries WHERE playlist_id = ?1",
+                            [playlist_id],
+                        )
+                        .map_err(|error| format!("empty playlist {}: {error}", playlist.name))?;
+                    filling = Some((playlist_id, playlist.name.as_str(), 0));
+                }
+                PlaylistWrite::Entry { track_id } => {
+                    let Some((playlist_id, name, position)) = filling.as_mut() else {
+                        continue;
+                    };
+                    let added = transaction
+                        .execute(
+                            "INSERT OR IGNORE INTO playlist_entries
+                                 (playlist_id, track_id, position)
+                             VALUES (?1, ?2, ?3)",
+                            rusqlite::params![*playlist_id, track_id, *position],
+                        )
+                        .map_err(|error| format!("fill playlist {name}: {error}"))?;
+                    *position += added as i64;
+                }
+            }
         }
+        transaction
+            .commit()
+            .map_err(|error| format!("playlist sync commit: {error}"))?;
+        drop(connection);
+        database.give_way();
     }
-    let stored: Vec<i64> = transaction
+
+    let connection = database.lock_for_library_change();
+    let stored: Vec<i64> = connection
         .prepare("SELECT id FROM playlists WHERE server_id = ?1")
         .and_then(|mut statement| {
             statement
@@ -736,6 +777,9 @@ pub fn sync_server_playlists(
                 .collect()
         })
         .map_err(|error| format!("list the server's playlists: {error}"))?;
+    let transaction = connection
+        .unchecked_transaction()
+        .map_err(|error| format!("playlist prune transaction: {error}"))?;
     for playlist_id in stored {
         if !kept.contains(&playlist_id) {
             transaction
@@ -745,7 +789,17 @@ pub fn sync_server_playlists(
     }
     transaction
         .commit()
-        .map_err(|error| format!("playlist sync commit: {error}"))
+        .map_err(|error| format!("playlist prune commit: {error}"))
+}
+
+/// How many rows a burst of the playlist sync writes in one transaction.
+const PLAYLIST_BURST: usize = 512;
+
+/// One row the playlist sync writes: a listed playlist, kept and emptied, or
+/// one of its songs, in order, after it.
+enum PlaylistWrite<'listing> {
+    Keep(&'listing ListedPlaylist),
+    Entry { track_id: i64 },
 }
 
 /// Brings the server's libraries and songs in the library in line with a
@@ -786,6 +840,8 @@ pub fn sync_server_tracks(
         transaction
             .commit()
             .map_err(|error| format!("server sync commit: {error}"))?;
+        drop(connection);
+        database.give_way();
         report.added += written.added;
         report.updated += written.updated;
         report.skipped += written.skipped;
@@ -1557,6 +1613,48 @@ mod tests {
             .map(|playlist| playlist.name)
             .collect();
         assert_eq!(names, ["Mine"]);
+    }
+
+    #[test]
+    fn a_playlist_longer_than_a_burst_is_synced_whole_and_in_order() {
+        let directory = tempfile::tempdir().expect("a temporary directory");
+        let database = crate::persistence::init(directory.path().to_path_buf()).expect("db");
+        let server_id = signed_in(&database);
+        let count = PLAYLIST_BURST * 2 + 3;
+        let songs: Vec<ServerSong> = (0..count)
+            .map(|index| server_song(&format!("{index:04}"), &format!("{index:04}")))
+            .collect();
+        sync_server_tracks(&database, server_id, &[], songs).expect("song sync");
+        let identifiers: std::collections::HashMap<String, i64> = list_tracks(&database)
+            .expect("tracks")
+            .into_iter()
+            .map(|track| (track.title, track.id))
+            .collect();
+        // Backwards, and the first song again at the end, past a burst.
+        let order: Vec<String> = (0..count)
+            .rev()
+            .map(|index| format!("{index:04}"))
+            .collect();
+        let mut addresses: Vec<String> = order
+            .iter()
+            .map(|item| format!("jellyfin://server/{item}"))
+            .collect();
+        addresses.push(addresses[0].clone());
+        let playlist = |item: &str| ListedPlaylist {
+            item: item.to_owned(),
+            name: item.to_owned(),
+            picture: false,
+            songs: addresses.clone(),
+        };
+
+        sync_server_playlists(&database, server_id, &[playlist("long"), playlist("again")])
+            .expect("playlist sync");
+
+        let expected: Vec<i64> = order.iter().map(|title| identifiers[title]).collect();
+        let saved = crate::persistence::playlists(&database).expect("read");
+        assert_eq!(saved.len(), 2);
+        assert_eq!(saved[0].track_ids, expected);
+        assert_eq!(saved[1].track_ids, expected);
     }
 
     fn signed_in(database: &DbState) -> i64 {
