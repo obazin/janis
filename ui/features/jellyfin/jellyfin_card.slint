@@ -7,9 +7,10 @@ import { TextField, TextFieldKind } from "../../atoms/text_field.slint";
 import { ToggleRow } from "../../molecules/toggle_row.slint";
 import { Jellyfin } from "jellyfin.slint";
 
-// The Jellyfin server: the sign-in form, or the server signed in to with
-// its Sync and Sign out buttons and a switch per library, and a status line
-// under either.
+// The Jellyfin server: the sign-in form (with Sign out while an account is
+// kept whose token the server refused), or the server signed in to with its
+// Sync and Sign out buttons and a switch per library, and a status line under
+// either.
 export component JellyfinCard inherits Rectangle {
     border-radius: Metrics.radius-card;
     border-width: 1px;
@@ -54,11 +55,24 @@ export component JellyfinCard inherits Rectangle {
             }
             HorizontalLayout {
                 alignment: start;
+                spacing: 10px;
                 PrimaryButton {
                     label: Strings.jellyfin-sign-in;
                     clicked => {
                         if !Jellyfin.busy {
                             Jellyfin.sign-in-clicked();
+                        }
+                    }
+                }
+                // Asked to sign in again, the account kept can be left instead.
+                if Jellyfin.has-account: VerticalLayout {
+                    alignment: center;
+                    GhostButton {
+                        label: Strings.jellyfin-sign-out;
+                        clicked => {
+                            if !Jellyfin.busy {
+                                Jellyfin.sign-out-clicked();
+                            }
                         }
                     }
                 }

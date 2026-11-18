@@ -264,6 +264,7 @@ impl Application {
         let view = self.window.global::<user_interface::Jellyfin>();
 
         view.set_signed_in(card.signed_in);
+        view.set_has_account(card.has_account);
         view.set_busy(card.busy);
         view.set_status(
             card.status_key

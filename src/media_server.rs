@@ -20,6 +20,9 @@ use crate::persistence::{MediaServer, ServerLibrary};
 #[derive(Clone, Debug, PartialEq)]
 pub struct Card {
     pub signed_in: bool,
+    /// An account is kept — signed in, or asked to sign in again — and can
+    /// be signed out of, its token working or not.
+    pub has_account: bool,
     pub busy: bool,
     /// The translation key of the line under the card.
     pub status_key: Option<&'static str>,
@@ -173,6 +176,7 @@ impl MediaServerState {
         });
         Card {
             signed_in: matches!(self.phase, Phase::SignedIn | Phase::Syncing),
+            has_account: self.server.is_some(),
             busy: self.busy(),
             status_key: self.message_key,
             // A line that stays once nothing is in flight says what went wrong.
@@ -667,6 +671,22 @@ mod tests {
                 "listener".to_owned()
             ))
         );
+    }
+
+    #[test]
+    fn an_account_whose_token_was_refused_can_still_be_signed_out_of() {
+        let mut state = signed_in();
+        let epoch = sync_epoch(&state.sync());
+        state.sync_finished(epoch, Err(Failure::TokenRejected), 200);
+        assert!(state.card(&[]).has_account);
+
+        let effects = state.sign_out();
+
+        assert!(matches!(
+            effects.as_slice(),
+            [Effect::SignOutMediaServer { .. }]
+        ));
+        assert!(!state.card(&[]).has_account);
     }
 
     fn library(id: i64, name: &str, shown: bool) -> ServerLibrary {
