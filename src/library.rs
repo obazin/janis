@@ -973,35 +973,42 @@ pub struct Gains {
     pub track_peak: Option<f64>,
 }
 
-/// The gain a track plays at, in dB.
-///
-/// The album gain first, so the songs of one record keep the loudness
-/// differences their mastering gave them; the track gain when the album has
 /// The gains measured while Janis runs, at most one per local file: a queue
 /// takes a track's from here once it is known, ahead of the gain the library
 /// read before the measurement.
+///
+/// Each gain is kept under the row and the path it was measured for: SQLite
+/// hands a removed row's id to the next file added, and that file must not
+/// play at the gain of the one it replaced.
 #[derive(Debug, Default)]
 pub struct SessionGains {
-    measured: std::collections::HashMap<i64, f64>,
+    measured: std::collections::HashMap<PendingLoudness, f64>,
 }
 
 impl SessionGains {
     /// The gain `track` plays at.
     pub fn gain_of(&self, track: &Track) -> f64 {
         self.measured
-            .get(&track.id)
+            .get(&PendingLoudness {
+                track_id: track.id,
+                path: track.path.clone(),
+            })
             .copied()
             .unwrap_or(track.gain_db)
     }
 
-    /// A measurement of `track_id` ended: the gain it plays at from now on.
-    pub fn measured(&mut self, track_id: i64, lufs: f64, peak: f64) -> f64 {
+    /// A measurement of `file` ended: the gain it plays at from now on.
+    pub fn measured(&mut self, file: PendingLoudness, lufs: f64, peak: f64) -> f64 {
         let gain = resolved_gain(Gains::default(), Some(lufs), Some(peak));
-        self.measured.insert(track_id, gain);
+        self.measured.insert(file, gain);
         gain
     }
 }
 
+/// The gain a track plays at, in dB.
+///
+/// The album gain first, so the songs of one record keep the loudness
+/// differences their mastering gave them; the track gain when the album has
 /// none; the measured loudness when there is no gain at all. Each gain keeps
 /// its own peak, and borrows the other's when it has none, so a boost never
 /// lifts the loudest sample past full scale for want of a figure.
@@ -1021,8 +1028,10 @@ pub fn resolved_gain(gains: Gains, lufs: Option<f64>, measured_peak: Option<f64>
     }
 }
 
-/// A file the background measurement still has to read.
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// A file the background measurement still has to read: its row and its path
+/// together, since a row id alone can name another file by the time the
+/// measurement ends.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct PendingLoudness {
     pub track_id: i64,
     pub path: String,
@@ -1097,6 +1106,29 @@ pub fn store_loudness(db: &DbState, track_id: i64, lufs: f64, peak: f64) {
         rusqlite::params![track_id, lufs, peak],
     ) {
         log::warn!("store loudness for track {}: {}", track_id, e);
+    }
+}
+
+/// Records what the background measurement read from `file`, only while its
+/// row still holds that file: one removed during the measurement may have
+/// handed its id to a file added since. Returns whether it was stored.
+pub fn store_measured_loudness(
+    database: &DbState,
+    file: &PendingLoudness,
+    lufs: f64,
+    peak: f64,
+) -> bool {
+    let connection = database.lock();
+    match connection.execute(
+        "UPDATE tracks SET loudness_lufs = ?3, loudness_peak = ?4
+         WHERE id = ?1 AND path = ?2 AND server_id IS NULL",
+        rusqlite::params![file.track_id, file.path, lufs, peak],
+    ) {
+        Ok(changed) => changed > 0,
+        Err(error) => {
+            log::warn!("store loudness for track {}: {error}", file.track_id);
+            false
+        }
     }
 }
 
@@ -2080,7 +2112,14 @@ mod tests {
         };
         assert_eq!(gains.gain_of(&tagged), -3.0);
 
-        let gain = gains.measured(1, -12.0, 0.5);
+        let gain = gains.measured(
+            PendingLoudness {
+                track_id: 1,
+                path: tagged.path.clone(),
+            },
+            -12.0,
+            0.5,
+        );
 
         assert_eq!(
             gain,
@@ -2092,6 +2131,43 @@ mod tests {
             0.0,
             "another track keeps its own"
         );
+        assert_eq!(
+            gains.gain_of(&Track {
+                path: "/music/another-file.flac".to_owned(),
+                ..tagged
+            }),
+            -3.0,
+            "another file given the same row keeps the gain the library read"
+        );
+    }
+
+    #[test]
+    fn a_measurement_is_not_stored_on_a_row_now_holding_another_file() {
+        let directory = tempfile::tempdir().expect("a temporary directory");
+        let database = crate::persistence::init(directory.path().join("data")).expect("a database");
+        let first = directory.path().join("first.wav");
+        write_wav(&first);
+        import_files(&database, vec![first.to_string_lossy().into_owned()]);
+        let measuring = tracks_needing_loudness(&database).expect("pending")[0].clone();
+
+        // While it is measured, the file goes and another takes its row.
+        database
+            .lock()
+            .execute("DELETE FROM tracks WHERE id = ?1", [measuring.track_id])
+            .expect("remove the song");
+        let second = directory.path().join("second.wav");
+        write_wav(&second);
+        import_files(&database, vec![second.to_string_lossy().into_owned()]);
+        let replacement = tracks_needing_loudness(&database).expect("pending")[0].clone();
+        assert_eq!(
+            replacement.track_id, measuring.track_id,
+            "SQLite reuses the id"
+        );
+
+        assert!(!store_measured_loudness(&database, &measuring, -20.0, 0.5));
+        assert!(needs_loudness(&database, replacement.track_id));
+        assert!(store_measured_loudness(&database, &replacement, -20.0, 0.5));
+        assert!(!needs_loudness(&database, replacement.track_id));
     }
 
     /// A row of `tracks`, as a scan or a sync would leave it.

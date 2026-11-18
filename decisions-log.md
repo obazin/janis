@@ -121,6 +121,9 @@ The scanner follows symbolic links, so a watched folder may link to music on ano
 **D57 · Watched folders do not nest** — *current* (2026-11-14)
 A track belongs to one watched folder, through `folder_id`. A folder inside a watched one used to take the tracks it held from the outer folder, and removing it then deleted tracks the outer folder still covered, until the next rescan. Adding such a folder is now refused (`ScanError::InsideWatched`, an `error.folderInsideWatched` toast naming the outer folder). Adding a folder that holds watched folders takes them over in the registration's transaction: their tracks move to it, keeping their loudness, and their rows go. Paths are compared whole component by whole component with links resolved, so `/music/a` holds `/music/a/b` but not `/music/ab`; adding a watched folder again rescans it.
 
+**D70 · A measurement names the file it read, not only its row** — *current* (2026-11-18)
+SQLite gives a new row the largest id plus one, so a song removed while the background measurement runs can hand its id to a file added meanwhile. The measurement carries the row and the path it read (`PendingLoudness`); it is stored only on a row still holding that path (`store_measured_loudness`), and the session's gains and the files already tried are kept by row and path. The engine's own measurement of the playing track records by id alone: its `Store` interface is the engine's.
+
 **D72 · A pruned file is one the system reports as not there** — *current* (2026-11-18)
 The pruner already required the file's folder root to be reachable. It now also requires the file's own check to answer "not found" (`Path::try_exists`): a folder that denies access answers with an error, and its files, their stars and their places in playlists, are kept.
 Superseded: `Path::exists`, which reads every error as absence (D72a).
