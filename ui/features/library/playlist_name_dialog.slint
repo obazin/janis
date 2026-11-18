@@ -1,0 +1,24 @@
+import { Strings } from "strings.slint";
+import { TextField } from "../../atoms/text_field.slint";
+import { Dialog } from "../../molecules/dialog.slint";
+import { Library } from "library.slint";
+
+// The dialog that names a new playlist or group, or renames one: one field,
+// its text ready to replace; Return confirms.
+export component PlaylistNameDialog inherits Dialog {
+    title: Library.naming-title;
+    confirm-label: Library.naming-confirm;
+    cancel-label: Strings.playlists-cancel;
+    confirmed => { Library.naming-confirmed(field.text); }
+    cancelled => { Library.naming-cancelled(); }
+
+    public function take-focus-in-field() {
+        field.take-focus();
+    }
+
+    field := TextField {
+        label: Library.naming-label;
+        text: Library.naming-text;
+        accepted => { Library.naming-confirmed(self.text); }
+    }
+}

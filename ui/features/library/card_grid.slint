@@ -4,8 +4,8 @@ import { Covers, CoverList } from "covers.slint";
 import { AlbumCard } from "album_card.slint";
 import { LibraryTrackAccordion } from "library_track_accordion.slint";
 
-// The album or artist grid: as many cards per row as fit, and — under the row
-// of the selected card — its tracks, in place. Only the lines in view are
+// The album, artist or playlist grid: as many cards per row as fit, and —
+// under the row of the selected card — its tracks, in place. Only the lines in view are
 // drawn, so a library of thousands of albums asks for no more covers than
 // the screen shows.
 //
@@ -21,6 +21,11 @@ export component CardGrid inherits Rectangle {
     // Which list the cards are, as told to `Covers.in-view`; `none` reports
     // nothing.
     in property <CoverList> cover-list;
+    // The selected card's place, and the place of the one whose panel is
+    // folding away; -1 for none. The Library's own unless a grid is one of
+    // several, as each group of playlists is.
+    in property <int> selection-index: Library.selection-index;
+    in property <int> folding-index: Library.folding-index;
     callback card-clicked(index: int);
     // A card was opened: the page brings `line-top`, where its line starts
     // once the panel open before has folded, to the top. `settled-height` is
@@ -39,7 +44,7 @@ export component CardGrid inherits Rectangle {
     property <int> line-count: ceil(root.cards.length / root.columns);
 
     // The line holding the selected card, or -1 when none of these is selected.
-    property <int> selected-line: Library.selection-index >= 0 ? floor(Library.selection-index / root.columns) : -1;
+    property <int> selected-line: root.selection-index >= 0 ? floor(root.selection-index / root.columns) : -1;
 
     // How far each panel is open, from 0 to 1. A panel opened by a click
     // starts closed; one found open when the screen is built is open.
@@ -58,7 +63,7 @@ export component CardGrid inherits Rectangle {
     }
 
     // The line whose panel the last click put away, or -1.
-    property <int> folding-line: Library.folding-index >= 0 ? floor(Library.folding-index / root.columns) : -1;
+    property <int> folding-line: root.folding-index >= 0 ? floor(root.folding-index / root.columns) : -1;
 
     property <length> accordion-room: root.selected-line >= 0 ? (accordion.height + root.gap) * root.unfolded : 0px;
     property <length> folding-room: root.folding-line >= 0 ? (folding.height + root.gap) * root.folded-open : 0px;
@@ -117,7 +122,7 @@ export component CardGrid inherits Rectangle {
         height: root.card-height;
         visible: self.index < root.cards.length;
         card: root.cards[self.index];
-        active: self.index == Library.selection-index;
+        active: self.index == root.selection-index;
         shows-detail: root.shows-detail;
         clicked => { root.card-clicked(self.index); }
     }

@@ -13,7 +13,7 @@ use std::time::Duration;
 use serde::Deserialize;
 
 use crate::audio::{Location, Metadata, RemoteFile, LOSSLESS_EXTENSIONS};
-use crate::library::{ListedLibrary, ServerSong, Track};
+use crate::library::{ListedLibrary, ListedPlaylist, ServerSong, Track};
 use crate::persistence::{MediaServer, NewMediaServer};
 
 /// How Janis names itself to the server. No personal detail: the device is
@@ -455,6 +455,52 @@ struct ViewsPage {
 pub struct Listing {
     pub libraries: Vec<ListedLibrary>,
     pub songs: Vec<ServerSong>,
+    /// The user's playlists of songs, or none when they could not be read
+    /// whole — the songs sync all the same, and the playlists stay as the
+    /// last sync left them.
+    pub playlists: Option<Vec<ListedPlaylist>>,
+}
+
+/// A playlist as the server lists the user's.
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "PascalCase", default)]
+struct PlaylistItem {
+    id: String,
+    name: String,
+    /// `Audio` for a playlist of songs; `Unknown`, or absent, on an empty
+    /// one.
+    media_type: Option<String>,
+    image_tags: ImageTags,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "PascalCase")]
+struct PlaylistsPage {
+    #[serde(default)]
+    items: Vec<PlaylistItem>,
+    total_record_count: Option<usize>,
+}
+
+/// One entry of a playlist: the song, and its own identifier in the list.
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "PascalCase", default)]
+struct PlaylistEntry {
+    id: String,
+    playlist_item_id: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "PascalCase")]
+struct PlaylistEntriesPage {
+    #[serde(default)]
+    items: Vec<PlaylistEntry>,
+    total_record_count: Option<usize>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "PascalCase")]
+struct PlaylistCreation {
+    id: String,
 }
 
 #[derive(Deserialize)]
@@ -639,7 +685,222 @@ pub fn listing(session: &Session, server_identifier: &str) -> Result<Listing, Fa
             name: view.name,
         });
     }
+    listing.playlists = match playlists(session, server_identifier) {
+        Ok(playlists) => Some(playlists),
+        Err(failure) => {
+            log::warn!("read the server's playlists: {failure:?}");
+            None
+        }
+    };
     Ok(listing)
+}
+
+/// Reads every page of a listing, `PAGE_SIZE` at a time from `url`, until
+/// the announced total, or the first empty page when none is announced.
+/// Either the whole listing or a failure.
+fn all_pages<Entry>(
+    session: &Session,
+    url: &reqwest::Url,
+    read: impl Fn(reqwest::blocking::Response) -> Result<(Vec<Entry>, Option<usize>), Failure>,
+) -> Result<Vec<Entry>, Failure> {
+    let mut entries = Vec::new();
+    loop {
+        let mut page_url = url.clone();
+        page_url
+            .query_pairs_mut()
+            .append_pair("StartIndex", &entries.len().to_string())
+            .append_pair("Limit", &PAGE_SIZE.to_string());
+        let (page, total) = read(signed_in_send(session, reqwest::Method::GET, page_url)?)?;
+        let received = page.len();
+        entries.extend(page);
+        match (total, received) {
+            (Some(total), _) if entries.len() >= total => return Ok(entries),
+            (Some(total), 0) => {
+                return Err(Failure::Other(format!(
+                    "the listing ended after {} of {total} entries",
+                    entries.len()
+                )))
+            }
+            (None, 0) => return Ok(entries),
+            _ => {}
+        }
+    }
+}
+
+/// The user's playlists of songs, each with the addresses of its songs in
+/// order. A playlist of videos or pictures is not the listener's music; an
+/// empty one may become so.
+fn playlists(session: &Session, server_identifier: &str) -> Result<Vec<ListedPlaylist>, Failure> {
+    let mut url = session_url(session, "/Items")?;
+    url.query_pairs_mut()
+        .append_pair("userId", &session.user_identifier)
+        .append_pair("IncludeItemTypes", "Playlist")
+        .append_pair("Recursive", "true")
+        .append_pair("SortBy", "SortName");
+    let items = all_pages(session, &url, |response| {
+        signed_in_answer::<PlaylistsPage>(response)
+            .map(|page| (page.items, page.total_record_count))
+    })?;
+    items
+        .into_iter()
+        .filter(|item| {
+            item.media_type
+                .as_deref()
+                .is_none_or(|kind| kind == "Audio" || kind == "Unknown")
+        })
+        .map(|item| {
+            let songs = playlist_entries(session, &item.id)?
+                .into_iter()
+                .map(|entry| song_address(server_identifier, &entry.id))
+                .collect();
+            Ok(ListedPlaylist {
+                picture: item.image_tags.primary.is_some(),
+                item: item.id,
+                name: item.name,
+                songs,
+            })
+        })
+        .collect()
+}
+
+/// A playlist's entries, in order.
+fn playlist_entries(session: &Session, playlist: &str) -> Result<Vec<PlaylistEntry>, Failure> {
+    let mut url = session_url(session, &format!("/Playlists/{playlist}/Items"))?;
+    url.query_pairs_mut()
+        .append_pair("userId", &session.user_identifier);
+    all_pages(session, &url, |response| {
+        signed_in_answer::<PlaylistEntriesPage>(response)
+            .map(|page| (page.items, page.total_record_count))
+    })
+}
+
+/// A URL on the signed-in server.
+fn session_url(session: &Session, path: &str) -> Result<reqwest::Url, Failure> {
+    reqwest::Url::parse(&format!("{}{path}", session.address))
+        .map_err(|error| Failure::Other(error.to_string()))
+}
+
+/// Sends a signed-in request carrying JSON.
+fn signed_in_send_json(
+    session: &Session,
+    method: reqwest::Method,
+    url: reqwest::Url,
+    body: &serde_json::Value,
+) -> Result<reqwest::blocking::Response, Failure> {
+    client()?
+        .request(method, url)
+        .header(
+            "Authorization",
+            authorization(&session.device_identifier, Some(&session.access_token)),
+        )
+        .json(body)
+        .send()
+        .map_err(transport_failure)
+}
+
+/// Fails unless the server answered with a success. A playlist the user
+/// may read but not change — another user's, shared or public — answers
+/// 403 with a token that still works: only 401 says the token is refused.
+fn succeeded(response: reqwest::blocking::Response) -> Result<(), Failure> {
+    match response.status() {
+        status if status.is_success() => Ok(()),
+        reqwest::StatusCode::FORBIDDEN => Err(Failure::Other(
+            "the server does not let this user change the playlist".to_owned(),
+        )),
+        status => Err(status_failure(status, false)),
+    }
+}
+
+/// The server item behind a song's address.
+fn item_of(song_address: &str) -> Result<&str, Failure> {
+    item_of_song_address(song_address)
+        .ok_or_else(|| Failure::Other(format!("{song_address} names no server item")))
+}
+
+/// Makes a private playlist of songs for the signed-in user, holding these
+/// songs in order, and gives its item.
+pub fn create_playlist(
+    session: &Session,
+    name: &str,
+    song_addresses: &[String],
+) -> Result<String, Failure> {
+    let items = song_addresses
+        .iter()
+        .map(|address| item_of(address))
+        .collect::<Result<Vec<&str>, Failure>>()?;
+    let body = serde_json::json!({
+        "Name": name,
+        "Ids": items,
+        "UserId": session.user_identifier,
+        "MediaType": "Audio",
+        "IsPublic": false,
+    });
+    let response = signed_in_send_json(
+        session,
+        reqwest::Method::POST,
+        session_url(session, "/Playlists")?,
+        &body,
+    )?;
+    signed_in_answer::<PlaylistCreation>(response).map(|created| created.id)
+}
+
+/// Puts a song at the end of a playlist.
+pub fn add_to_playlist(
+    session: &Session,
+    playlist: &str,
+    song_address: &str,
+) -> Result<(), Failure> {
+    let mut url = session_url(session, &format!("/Playlists/{playlist}/Items"))?;
+    url.query_pairs_mut()
+        .append_pair("ids", item_of(song_address)?)
+        .append_pair("userId", &session.user_identifier);
+    succeeded(signed_in_send(session, reqwest::Method::POST, url)?)
+}
+
+/// Takes a song out of a playlist. A playlist names its entries apart from
+/// their songs, so they are looked up first; a song no longer in it is
+/// already out.
+pub fn remove_from_playlist(
+    session: &Session,
+    playlist: &str,
+    song_address: &str,
+) -> Result<(), Failure> {
+    let item = item_of(song_address)?;
+    let entries: Vec<String> = playlist_entries(session, playlist)?
+        .into_iter()
+        .filter(|entry| entry.id == item)
+        .map(|entry| entry.playlist_item_id.unwrap_or(entry.id))
+        .collect();
+    if entries.is_empty() {
+        return Ok(());
+    }
+    let mut url = session_url(session, &format!("/Playlists/{playlist}/Items"))?;
+    url.query_pairs_mut()
+        .append_pair("entryIds", &entries.join(","));
+    succeeded(signed_in_send(session, reqwest::Method::DELETE, url)?)
+}
+
+/// Renames a playlist. A server older than Jellyfin 10.9 cannot.
+pub fn rename_playlist(session: &Session, playlist: &str, name: &str) -> Result<(), Failure> {
+    succeeded(signed_in_send_json(
+        session,
+        reqwest::Method::POST,
+        session_url(session, &format!("/Playlists/{playlist}"))?,
+        &serde_json::json!({ "Name": name }),
+    )?)
+}
+
+/// Deletes a playlist; one already gone is deleted.
+pub fn delete_playlist(session: &Session, playlist: &str) -> Result<(), Failure> {
+    let response = signed_in_send(
+        session,
+        reqwest::Method::DELETE,
+        session_url(session, &format!("/Items/{playlist}"))?,
+    )?;
+    if response.status() == reqwest::StatusCode::NOT_FOUND {
+        return Ok(());
+    }
+    succeeded(response)
 }
 
 /// The session of the signed-in `server`, when the song is one of its own.
@@ -842,6 +1103,12 @@ mod tests {
             route("/Items?", move |request| {
                 if !request.signed_in {
                     return ("401 Unauthorized", String::new());
+                }
+                if query_value(&request.target, "IncludeItemTypes") == Some("Playlist") {
+                    return (
+                        "200 OK",
+                        r#"{"Items": [], "TotalRecordCount": 0}"#.to_owned(),
+                    );
                 }
                 let start: usize = request
                     .target
@@ -1405,6 +1672,221 @@ mod tests {
             Some("alac"),
             "its own picture when its album has none"
         );
+    }
+
+    /// A working server answering `answers` — a path prefix, a status and
+    /// a body each — ahead of its own routes, and telling the test every
+    /// request they took: its method, target and body.
+    fn recording_server(
+        answers: Vec<(&'static str, &'static str, &'static str)>,
+    ) -> (String, std::sync::mpsc::Receiver<(String, String, String)>) {
+        let (calls, received) = std::sync::mpsc::channel();
+        let calls = std::sync::Arc::new(std::sync::Mutex::new(calls));
+        let routes = answers
+            .into_iter()
+            .map(|(prefix, status, body)| {
+                let calls = std::sync::Arc::clone(&calls);
+                route(prefix, move |request| {
+                    if !request.signed_in {
+                        return ("401 Unauthorized", String::new());
+                    }
+                    let _ = calls.lock().expect("the sender").send((
+                        request.method.clone(),
+                        request.target.clone(),
+                        request.body.clone(),
+                    ));
+                    (status, body.to_owned())
+                })
+            })
+            .collect();
+        (fake_server_with(routes), received)
+    }
+
+    fn next_call(
+        calls: &std::sync::mpsc::Receiver<(String, String, String)>,
+    ) -> (String, String, String) {
+        calls
+            .recv_timeout(Duration::from_secs(5))
+            .expect("a call reached the server")
+    }
+
+    #[test]
+    fn a_listing_reads_the_users_playlists_of_songs_with_their_songs_in_order() {
+        let (address, _calls) = recording_server(vec![
+            (
+                "/Items?userId=user&IncludeItemTypes=Playlist",
+                "200 OK",
+                r#"{"Items": [
+                    {"Id": "road", "Name": "Road", "MediaType": "Audio", "ImageTags": {"Primary": "tag"}},
+                    {"Id": "films", "Name": "Films", "MediaType": "Video"},
+                    {"Id": "new", "Name": "New", "MediaType": "Unknown"}
+                ], "TotalRecordCount": 3}"#,
+            ),
+            (
+                "/Playlists/road/Items",
+                "200 OK",
+                r#"{"Items": [{"Id": "song2", "PlaylistItemId": "a"}, {"Id": "song0", "PlaylistItemId": "b"}], "TotalRecordCount": 2}"#,
+            ),
+            (
+                "/Playlists/new/Items",
+                "200 OK",
+                r#"{"Items": [], "TotalRecordCount": 0}"#,
+            ),
+        ]);
+        let listing = listing(&signed_in_to(&address), "server").expect("listing");
+        assert_eq!(
+            listing.playlists,
+            Some(vec![
+                ListedPlaylist {
+                    item: "road".to_owned(),
+                    name: "Road".to_owned(),
+                    picture: true,
+                    songs: vec![
+                        "jellyfin://server/song2".to_owned(),
+                        "jellyfin://server/song0".to_owned()
+                    ],
+                },
+                ListedPlaylist {
+                    item: "new".to_owned(),
+                    name: "New".to_owned(),
+                    picture: false,
+                    songs: Vec::new(),
+                },
+            ]),
+            "a playlist of videos is left out"
+        );
+    }
+
+    #[test]
+    fn playlists_that_cannot_be_read_leave_the_songs_listed_and_the_playlists_unknown() {
+        let (address, _calls) = recording_server(vec![(
+            "/Items?userId=user&IncludeItemTypes=Playlist",
+            "200 OK",
+            r#"{"Items": [{"Id": "road", "Name": "Road"}], "TotalRecordCount": 1}"#,
+        )]);
+        // The playlist's entries are not served: 404.
+        let listing = listing(&signed_in_to(&address), "server").expect("listing");
+        assert_eq!(listing.songs.len(), 3);
+        assert_eq!(listing.playlists, None);
+    }
+
+    #[test]
+    fn creating_a_playlist_posts_a_private_playlist_of_songs_and_gives_its_item() {
+        let (address, calls) =
+            recording_server(vec![("/Playlists", "200 OK", r#"{"Id": "made"}"#)]);
+        let session = signed_in_to(&address);
+        assert_eq!(
+            create_playlist(
+                &session,
+                "Road",
+                &[
+                    "jellyfin://server/song1".to_owned(),
+                    "jellyfin://server/song2".to_owned()
+                ]
+            ),
+            Ok("made".to_owned())
+        );
+        let (method, target, body) = next_call(&calls);
+        assert_eq!((method.as_str(), target.as_str()), ("POST", "/Playlists"));
+        let body: serde_json::Value = serde_json::from_str(&body).expect("a JSON body");
+        assert_eq!(
+            body,
+            serde_json::json!({
+                "Name": "Road",
+                "Ids": ["song1", "song2"],
+                "UserId": "user",
+                "MediaType": "Audio",
+                "IsPublic": false,
+            })
+        );
+    }
+
+    #[test]
+    fn a_song_is_added_by_its_item_and_removed_by_its_entry() {
+        let (address, calls) = recording_server(vec![(
+            "/Playlists/road/Items",
+            "200 OK",
+            r#"{"Items": [{"Id": "song1", "PlaylistItemId": "entry1"}, {"Id": "song2", "PlaylistItemId": "entry2"}], "TotalRecordCount": 2}"#,
+        )]);
+        let session = signed_in_to(&address);
+
+        assert_eq!(
+            add_to_playlist(&session, "road", "jellyfin://server/song3"),
+            Ok(())
+        );
+        let (method, target, _) = next_call(&calls);
+        assert_eq!(method, "POST");
+        assert_eq!(query_value(&target, "ids"), Some("song3"));
+        assert_eq!(query_value(&target, "userId"), Some("user"));
+
+        assert_eq!(
+            remove_from_playlist(&session, "road", "jellyfin://server/song2"),
+            Ok(())
+        );
+        let (method, _, _) = next_call(&calls);
+        assert_eq!(method, "GET", "the entries are looked up first");
+        let (method, target, _) = next_call(&calls);
+        assert_eq!(method, "DELETE");
+        assert_eq!(query_value(&target, "entryIds"), Some("entry2"));
+
+        // A song no longer in the playlist is already out: nothing is deleted.
+        assert_eq!(
+            remove_from_playlist(&session, "road", "jellyfin://server/song9"),
+            Ok(())
+        );
+        let (method, _, _) = next_call(&calls);
+        assert_eq!(method, "GET");
+        assert!(calls.recv_timeout(Duration::from_millis(300)).is_err());
+    }
+
+    #[test]
+    fn a_playlist_is_renamed_with_its_new_name_and_deleted_as_an_item() {
+        let (address, calls) = recording_server(vec![
+            ("/Playlists/road", "204 No Content", ""),
+            ("/Items/road", "204 No Content", ""),
+        ]);
+        let session = signed_in_to(&address);
+        assert_eq!(rename_playlist(&session, "road", "Road trip"), Ok(()));
+        let (method, target, body) = next_call(&calls);
+        assert_eq!(
+            (method.as_str(), target.as_str()),
+            ("POST", "/Playlists/road")
+        );
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&body).expect("a JSON body"),
+            serde_json::json!({"Name": "Road trip"})
+        );
+        assert_eq!(delete_playlist(&session, "road"), Ok(()));
+        let (method, target, _) = next_call(&calls);
+        assert_eq!(
+            (method.as_str(), target.as_str()),
+            ("DELETE", "/Items/road")
+        );
+    }
+
+    #[test]
+    fn a_playlist_already_gone_is_deleted_and_a_refusal_is_a_failure() {
+        let session = signed_in_to(&fake_server());
+        assert_eq!(delete_playlist(&session, "gone"), Ok(()));
+
+        let (address, _calls) = recording_server(vec![
+            ("/Items/kept", "403 Forbidden", ""),
+            ("/Items/revoked", "401 Unauthorized", ""),
+            ("/Playlists/old", "404 Not Found", ""),
+        ]);
+        let session = signed_in_to(&address);
+        assert!(
+            matches!(delete_playlist(&session, "kept"), Err(Failure::Other(_))),
+            "a playlist the user may not change says nothing of the token"
+        );
+        assert_eq!(
+            delete_playlist(&session, "revoked"),
+            Err(Failure::TokenRejected)
+        );
+        assert!(matches!(
+            rename_playlist(&session, "old", "New"),
+            Err(Failure::Other(_))
+        ));
     }
 
     fn signed_in_to(address: &str) -> Session {

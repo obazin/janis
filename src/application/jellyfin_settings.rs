@@ -109,13 +109,23 @@ impl Application {
         self.server_worker.run(move || {
             let outcome = jellyfin::listing(&session, &server.server_identifier)
                 .and_then(|listing| {
-                    library::sync_server_tracks(
+                    let report = library::sync_server_tracks(
                         &database,
                         server.id,
                         &listing.libraries,
                         listing.songs,
                     )
-                    .map_err(Failure::Other)
+                    .map_err(Failure::Other)?;
+                    // The songs are in; playlists that could not be written
+                    // stay as the last sync left them.
+                    if let Some(playlists) = &listing.playlists {
+                        if let Err(error) =
+                            library::sync_server_playlists(&database, server.id, playlists)
+                        {
+                            log::warn!("keep the server's playlists: {error}");
+                        }
+                    }
+                    Ok(report)
                 })
                 .and_then(|report| {
                     persistence::set_last_sync(&database, server.id).map_err(Failure::Other)?;

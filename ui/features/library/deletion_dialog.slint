@@ -1,0 +1,21 @@
+import { Tokens, Typography } from "../../tokens.slint";
+import { Strings } from "strings.slint";
+import { Dialog } from "../../molecules/dialog.slint";
+import { Library } from "library.slint";
+
+// The dialog that asks before a playlist or a group is deleted.
+export component DeletionDialog inherits Dialog {
+    title: Library.confirming-title;
+    confirm-label: Library.confirming-confirm;
+    cancel-label: Strings.playlists-cancel;
+    confirmed => { Library.confirming-confirmed(); }
+    cancelled => { Library.confirming-cancelled(); }
+
+    Text {
+        text: Library.confirming-message;
+        font-size: Typography.body;
+        color: Tokens.text-muted;
+        horizontal-alignment: left;
+        wrap: word-wrap;
+    }
+}

@@ -609,6 +609,96 @@ pub struct ListedLibrary {
     pub name: String,
 }
 
+/// One playlist of a media server, as its listing gives it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ListedPlaylist {
+    /// The server's own identifier of the playlist.
+    pub item: String,
+    pub name: String,
+    /// The server has a picture of it.
+    pub picture: bool,
+    /// The `jellyfin://<server>/<item>` addresses of its songs, in order.
+    pub songs: Vec<String>,
+}
+
+/// Brings the server's playlists in line with a complete listing of them,
+/// once its songs are: each listed playlist is upserted by its item, which
+/// keeps the group and the picture the listener gave it, and holds the
+/// listed songs Janis has, in order, each once at its first place. A
+/// playlist of this server missing from the listing is removed.
+pub fn sync_server_playlists(
+    database: &DbState,
+    server_id: i64,
+    playlists: &[ListedPlaylist],
+) -> Result<(), String> {
+    let connection = database.lock();
+    let transaction = connection
+        .unchecked_transaction()
+        .map_err(|error| format!("playlist sync transaction: {error}"))?;
+    let tracks: std::collections::HashMap<String, i64> = transaction
+        .prepare("SELECT path, id FROM tracks WHERE server_id = ?1")
+        .and_then(|mut statement| {
+            statement
+                .query_map([server_id], |row| Ok((row.get(0)?, row.get(1)?)))?
+                .collect()
+        })
+        .map_err(|error| format!("list the server's songs: {error}"))?;
+    let mut kept = std::collections::HashSet::new();
+    for playlist in playlists {
+        let playlist_id: i64 = transaction
+            .query_row(
+                "INSERT INTO playlists (name, server_id, server_item, server_picture)
+                 VALUES (?1, ?2, ?3, ?4)
+                 ON CONFLICT(server_id, server_item) DO UPDATE SET
+                     name = excluded.name,
+                     server_picture = excluded.server_picture
+                 RETURNING id",
+                rusqlite::params![playlist.name, server_id, playlist.item, playlist.picture],
+                |row| row.get(0),
+            )
+            .map_err(|error| format!("keep playlist {}: {error}", playlist.name))?;
+        kept.insert(playlist_id);
+        transaction
+            .execute(
+                "DELETE FROM playlist_entries WHERE playlist_id = ?1",
+                [playlist_id],
+            )
+            .map_err(|error| format!("empty playlist {}: {error}", playlist.name))?;
+        let mut position = 0_i64;
+        for address in &playlist.songs {
+            let Some(track_id) = tracks.get(address) else {
+                continue;
+            };
+            let added = transaction
+                .execute(
+                    "INSERT OR IGNORE INTO playlist_entries (playlist_id, track_id, position)
+                     VALUES (?1, ?2, ?3)",
+                    rusqlite::params![playlist_id, track_id, position],
+                )
+                .map_err(|error| format!("fill playlist {}: {error}", playlist.name))?;
+            position += added as i64;
+        }
+    }
+    let stored: Vec<i64> = transaction
+        .prepare("SELECT id FROM playlists WHERE server_id = ?1")
+        .and_then(|mut statement| {
+            statement
+                .query_map([server_id], |row| row.get(0))?
+                .collect()
+        })
+        .map_err(|error| format!("list the server's playlists: {error}"))?;
+    for playlist_id in stored {
+        if !kept.contains(&playlist_id) {
+            transaction
+                .execute("DELETE FROM playlists WHERE id = ?1", [playlist_id])
+                .map_err(|error| format!("remove playlist {playlist_id}: {error}"))?;
+        }
+    }
+    transaction
+        .commit()
+        .map_err(|error| format!("playlist sync commit: {error}"))
+}
+
 /// Brings the server's libraries and songs in the library in line with a
 /// complete listing of them: every listed library and song is upserted, and
 /// every library or song of this server missing from the listing is removed
@@ -1305,6 +1395,87 @@ mod tests {
             crate::persistence::favourite_track_ids(&database),
             Ok(vec![two])
         );
+    }
+
+    #[test]
+    fn a_playlist_sync_keeps_the_listeners_group_and_picture_and_drops_what_the_server_dropped() {
+        let directory = tempfile::tempdir().expect("a temporary directory");
+        let database = crate::persistence::init(directory.path().to_path_buf()).expect("db");
+        let server_id = signed_in(&database);
+        sync_server_tracks(
+            &database,
+            server_id,
+            &[],
+            vec![server_song("a", "One"), server_song("b", "Two")],
+        )
+        .expect("song sync");
+        let identifier_of = |title: &str| {
+            list_tracks(&database)
+                .expect("tracks")
+                .iter()
+                .find(|track| track.title == title)
+                .map(|track| track.id)
+                .expect("a listed song")
+        };
+        let (one, two) = (identifier_of("One"), identifier_of("Two"));
+        let listed = |item: &str, name: &str, songs: &[&str]| ListedPlaylist {
+            item: item.to_owned(),
+            name: name.to_owned(),
+            picture: true,
+            songs: songs
+                .iter()
+                .map(|song| format!("jellyfin://server/{song}"))
+                .collect(),
+        };
+
+        sync_server_playlists(
+            &database,
+            server_id,
+            &[
+                // A duplicate keeps its first place; a video, unknown here, is
+                // left out.
+                listed("road", "Road", &["b", "video", "a", "b"]),
+                listed("gone", "Gone soon", &["a"]),
+            ],
+        )
+        .expect("first playlist sync");
+        let saved = crate::persistence::playlists(&database).expect("read");
+        assert_eq!(saved.len(), 2);
+        assert_eq!(saved[0].track_ids, [two, one]);
+        assert!(saved[0].server_picture);
+        assert_eq!(saved[0].server, Some((server_id, "road".to_owned())));
+
+        let group = crate::persistence::create_playlist_group(&database, "Trips").expect("group");
+        crate::persistence::set_playlist_group(&database, saved[0].id, Some(group)).expect("file");
+        crate::persistence::set_playlist_picture(&database, saved[0].id, Some(&[7]))
+            .expect("picture");
+
+        sync_server_playlists(&database, server_id, &[listed("road", "Road trip", &["a"])])
+            .expect("second playlist sync");
+        let saved_again = crate::persistence::playlists(&database).expect("read");
+        assert_eq!(
+            saved_again.len(),
+            1,
+            "the playlist gone from the server is gone"
+        );
+        assert_eq!(
+            saved_again[0].id, saved[0].id,
+            "a re-listed playlist keeps its row"
+        );
+        assert_eq!(saved_again[0].name, "Road trip");
+        assert_eq!(saved_again[0].track_ids, [one]);
+        assert_eq!(saved_again[0].group_id, Some(group));
+        assert!(saved_again[0].picture);
+
+        // A playlist of Janis's own is not the server's to remove.
+        crate::persistence::create_playlist(&database, "Mine", None, &[]).expect("local");
+        sync_server_playlists(&database, server_id, &[]).expect("third playlist sync");
+        let names: Vec<String> = crate::persistence::playlists(&database)
+            .expect("read")
+            .into_iter()
+            .map(|playlist| playlist.name)
+            .collect();
+        assert_eq!(names, ["Mine"]);
     }
 
     fn signed_in(database: &DbState) -> i64 {

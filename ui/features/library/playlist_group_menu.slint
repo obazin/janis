@@ -1,0 +1,55 @@
+import { Tokens } from "../../tokens.slint";
+import { Icons } from "../../icons.slint";
+import { Strings } from "strings.slint";
+import { MenuItem } from "../../atoms/menu_item.slint";
+import { MenuPanel } from "../../molecules/menu_panel.slint";
+import { Library } from "library.slint";
+
+// The menu that files a playlist in a group, under the button that opened
+// it: no group, each group, or a new one. A click elsewhere or Escape
+// closes it.
+export component PlaylistGroupMenu inherits Rectangle {
+    property <length> margin: 8px;
+
+    public function take-focus() {
+        keys.focus();
+    }
+
+    keys := FocusScope {
+        key-pressed(event) => {
+            if event.text == Key.Escape {
+                Library.group-menu-closed();
+                return accept;
+            }
+            return reject;
+        }
+
+        TouchArea {
+            clicked => { Library.group-menu-closed(); }
+        }
+
+        MenuPanel {
+            x: clamp(Library.group-menu-x, root.margin, root.width - self.width - root.margin);
+            y: clamp(Library.group-menu-y, root.margin, root.height - self.height - root.margin);
+            accessible-label: Strings.playlists-manage-no-group;
+
+            for choice[index] in Library.group-menu-choices: MenuItem {
+                label: choice.label;
+                checked: choice.current;
+                activated => { Library.group-menu-chosen(index); }
+            }
+            Rectangle {
+                height: 9px;
+                Rectangle {
+                    height: 1px;
+                    background: Tokens.divider;
+                }
+            }
+            MenuItem {
+                icon: Icons.plus;
+                label: Strings.playlists-manage-new-group-choice;
+                activated => { Library.group-menu-chosen(-1); }
+            }
+        }
+    }
+}

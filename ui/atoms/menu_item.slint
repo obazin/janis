@@ -1,0 +1,74 @@
+import { Tokens, Typography, Metrics, Motion } from "../tokens.slint";
+import { Icons } from "../icons.slint";
+import { Glyph } from "glyph.slint";
+
+// One line of a menu: an optional icon, a label, and at the end a check mark
+// (`checked`) or the chevron of a submenu (`opens-submenu`). A disabled item
+// is drawn faint and takes no click. `highlighted` lights it as if under the
+// pointer — the item whose submenu is open.
+export component MenuItem inherits Rectangle {
+    in property <string> icon;
+    in property <string> label;
+    in property <bool> checked;
+    in property <bool> opens-submenu;
+    in property <bool> enabled: true;
+    in property <bool> highlighted;
+    out property <bool> has-hover: touch.has-hover;
+    callback activated();
+
+    property <color> foreground: !root.enabled ? Tokens.text-faint : touch.has-hover || root.highlighted ? Tokens.text : Tokens.text-secondary;
+
+    height: 34px;
+    border-radius: Metrics.radius-tile;
+    background: root.enabled && (touch.has-hover || root.highlighted) ? Tokens.row-hover : transparent;
+    animate background { duration: Motion.fast; }
+    accessible-role: button;
+    accessible-label: root.label;
+    accessible-enabled: root.enabled;
+    accessible-checkable: root.checked;
+    accessible-checked: root.checked;
+    accessible-action-default => {
+        if root.enabled {
+            root.activated();
+        }
+    }
+
+    HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 10px;
+        spacing: 10px;
+        if root.icon != "": VerticalLayout {
+            alignment: center;
+            Glyph {
+                width: 16px;
+                height: 16px;
+                icon: root.icon;
+                tint: root.foreground;
+            }
+        }
+        Text {
+            horizontal-stretch: 1;
+            text: root.label;
+            font-size: Typography.body;
+            font-weight: Typography.semibold;
+            color: root.foreground;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+        if root.checked || root.opens-submenu: VerticalLayout {
+            alignment: center;
+            Glyph {
+                width: 14px;
+                height: 14px;
+                icon: root.checked ? Icons.check : Icons.chevron-right;
+                tint: root.checked ? Tokens.accent : root.foreground;
+            }
+        }
+    }
+
+    touch := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: pointer;
+        clicked => { root.activated(); }
+    }
+}

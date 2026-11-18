@@ -23,6 +23,11 @@ import { Settings } from "features/settings/settings.slint";
 import { Radio } from "features/radio/radio.slint";
 import { Library } from "features/library/library.slint";
 import { Jellyfin } from "features/jellyfin/jellyfin.slint";
+import { TrackMenu } from "features/library/track_menu.slint";
+import { PlaylistManager } from "features/library/playlist_manager.slint";
+import { PlaylistGroupMenu } from "features/library/playlist_group_menu.slint";
+import { PlaylistNameDialog } from "features/library/playlist_name_dialog.slint";
+import { DeletionDialog } from "features/library/deletion_dialog.slint";
 
 export { Strings, Shell, Player, Covers, Equalizer, Library, Radio, Settings, Jellyfin, Tokens }
 
@@ -85,6 +90,27 @@ export component AppWindow inherits Window {
     }
 
     if Shell.equalizer-open: EqualizerOverlay {
+        init => { self.take-focus(); }
+    }
+
+    // The playlists' sheet, then what opens over it: a dialog, a menu.
+    if Library.manager-open: PlaylistManager {
+        init => { self.take-focus(); }
+    }
+
+    if Library.naming-open: PlaylistNameDialog {
+        init => { self.take-focus-in-field(); }
+    }
+
+    if Library.confirming-open: DeletionDialog {
+        init => { self.take-focus(); }
+    }
+
+    if Library.menu-open: TrackMenu {
+        init => { self.take-focus(); }
+    }
+
+    if Library.group-menu-open: PlaylistGroupMenu {
         init => { self.take-focus(); }
     }
 

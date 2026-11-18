@@ -31,7 +31,9 @@ mod persistence;
 mod platform;
 mod playback_options;
 mod player;
+mod playlists;
 mod radio;
+mod server_pushes;
 #[cfg(test)]
 mod string_names;
 mod text;
@@ -141,9 +143,33 @@ mod development {
             library.invoke_tab_selected(tab.into());
             match (tab, card) {
                 ("artists", Some(card)) => library.invoke_artist_clicked(card),
+                ("playlists", Some(card)) => library.invoke_playlist_clicked(0, card),
                 (_, Some(card)) => library.invoke_album_clicked(card),
                 (_, None) => {}
             }
+        }
+        // `JANIS_TRACK_MENU=<row>` opens the menu of that Songs row, its
+        // playlists unfolded; `JANIS_NEW_PLAYLIST=<row>` goes on to the
+        // dialog that names a new playlist for it.
+        let library = window.global::<crate::user_interface::Library>();
+        for (variable, naming) in [("JANIS_TRACK_MENU", false), ("JANIS_NEW_PLAYLIST", true)] {
+            let row = std::env::var(variable)
+                .ok()
+                .and_then(|row| row.parse::<usize>().ok());
+            let track_id = row.and_then(|row| {
+                slint::Model::row_data(&library.get_songs(), row).map(|song| song.track_id)
+            });
+            if let Some(track_id) = track_id {
+                library.invoke_track_menu_requested(track_id, 420.0, 300.0, false);
+                library.set_menu_submenu_open(true);
+                if naming {
+                    library.invoke_menu_new_playlist();
+                }
+            }
+        }
+        // `JANIS_PLAYLIST_MANAGER` opens the sheet that manages the playlists.
+        if std::env::var_os("JANIS_PLAYLIST_MANAGER").is_some() {
+            library.invoke_manager_opened();
         }
         // `JANIS_FAVOURITES` turns the Radio screen's favourites filter on.
         if std::env::var_os("JANIS_FAVOURITES").is_some() {

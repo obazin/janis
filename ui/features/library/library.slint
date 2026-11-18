@@ -10,6 +10,51 @@ export struct LibraryCard {
     // The track whose cover stands for the card.
     track-id: int,
     gradient-index: int,
+    // The playlist the card stands for, whose own cover it shows; 0 for an
+    // album or an artist.
+    playlist-id: int,
+}
+
+// One heading of the Playlists tab: a group's playlists, or those in none.
+export struct PlaylistSection {
+    // Empty for the playlists in no group when there is no group at all.
+    heading: string,
+    cards: [LibraryCard],
+    // The open playlist's place among these cards, or -1.
+    selection-index: int,
+    // The place of the playlist whose panel is folding away, or -1.
+    folding-index: int,
+}
+
+// A line of a menu that offers a choice: a playlist to add a song to, or a
+// group to file a playlist in. `current` marks the playlist that holds the
+// song already, or the group the playlist is in.
+export struct MenuChoice {
+    label: string,
+    current: bool,
+}
+
+// A playlist in the sheet that manages them.
+export struct ManagedPlaylist {
+    playlist-id: int,
+    name: string,
+    detail: string,
+    // The group it is in, as its button says.
+    group: string,
+    // The listener chose a picture for it.
+    picture: bool,
+    track-id: int,
+    gradient-index: int,
+}
+
+// A group in the sheet that manages them, or — with an id of 0 — the
+// playlists in none.
+export struct ManagedGroup {
+    group-id: int,
+    name: string,
+    first: bool,
+    last: bool,
+    playlists: [ManagedPlaylist],
 }
 
 // A row of a track list.
@@ -64,6 +109,78 @@ export global Library {
     // Counts the times the listener opened, switched or closed a selection:
     // the grid animates on these, and only these.
     in property <int> selection-changes;
+
+    // ── Playlists ─────────────────────────────────────────────────────────
+    in property <[PlaylistSection]> playlist-sections;
+    // True when there is no playlist at all, whatever the search keeps.
+    in property <bool> playlists-empty: true;
+    // True while the open selection is a playlist: its rows can leave it.
+    in property <bool> selection-is-playlist;
+
+    // The menu a right-click on a song opens, where the window was clicked.
+    in property <bool> menu-open;
+    in property <length> menu-x;
+    in property <length> menu-y;
+    // The playlists the song can go in, and whether each holds it already.
+    in property <[MenuChoice]> menu-playlists;
+    // The song is a favourite.
+    in property <bool> menu-favourite;
+    // The song was clicked in a playlist's panel.
+    in property <bool> menu-in-playlist;
+    // Opens with the playlists unfolded.
+    in property <bool> menu-submenu-open;
+
+    // The dialog that names a new playlist or group, or renames one.
+    in property <bool> naming-open;
+    in property <string> naming-title;
+    in property <string> naming-label;
+    in property <string> naming-confirm;
+    in property <string> naming-text;
+
+    // The dialog that asks before something is deleted.
+    in property <bool> confirming-open;
+    in property <string> confirming-title;
+    in property <string> confirming-message;
+    in property <string> confirming-confirm;
+
+    // The sheet that groups the playlists and gives them pictures.
+    in property <bool> manager-open;
+    in property <[ManagedGroup]> managed-groups;
+    // The menu that files a playlist in a group, where the window was clicked.
+    in property <bool> group-menu-open;
+    in property <length> group-menu-x;
+    in property <length> group-menu-y;
+    // "No group" first, then each group.
+    in property <[MenuChoice]> group-menu-choices;
+
+    // A playlist's card was clicked: open it, or close it when it is open.
+    callback playlist-clicked(section: int, index: int);
+    // A song was right-clicked at `x`, `y` in the window; `in-playlist` when
+    // its row is in a playlist's panel.
+    callback track-menu-requested(track-id: int, x: length, y: length, in-playlist: bool);
+    callback menu-closed();
+    callback menu-playlist-chosen(index: int);
+    callback menu-new-playlist();
+    callback menu-favourite-toggled();
+    callback menu-remove-from-playlist();
+    callback naming-confirmed(name: string);
+    callback naming-cancelled();
+    callback confirming-confirmed();
+    callback confirming-cancelled();
+    callback manager-opened();
+    callback manager-closed();
+    callback group-added();
+    callback group-renamed(group-id: int);
+    callback group-moved(group-id: int, earlier: bool);
+    callback group-deleted(group-id: int);
+    callback playlist-renamed(playlist-id: int);
+    callback playlist-deleted(playlist-id: int);
+    callback playlist-picture-chosen(playlist-id: int);
+    callback playlist-picture-removed(playlist-id: int);
+    callback group-menu-requested(playlist-id: int, x: length, y: length);
+    // A place among `group-menu-choices`, or -1 for a new group.
+    callback group-menu-chosen(index: int);
+    callback group-menu-closed();
 
     // ── Local Files ───────────────────────────────────────────────────────
     // The files the search kept there: it reads titles and artists only.

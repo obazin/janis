@@ -67,7 +67,7 @@ CREATE INDEX IF NOT EXISTS idx_tracks_added ON tracks(added_at DESC);
 /// `SCHEMA` above is frozen at version 1 — it only ever creates a fresh file.
 /// Every change since is a migration, so a new database and an existing one
 /// converge on the same shape.
-const SCHEMA_VERSION: i64 = 8;
+const SCHEMA_VERSION: i64 = 9;
 
 // The migrations reach the version a fresh database is stamped with.
 const _: () = assert!(MIGRATIONS.len() as i64 + 1 == SCHEMA_VERSION);
@@ -158,6 +158,35 @@ const MIGRATIONS: &[&str] = &[
          track_id INTEGER NOT NULL UNIQUE REFERENCES tracks(id) ON DELETE CASCADE,
          added_at INTEGER NOT NULL DEFAULT (unixepoch())
      );",
+    // → 9: the listener's playlists, the groups they sort them into, and the
+    //      songs each holds, in order. A playlist lives in Janis alone, or on
+    //      a media server (`server_id` and its `server_item`), whose sync
+    //      keeps it, so it leaves with the server. Groups and the chosen
+    //      picture are Janis's own and survive a sync. A song is in a
+    //      playlist at most once; a removed song leaves its playlists.
+    "CREATE TABLE IF NOT EXISTS playlist_groups (
+         id INTEGER PRIMARY KEY,
+         name TEXT NOT NULL,
+         position INTEGER NOT NULL DEFAULT 0
+     );
+     CREATE TABLE IF NOT EXISTS playlists (
+         id INTEGER PRIMARY KEY,
+         name TEXT NOT NULL,
+         server_id INTEGER REFERENCES media_servers(id) ON DELETE CASCADE,
+         server_item TEXT,
+         server_picture INTEGER NOT NULL DEFAULT 0,
+         group_id INTEGER REFERENCES playlist_groups(id) ON DELETE SET NULL,
+         picture BLOB,
+         created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+         UNIQUE (server_id, server_item)
+     );
+     CREATE TABLE IF NOT EXISTS playlist_entries (
+         playlist_id INTEGER NOT NULL REFERENCES playlists(id) ON DELETE CASCADE,
+         track_id INTEGER NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
+         position INTEGER NOT NULL,
+         PRIMARY KEY (playlist_id, track_id)
+     ) WITHOUT ROWID;
+     CREATE INDEX IF NOT EXISTS idx_playlist_entries_track ON playlist_entries(track_id);",
 ];
 
 /// Opens (creating if needed) `janis.db` under the app-data directory and
@@ -438,6 +467,300 @@ pub fn set_favourite_track(
         .execute(statement, [track_id])
         .map_err(|error| format!("persist favourite song: {error}"))?;
     Ok(())
+}
+
+/// A playlist as `janis.db` keeps it, with its songs in order.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SavedPlaylist {
+    pub id: i64,
+    pub name: String,
+    /// The media server it lives on, and its item there; none for a
+    /// playlist of Janis's own.
+    pub server: Option<(i64, String)>,
+    /// The server has a picture of it.
+    pub server_picture: bool,
+    pub group_id: Option<i64>,
+    /// The listener chose a picture for it.
+    pub picture: bool,
+    pub track_ids: Vec<i64>,
+}
+
+/// A group the listener sorts playlists into.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PlaylistGroup {
+    pub id: i64,
+    pub name: String,
+}
+
+/// Every playlist, the oldest first, each with its songs in order.
+pub fn playlists(database: &DbState) -> Result<Vec<SavedPlaylist>, String> {
+    let connection = database.lock();
+    let mut playlists: Vec<SavedPlaylist> = connection
+        .prepare(
+            "SELECT id, name, server_id, server_item, server_picture, group_id,
+                    picture IS NOT NULL
+             FROM playlists ORDER BY created_at, id",
+        )
+        .and_then(|mut statement| {
+            statement
+                .query_map([], |row| {
+                    let server_id: Option<i64> = row.get(2)?;
+                    let server_item: Option<String> = row.get(3)?;
+                    Ok(SavedPlaylist {
+                        id: row.get(0)?,
+                        name: row.get(1)?,
+                        server: server_id.zip(server_item),
+                        server_picture: row.get::<_, i64>(4)? != 0,
+                        group_id: row.get(5)?,
+                        picture: row.get(6)?,
+                        track_ids: Vec::new(),
+                    })
+                })?
+                .collect()
+        })
+        .map_err(|error| format!("read the playlists: {error}"))?;
+    let entries: Vec<(i64, i64)> = connection
+        .prepare(
+            "SELECT playlist_id, track_id FROM playlist_entries ORDER BY playlist_id, position",
+        )
+        .and_then(|mut statement| {
+            statement
+                .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+                .collect()
+        })
+        .map_err(|error| format!("read the playlists' songs: {error}"))?;
+    let places: std::collections::HashMap<i64, usize> = playlists
+        .iter()
+        .enumerate()
+        .map(|(place, playlist)| (playlist.id, place))
+        .collect();
+    for (playlist_id, track_id) in entries {
+        if let Some(place) = places.get(&playlist_id) {
+            playlists[*place].track_ids.push(track_id);
+        }
+    }
+    Ok(playlists)
+}
+
+/// The groups, in the order the listener gave them.
+pub fn playlist_groups(database: &DbState) -> Result<Vec<PlaylistGroup>, String> {
+    let connection = database.lock();
+    connection
+        .prepare("SELECT id, name FROM playlist_groups ORDER BY position, id")
+        .and_then(|mut statement| {
+            statement
+                .query_map([], |row| {
+                    Ok(PlaylistGroup {
+                        id: row.get(0)?,
+                        name: row.get(1)?,
+                    })
+                })?
+                .collect()
+        })
+        .map_err(|error| format!("read the playlist groups: {error}"))
+}
+
+/// Saves a new playlist holding `track_ids`, in that order, and gives its
+/// row. A server's playlist the server's sync saved already is that row,
+/// renamed; one whose server is gone is not saved, and gives none.
+pub fn create_playlist(
+    database: &DbState,
+    name: &str,
+    server: Option<(i64, &str)>,
+    track_ids: &[i64],
+) -> Result<Option<i64>, String> {
+    let mut connection = database.lock();
+    let transaction = connection
+        .transaction()
+        .map_err(|error| format!("create a playlist: {error}"))?;
+    let playlist_id: Option<i64> = match server {
+        None => transaction
+            .query_row(
+                "INSERT INTO playlists (name) VALUES (?1) RETURNING id",
+                [name],
+                |row| row.get(0),
+            )
+            .map(Some),
+        Some((server_id, item)) => transaction
+            .query_row(
+                "INSERT INTO playlists (name, server_id, server_item)
+                 SELECT ?1, id, ?3 FROM media_servers WHERE id = ?2
+                 ON CONFLICT (server_id, server_item) DO UPDATE SET name = excluded.name
+                 RETURNING id",
+                rusqlite::params![name, server_id, item],
+                |row| row.get(0),
+            )
+            .map(Some)
+            .or_else(|error| match error {
+                rusqlite::Error::QueryReturnedNoRows => Ok(None),
+                error => Err(error),
+            }),
+    }
+    .map_err(|error| format!("create a playlist: {error}"))?;
+    if let Some(playlist_id) = playlist_id {
+        for track_id in track_ids {
+            add_entry(&transaction, playlist_id, *track_id)
+                .map_err(|error| format!("fill a new playlist: {error}"))?;
+        }
+    }
+    transaction
+        .commit()
+        .map_err(|error| format!("create a playlist: {error}"))?;
+    Ok(playlist_id)
+}
+
+/// Puts a song at the end of a playlist, unless it is there already or no
+/// longer in the library.
+fn add_entry(connection: &Connection, playlist_id: i64, track_id: i64) -> rusqlite::Result<usize> {
+    connection.execute(
+        "INSERT OR IGNORE INTO playlist_entries (playlist_id, track_id, position)
+         SELECT ?1, tracks.id,
+                (SELECT COALESCE(MAX(position) + 1, 0) FROM playlist_entries WHERE playlist_id = ?1)
+         FROM tracks WHERE tracks.id = ?2 AND EXISTS (SELECT 1 FROM playlists WHERE id = ?1)",
+        [playlist_id, track_id],
+    )
+}
+
+/// Puts a song at the end of a playlist, or takes it out.
+pub fn set_playlist_entry(
+    database: &DbState,
+    playlist_id: i64,
+    track_id: i64,
+    present: bool,
+) -> Result<(), String> {
+    let connection = database.lock();
+    let result = if present {
+        add_entry(&connection, playlist_id, track_id)
+    } else {
+        connection.execute(
+            "DELETE FROM playlist_entries WHERE playlist_id = ?1 AND track_id = ?2",
+            [playlist_id, track_id],
+        )
+    };
+    result
+        .map(|_| ())
+        .map_err(|error| format!("change a playlist's songs: {error}"))
+}
+
+pub fn rename_playlist(database: &DbState, playlist_id: i64, name: &str) -> Result<(), String> {
+    let connection = database.lock();
+    connection
+        .execute(
+            "UPDATE playlists SET name = ?1 WHERE id = ?2",
+            rusqlite::params![name, playlist_id],
+        )
+        .map(|_| ())
+        .map_err(|error| format!("rename a playlist: {error}"))
+}
+
+pub fn remove_playlist(database: &DbState, playlist_id: i64) -> Result<(), String> {
+    let connection = database.lock();
+    connection
+        .execute("DELETE FROM playlists WHERE id = ?1", [playlist_id])
+        .map(|_| ())
+        .map_err(|error| format!("remove a playlist: {error}"))
+}
+
+/// Files a playlist in a group, or in none.
+pub fn set_playlist_group(
+    database: &DbState,
+    playlist_id: i64,
+    group_id: Option<i64>,
+) -> Result<(), String> {
+    let connection = database.lock();
+    connection
+        .execute(
+            "UPDATE playlists SET group_id = (SELECT id FROM playlist_groups WHERE id = ?1)
+             WHERE id = ?2",
+            rusqlite::params![group_id, playlist_id],
+        )
+        .map(|_| ())
+        .map_err(|error| format!("file a playlist in a group: {error}"))
+}
+
+/// Keeps the picture the listener chose for a playlist, or forgets it.
+pub fn set_playlist_picture(
+    database: &DbState,
+    playlist_id: i64,
+    picture: Option<&[u8]>,
+) -> Result<(), String> {
+    let connection = database.lock();
+    connection
+        .execute(
+            "UPDATE playlists SET picture = ?1 WHERE id = ?2",
+            rusqlite::params![picture, playlist_id],
+        )
+        .map(|_| ())
+        .map_err(|error| format!("keep a playlist's picture: {error}"))
+}
+
+/// The picture the listener chose for a playlist, as it was saved.
+pub fn playlist_picture(database: &DbState, playlist_id: i64) -> Result<Option<Vec<u8>>, String> {
+    let connection = database.lock();
+    connection
+        .query_row(
+            "SELECT picture FROM playlists WHERE id = ?1",
+            [playlist_id],
+            |row| row.get(0),
+        )
+        .or_else(|error| match error {
+            rusqlite::Error::QueryReturnedNoRows => Ok(None),
+            error => Err(error),
+        })
+        .map_err(|error| format!("read a playlist's picture: {error}"))
+}
+
+/// Saves a new group after the others and gives its row.
+pub fn create_playlist_group(database: &DbState, name: &str) -> Result<i64, String> {
+    let connection = database.lock();
+    connection
+        .query_row(
+            "INSERT INTO playlist_groups (name, position)
+             SELECT ?1, COALESCE(MAX(position) + 1, 0) FROM playlist_groups
+             RETURNING id",
+            [name],
+            |row| row.get(0),
+        )
+        .map_err(|error| format!("create a playlist group: {error}"))
+}
+
+pub fn rename_playlist_group(database: &DbState, group_id: i64, name: &str) -> Result<(), String> {
+    let connection = database.lock();
+    connection
+        .execute(
+            "UPDATE playlist_groups SET name = ?1 WHERE id = ?2",
+            rusqlite::params![name, group_id],
+        )
+        .map(|_| ())
+        .map_err(|error| format!("rename a playlist group: {error}"))
+}
+
+/// Removes a group; its playlists are then in none.
+pub fn remove_playlist_group(database: &DbState, group_id: i64) -> Result<(), String> {
+    let connection = database.lock();
+    connection
+        .execute("DELETE FROM playlist_groups WHERE id = ?1", [group_id])
+        .map(|_| ())
+        .map_err(|error| format!("remove a playlist group: {error}"))
+}
+
+/// Puts the groups in the order given.
+pub fn set_playlist_group_order(database: &DbState, group_ids: &[i64]) -> Result<(), String> {
+    let mut connection = database.lock();
+    let transaction = connection
+        .transaction()
+        .map_err(|error| format!("order the playlist groups: {error}"))?;
+    for (position, group_id) in group_ids.iter().enumerate() {
+        transaction
+            .execute(
+                "UPDATE playlist_groups SET position = ?1 WHERE id = ?2",
+                rusqlite::params![position as i64, group_id],
+            )
+            .map_err(|error| format!("order the playlist groups: {error}"))?;
+    }
+    transaction
+        .commit()
+        .map_err(|error| format!("order the playlist groups: {error}"))
 }
 
 /// A Jellyfin server the listener signed in to, as `janis.db` keeps it.
@@ -838,6 +1161,155 @@ mod tests {
         assert_eq!(favourite_track_ids(&database), Ok(Vec::new()));
     }
 
+    fn seed_songs(database: &DbState) {
+        database
+            .lock()
+            .execute_batch(
+                "INSERT INTO tracks (id, path, title, format) VALUES
+                     (1, '/a.flac', 'A', 'FLAC'), (2, '/b.flac', 'B', 'FLAC'),
+                     (3, '/c.flac', 'C', 'FLAC');",
+            )
+            .expect("seed three songs");
+    }
+
+    #[test]
+    fn a_playlist_keeps_its_songs_in_the_order_given_each_once() {
+        let (_directory, database) = fresh_database();
+        seed_songs(&database);
+        let playlist_id = create_playlist(&database, "Road", None, &[2, 1])
+            .expect("create")
+            .expect("a local playlist is always saved");
+        set_playlist_entry(&database, playlist_id, 3, true).expect("add a third");
+        set_playlist_entry(&database, playlist_id, 2, true).expect("add the second again");
+        // A song no longer in the library is not added.
+        set_playlist_entry(&database, playlist_id, 9, true).expect("add a song that is gone");
+        assert_eq!(
+            playlists(&database),
+            Ok(vec![SavedPlaylist {
+                id: playlist_id,
+                name: "Road".to_owned(),
+                server: None,
+                server_picture: false,
+                group_id: None,
+                picture: false,
+                track_ids: vec![2, 1, 3],
+            }])
+        );
+
+        set_playlist_entry(&database, playlist_id, 1, false).expect("take one out");
+        set_playlist_entry(&database, playlist_id, 1, true).expect("put it back");
+        let saved = playlists(&database).expect("read");
+        assert_eq!(saved[0].track_ids, [2, 3, 1], "a song put back goes last");
+
+        database
+            .lock()
+            .execute("DELETE FROM tracks WHERE id = 3", [])
+            .expect("remove a song");
+        let saved = playlists(&database).expect("read");
+        assert_eq!(
+            saved[0].track_ids,
+            [2, 1],
+            "a removed song leaves its playlists"
+        );
+    }
+
+    #[test]
+    fn a_playlist_is_renamed_given_a_picture_and_removed_with_its_songs() {
+        let (_directory, database) = fresh_database();
+        seed_songs(&database);
+        let playlist_id = create_playlist(&database, "Road", None, &[1])
+            .expect("create")
+            .expect("saved");
+        rename_playlist(&database, playlist_id, "Night drive").expect("rename");
+        set_playlist_picture(&database, playlist_id, Some(&[1, 2, 3])).expect("picture");
+        let saved = playlists(&database).expect("read");
+        assert_eq!(saved[0].name, "Night drive");
+        assert!(saved[0].picture);
+        assert_eq!(
+            playlist_picture(&database, playlist_id),
+            Ok(Some(vec![1, 2, 3]))
+        );
+        set_playlist_picture(&database, playlist_id, None).expect("forget the picture");
+        assert_eq!(playlist_picture(&database, playlist_id), Ok(None));
+
+        remove_playlist(&database, playlist_id).expect("remove");
+        assert_eq!(playlists(&database), Ok(Vec::new()));
+        let entries: i64 = database
+            .lock()
+            .query_row("SELECT COUNT(*) FROM playlist_entries", [], |row| {
+                row.get(0)
+            })
+            .expect("count entries");
+        assert_eq!(entries, 0);
+        assert_eq!(playlist_picture(&database, playlist_id), Ok(None));
+    }
+
+    #[test]
+    fn groups_keep_their_order_and_removing_one_leaves_its_playlists_in_none() {
+        let (_directory, database) = fresh_database();
+        let first = create_playlist_group(&database, "Moods").expect("first group");
+        let second = create_playlist_group(&database, "Sport").expect("second group");
+        let names = |database: &DbState| -> Vec<String> {
+            playlist_groups(database)
+                .expect("read groups")
+                .into_iter()
+                .map(|group| group.name)
+                .collect()
+        };
+        assert_eq!(names(&database), ["Moods", "Sport"]);
+        set_playlist_group_order(&database, &[second, first]).expect("reorder");
+        rename_playlist_group(&database, first, "Feelings").expect("rename");
+        assert_eq!(names(&database), ["Sport", "Feelings"]);
+
+        let playlist_id = create_playlist(&database, "Run", None, &[])
+            .expect("create")
+            .expect("saved");
+        set_playlist_group(&database, playlist_id, Some(second)).expect("file it");
+        assert_eq!(
+            playlists(&database).expect("read")[0].group_id,
+            Some(second)
+        );
+        // A group that does not exist files it in none.
+        set_playlist_group(&database, playlist_id, Some(99)).expect("file it nowhere");
+        assert_eq!(playlists(&database).expect("read")[0].group_id, None);
+
+        set_playlist_group(&database, playlist_id, Some(second)).expect("file it again");
+        remove_playlist_group(&database, second).expect("remove the group");
+        assert_eq!(names(&database), ["Feelings"]);
+        assert_eq!(playlists(&database).expect("read")[0].group_id, None);
+    }
+
+    #[test]
+    fn a_server_playlist_is_saved_once_and_leaves_with_its_server() {
+        let directory = tempfile::tempdir().expect("a temporary directory");
+        let database = init(directory.path().to_path_buf()).expect("init");
+        let server = save_media_server(&database, &new_server("server", "user", "token"))
+            .expect("save the server");
+        server_track(&database, server.id, "song");
+
+        let first = create_playlist(&database, "Mine", Some((server.id, "list")), &[1])
+            .expect("create")
+            .expect("its server is kept");
+        // Saved again — the sync got there first: the same row.
+        let again = create_playlist(&database, "Mine too", Some((server.id, "list")), &[])
+            .expect("create again")
+            .expect("its server is kept");
+        assert_eq!(first, again);
+        let saved = playlists(&database).expect("read");
+        assert_eq!(saved.len(), 1);
+        assert_eq!(saved[0].server, Some((server.id, "list".to_owned())));
+        assert_eq!(saved[0].name, "Mine too");
+
+        // A playlist whose server has gone is not saved.
+        assert_eq!(
+            create_playlist(&database, "Lost", Some((server.id + 1, "other")), &[]),
+            Ok(None)
+        );
+
+        remove_media_server(&database, server.id).expect("sign out");
+        assert_eq!(playlists(&database), Ok(Vec::new()));
+    }
+
     /// A database as an earlier Janis left it: the frozen schema, the
     /// migrations up to `version`, a preference changed and one track.
     fn database_at_version(directory: &std::path::Path, version: i64) {
@@ -886,6 +1358,8 @@ mod tests {
             assert_eq!(media_server(&database), Ok(None));
             assert_eq!(server_libraries(&database), Ok(Vec::new()));
             assert_eq!(favourite_track_ids(&database), Ok(Vec::new()));
+            assert_eq!(playlists(&database), Ok(Vec::new()));
+            assert_eq!(playlist_groups(&database), Ok(Vec::new()));
             let connection = database.lock();
             let (title, server_id): (String, Option<i64>) = connection
                 .query_row(

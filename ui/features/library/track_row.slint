@@ -7,11 +7,14 @@ import { CoverArt } from "cover_art.slint";
 import { Library, LibraryTrack } from "library.slint";
 
 // A row of a library track list: number, cover, title and artist, composer,
-// the star that makes it a favourite, duration.
+// the star that makes it a favourite, duration. A right-click opens the
+// song's menu.
 export component TrackRow inherits Rectangle {
     in property <LibraryTrack> track;
     // Every row but the first is ruled off from the one above.
     in property <bool> ruled;
+    // The row is in a playlist's panel: its menu offers to take it out.
+    in property <bool> in-playlist;
     callback clicked();
 
     background: touch.has-hover ? Tokens.row-hover : transparent;
@@ -31,6 +34,11 @@ export component TrackRow inherits Rectangle {
     touch := TouchArea {
         mouse-cursor: pointer;
         clicked => { root.clicked(); }
+        pointer-event(event) => {
+            if event.kind == PointerEventKind.down && event.button == PointerEventButton.right {
+                Library.track-menu-requested(root.track.track-id, self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y, root.in-playlist);
+            }
+        }
 
         HorizontalLayout {
             padding-left: 14px;

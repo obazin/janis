@@ -1,5 +1,5 @@
 import { Tokens, Fonts, Typography, Metrics, Motion } from "../../tokens.slint";
-import { LibraryTrack } from "library.slint";
+import { Library, LibraryTrack } from "library.slint";
 
 // A row of the Local Files table: title, artist, format, duration.
 export component LocalRow inherits Rectangle {
@@ -82,5 +82,10 @@ export component LocalRow inherits Rectangle {
     touch := TouchArea {
         mouse-cursor: pointer;
         clicked => { root.clicked(); }
+        pointer-event(event) => {
+            if event.kind == PointerEventKind.down && event.button == PointerEventButton.right {
+                Library.track-menu-requested(root.track.track-id, self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y, false);
+            }
+        }
     }
 }

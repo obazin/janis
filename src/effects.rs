@@ -8,6 +8,7 @@
 
 use crate::library::Track;
 use crate::persistence::{MediaServer, PlaybackOption};
+use crate::playlists::{PlaylistChange, PlaylistKey};
 use crate::radio::Station;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -74,6 +75,53 @@ pub enum Effect {
         track_id: i64,
         favourite: bool,
     },
+    /// Save a new playlist holding these songs — on `server`, as its item,
+    /// when it lives there — then report its row back through
+    /// `Playlists::creation_saved` with the same `creation`.
+    SavePlaylist {
+        creation: u64,
+        name: String,
+        server: Option<(i64, String)>,
+        track_ids: Vec<i64>,
+    },
+    /// Remember that a song is, or stopped being, in a playlist (last).
+    PersistPlaylistEntry {
+        playlist_id: i64,
+        track_id: i64,
+        present: bool,
+    },
+    PersistPlaylistName {
+        playlist_id: i64,
+        name: String,
+    },
+    RemovePlaylist {
+        playlist_id: i64,
+    },
+    /// Forget the picture the listener chose for a playlist.
+    RemovePlaylistPicture {
+        playlist_id: i64,
+    },
+    /// File a playlist in a group, or in none.
+    PersistPlaylistGroup {
+        playlist_id: i64,
+        group_id: Option<i64>,
+    },
+    /// Save a new group, then report its row back through
+    /// `Playlists::group_created`, which files `then_file` in it.
+    CreatePlaylistGroup {
+        name: String,
+        then_file: Option<PlaylistKey>,
+    },
+    PersistPlaylistGroupName {
+        group_id: i64,
+        name: String,
+    },
+    RemovePlaylistGroup {
+        group_id: i64,
+    },
+    PersistPlaylistGroupOrder {
+        group_ids: Vec<i64>,
+    },
 
     // ── Media server ─────────────────────────────────────────────────────────
     /// Sign in to a Jellyfin server off the user-interface thread and keep
@@ -104,6 +152,17 @@ pub enum Effect {
         /// The song's `jellyfin://<server>/<item>` address.
         address: String,
         favourite: bool,
+        sequence: u64,
+    },
+    /// Make, change or delete a playlist on its server off the
+    /// user-interface thread, then report back through
+    /// `Playlists::push_finished` with the same `sequence`. `item` is the
+    /// playlist's on the server; none for a creation.
+    PushPlaylistChange {
+        server: MediaServer,
+        playlist: PlaylistKey,
+        item: Option<String>,
+        change: PlaylistChange,
         sequence: u64,
     },
 

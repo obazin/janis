@@ -110,6 +110,26 @@ pub fn base64_cover(encoded: &str, longest_side: u32) -> Result<Pixels, String> 
     picture_cover(bytes, longest_side)
 }
 
+/// The longest side of the picture kept for a playlist: enough for its
+/// card at any size the grid draws it.
+pub const PLAYLIST_PICTURE_SIDE: u32 = 600;
+
+/// A picture the listener chose for a playlist, as it is kept: decoded with
+/// the same limits as any cover, brought within `PLAYLIST_PICTURE_SIDE`, and
+/// encoded as a JPEG.
+pub fn playlist_picture(bytes: Vec<u8>) -> Result<Vec<u8>, String> {
+    let pixels = picture_cover(bytes, PLAYLIST_PICTURE_SIDE)?;
+    let picture =
+        image::RgbaImage::from_raw(pixels.width(), pixels.height(), pixels.as_bytes().to_vec())
+            .ok_or_else(|| "a decoded picture of the wrong size".to_owned())?;
+    let mut encoded = std::io::Cursor::new(Vec::new());
+    image::DynamicImage::ImageRgba8(picture)
+        .to_rgb8()
+        .write_to(&mut encoded, image::ImageFormat::Jpeg)
+        .map_err(|error| format!("encode a playlist picture: {error}"))?;
+    Ok(encoded.into_inner())
+}
+
 /// A picture file's bytes — as a media server sends them — scaled to fit
 /// `longest_side`.
 pub fn picture_cover(bytes: Vec<u8>, longest_side: u32) -> Result<Pixels, String> {
@@ -148,6 +168,8 @@ pub enum CoverKey {
     Track(i64),
     /// A media server's picture of this item.
     ServerPicture(String),
+    /// The picture the listener chose for this playlist.
+    PlaylistPicture(i64),
 }
 
 /// The cover key of every track in the library, so a tile that names a
@@ -220,11 +242,32 @@ impl<Key: Clone + Eq + Hash, Value> BoundedCache<Key, Value> {
         self.entries.clear();
         self.order.clear();
     }
+
+    /// Forgets what the key held, so it is loaded again when next asked for.
+    pub fn remove(&mut self, key: &Key) {
+        if self.entries.remove(key).is_some() {
+            self.order.retain(|kept| kept != key);
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_chosen_playlist_picture_is_kept_as_a_jpeg_no_larger_than_needed() {
+        let picture = image::RgbaImage::from_pixel(1200, 800, image::Rgba([10, 200, 30, 255]));
+        let mut bytes = std::io::Cursor::new(Vec::new());
+        picture
+            .write_to(&mut bytes, image::ImageFormat::Png)
+            .expect("encode a test picture");
+        let kept = playlist_picture(bytes.into_inner()).expect("a picture is kept");
+        let decoded = image::load_from_memory_with_format(&kept, image::ImageFormat::Jpeg)
+            .expect("the kept picture is a JPEG");
+        assert_eq!((decoded.width(), decoded.height()), (600, 400));
+        assert!(playlist_picture(b"not a picture".to_vec()).is_err());
+    }
 
     fn encoded_png(width: u32, height: u32) -> String {
         let picture = image::RgbaImage::from_pixel(width, height, image::Rgba([255, 45, 155, 255]));

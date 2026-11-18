@@ -1,0 +1,205 @@
+import { Tokens, Typography, Metrics } from "../../tokens.slint";
+import { Icons } from "../../icons.slint";
+import { Strings } from "strings.slint";
+import { GhostButton } from "../../atoms/ghost_button.slint";
+import { IconButton, IconButtonIdentifier } from "../../atoms/icon_button.slint";
+import { SectionLabel } from "../../atoms/section_label.slint";
+import { Dialog } from "../../molecules/dialog.slint";
+import { ScrollArea } from "../../molecules/scroll_area.slint";
+import { CoverArt } from "cover_art.slint";
+import { Library, ManagedPlaylist } from "library.slint";
+
+// A playlist of the sheet: its cover, its name, the group it is in, and
+// what can be done to it.
+component ManagedPlaylistRow inherits Rectangle {
+    in property <ManagedPlaylist> playlist;
+
+    height: 58px;
+    border-radius: Metrics.radius-inset;
+    background: Tokens.panel;
+
+    HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 12px;
+        spacing: 12px;
+        VerticalLayout {
+            alignment: center;
+            CoverArt {
+                width: 40px;
+                height: 40px;
+                radius: 8px;
+                playlist-id: root.playlist.playlist-id;
+                track-id: root.playlist.track-id;
+                gradient-index: root.playlist.gradient-index;
+            }
+        }
+        VerticalLayout {
+            horizontal-stretch: 1;
+            alignment: center;
+            Text {
+                text: root.playlist.name;
+                font-size: Typography.body-em;
+                font-weight: Typography.semibold;
+                color: Tokens.text;
+                horizontal-alignment: left;
+                overflow: elide;
+            }
+            Text {
+                text: root.playlist.detail;
+                font-size: Typography.caption;
+                color: Tokens.text-muted;
+                horizontal-alignment: left;
+                overflow: elide;
+            }
+        }
+        HorizontalLayout {
+            width: 200px;
+            alignment: start;
+            GhostButton {
+                y: (parent.height - self.height) / 2;
+                icon: Icons.folder;
+                label: root.playlist.group;
+                clicked => {
+                    Library.group-menu-requested(root.playlist.playlist-id, self.absolute-position.x, self.absolute-position.y + self.height + 4px);
+                }
+            }
+        }
+        HorizontalLayout {
+            // As wide with or without a picture to remove, so the rows line up.
+            width: 4 * 20px + 3 * 12px;
+            alignment: end;
+            spacing: 12px;
+            VerticalLayout {
+                alignment: center;
+                IconButton {
+                    identifier: IconButtonIdentifier.playlist-picture;
+                    icon: Icons.image;
+                    label: Strings.playlists-manage-picture;
+                    clicked => { Library.playlist-picture-chosen(root.playlist.playlist-id); }
+                }
+            }
+            if root.playlist.picture: VerticalLayout {
+                alignment: center;
+                IconButton {
+                    identifier: IconButtonIdentifier.playlist-picture-remove;
+                    icon: Icons.image-off;
+                    label: Strings.playlists-manage-picture-remove;
+                    clicked => { Library.playlist-picture-removed(root.playlist.playlist-id); }
+                }
+            }
+            VerticalLayout {
+                alignment: center;
+                IconButton {
+                    identifier: IconButtonIdentifier.playlist-rename;
+                    icon: Icons.pencil;
+                    label: Strings.playlists-manage-rename;
+                    clicked => { Library.playlist-renamed(root.playlist.playlist-id); }
+                }
+            }
+            VerticalLayout {
+                alignment: center;
+                IconButton {
+                    identifier: IconButtonIdentifier.playlist-delete;
+                    icon: Icons.trash;
+                    label: Strings.playlists-manage-delete;
+                    clicked => { Library.playlist-deleted(root.playlist.playlist-id); }
+                }
+            }
+        }
+    }
+}
+
+// The sheet that sorts the playlists into groups — made, named, ordered
+// and removed here — and gives them pictures, names, or the door.
+export component PlaylistManager inherits Dialog {
+    title: Strings.playlists-manage-title;
+    confirm-label: Strings.playlists-manage-done;
+    sheet-width: 760px;
+    confirmed => { Library.manager-closed(); }
+    cancelled => { Library.manager-closed(); }
+
+    HorizontalLayout {
+        alignment: start;
+        GhostButton {
+            icon: Icons.plus;
+            label: Strings.playlists-manage-new-group;
+            clicked => { Library.group-added(); }
+        }
+    }
+
+    list := ScrollArea {
+        // The sheet leaves room for its title and buttons.
+        height: min(rows.preferred-height, root.height - 260px);
+        content-height: rows.preferred-height;
+
+        rows := VerticalLayout {
+            width: list.content-width;
+            height: self.preferred-height;
+            spacing: 20px;
+
+            for group in Library.managed-groups: VerticalLayout {
+                spacing: 8px;
+                HorizontalLayout {
+                    height: 26px;
+                    spacing: 12px;
+                    SectionLabel {
+                        horizontal-stretch: 1;
+                        label: group.name;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+                    if group.group-id > 0: HorizontalLayout {
+                        spacing: 12px;
+                        padding-right: 12px;
+                        VerticalLayout {
+                            alignment: center;
+                            IconButton {
+                                identifier: IconButtonIdentifier.playlist-group-rename;
+                                icon: Icons.pencil;
+                                label: Strings.playlists-manage-group-rename;
+                                clicked => { Library.group-renamed(group.group-id); }
+                            }
+                        }
+                        if !group.first: VerticalLayout {
+                            alignment: center;
+                            IconButton {
+                                identifier: IconButtonIdentifier.playlist-group-earlier;
+                                icon: Icons.arrow-up;
+                                label: Strings.playlists-manage-group-earlier;
+                                clicked => { Library.group-moved(group.group-id, true); }
+                            }
+                        }
+                        if !group.last: VerticalLayout {
+                            alignment: center;
+                            IconButton {
+                                identifier: IconButtonIdentifier.playlist-group-later;
+                                icon: Icons.arrow-down;
+                                label: Strings.playlists-manage-group-later;
+                                clicked => { Library.group-moved(group.group-id, false); }
+                            }
+                        }
+                        VerticalLayout {
+                            alignment: center;
+                            IconButton {
+                                identifier: IconButtonIdentifier.playlist-group-delete;
+                                icon: Icons.trash;
+                                label: Strings.playlists-manage-group-delete;
+                                clicked => { Library.group-deleted(group.group-id); }
+                            }
+                        }
+                    }
+                }
+                if group.playlists.length == 0: Text {
+                    text: Strings.playlists-manage-empty-group;
+                    font-size: Typography.body;
+                    color: Tokens.text-faint;
+                    horizontal-alignment: left;
+                    wrap: word-wrap;
+                }
+                for playlist in group.playlists: ManagedPlaylistRow {
+                    playlist: playlist;
+                }
+            }
+        }
+    }
+}

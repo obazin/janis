@@ -17,36 +17,21 @@
 //! server before a push reached it, takes the star the listener gave over
 //! what it read.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 use crate::effects::Effect;
 use crate::jellyfin::Failure;
 use crate::library::Track;
 use crate::persistence::MediaServer;
+use crate::server_pushes::PendingPushes;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct FavouriteTracks {
     /// The favourites, the newest first.
     track_ids: Vec<i64>,
     members: HashSet<i64>,
-    /// The songs whose stars are on their way to a server.
-    pending: HashMap<i64, Pending>,
-    /// Numbers the pushes, so the answer to the last one of a song is known.
-    sequence: u64,
-}
-
-/// A song whose star is on its way to its server.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct Pending {
-    /// The star the listener gave last, which the song shows.
-    wanted: bool,
-    /// The star the server holds, as far as its answers tell.
-    server_favourite: bool,
-    /// Where the song sat among the favourites before the first push, so a
-    /// refused removal puts it back there.
-    place: Option<usize>,
-    /// The song's last push.
-    last_sequence: u64,
+    /// The songs whose stars are on their way to a server, by track id.
+    pending: PendingPushes<i64, bool>,
 }
 
 impl FavouriteTracks {
@@ -58,8 +43,8 @@ impl FavouriteTracks {
         self.members = self.track_ids.iter().copied().collect();
         let pending: Vec<(i64, bool)> = self
             .pending
-            .iter()
-            .map(|(track_id, pending)| (*track_id, pending.wanted))
+            .wanted()
+            .map(|(track_id, favourite)| (*track_id, *favourite))
             .collect();
         for (track_id, favourite) in pending {
             self.set(track_id, favourite, 0);
@@ -88,21 +73,13 @@ impl FavouriteTracks {
                 favourite,
             }];
         };
-        self.sequence += 1;
-        let pending = self.pending.entry(track.id).or_insert(Pending {
-            wanted: favourite,
-            server_favourite: was_favourite,
-            place,
-            last_sequence: self.sequence,
-        });
-        pending.wanted = favourite;
-        pending.last_sequence = self.sequence;
+        let sequence = self.pending.push(track.id, favourite, was_favourite, place);
         vec![Effect::PushServerFavourite {
             server: server.clone(),
             track_id: track.id,
             address: track.path.clone(),
             favourite,
-            sequence: self.sequence,
+            sequence,
         }]
     }
 
@@ -118,33 +95,30 @@ impl FavouriteTracks {
         favourite: bool,
         outcome: Result<(), Failure>,
     ) -> Vec<Effect> {
-        let Some(pending) = self.pending.get_mut(&track_id) else {
+        if let Err(failure) = &outcome {
+            log::warn!("star a song on the server: {failure:?}");
+        }
+        let Some(settled) = self
+            .pending
+            .answer(&track_id, sequence, favourite, outcome.is_ok())
+        else {
             return Vec::new();
         };
-        match &outcome {
-            Ok(()) => pending.server_favourite = favourite,
-            Err(failure) => log::warn!("star a song on the server: {failure:?}"),
-        }
-        if sequence != pending.last_sequence {
-            return Vec::new();
-        }
-        let pending = *pending;
-        self.pending.remove(&track_id);
         let mut effects = vec![Effect::PersistFavouriteTrack {
             track_id,
-            favourite: pending.server_favourite,
+            favourite: settled.server_value,
         }];
-        if pending.server_favourite == pending.wanted {
+        if settled.as_wanted() {
             return effects;
         }
         self.set(
             track_id,
-            pending.server_favourite,
-            pending.place.unwrap_or_default(),
+            settled.server_value,
+            settled.place.unwrap_or_default(),
         );
         if !matches!(outcome, Err(Failure::TokenRejected)) {
             effects.push(Effect::NotifyError {
-                key: if pending.wanted {
+                key: if settled.wanted {
                     "error.favouriteAdd"
                 } else {
                     "error.favouriteRemove"

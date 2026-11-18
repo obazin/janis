@@ -17,7 +17,7 @@ use crate::library::{self, ScanError, ScanReport, Track, WatchedFolder};
 use crate::library_view::{
     self, AlbumGroup, ArtistGroup, LibraryTab, Selection, SelectionKind, SHELF_TILE_COUNT,
 };
-use crate::persistence::{self, DbState, ServerLibrary};
+use crate::persistence::{self, DbState, PlaylistGroup, SavedPlaylist, ServerLibrary};
 use crate::text;
 use crate::translations::Translations;
 use crate::user_interface::{self, LibraryCard, LibraryTrack};
@@ -31,6 +31,9 @@ pub(super) struct LibraryScreen {
     /// Where the selection's card sits among the cards of the open tab, when
     /// it shows there.
     shown_selection: Option<usize>,
+    /// Where the open playlist's card sits on the Playlists tab: its section
+    /// and its place there.
+    pub shown_playlist_selection: Option<(usize, usize)>,
     /// How many times the listener opened, switched or closed a selection.
     selection_changes: i32,
     shown_tracks: Vec<Track>,
@@ -53,6 +56,8 @@ pub(super) struct LibrarySnapshot {
     folders: Vec<WatchedFolder>,
     libraries: Vec<ServerLibrary>,
     favourite_track_ids: Vec<i64>,
+    playlists: Vec<SavedPlaylist>,
+    playlist_groups: Vec<PlaylistGroup>,
 }
 
 impl LibrarySnapshot {
@@ -62,6 +67,8 @@ impl LibrarySnapshot {
             folders: library::list_watched_folders(database)?,
             libraries: persistence::server_libraries(database)?,
             favourite_track_ids: persistence::favourite_track_ids(database)?,
+            playlists: persistence::playlists(database)?,
+            playlist_groups: persistence::playlist_groups(database)?,
         })
     }
 }
@@ -289,29 +296,39 @@ impl Application {
         }
     }
 
-    fn toggle_selection(&self, selection: Selection) {
+    pub(super) fn toggle_selection(&self, selection: Selection) {
         self.change_selection(|current| library_view::toggle_selection(current, selection));
     }
 
     /// Changes the selection as the listener asked and hands the grid the
     /// panel it puts away, tracks included, so that panel folds while the
     /// next one opens.
-    fn change_selection(&self, change: impl FnOnce(&mut Option<Selection>)) {
-        let (folding, folding_index, changes) = {
+    pub(super) fn change_selection(&self, change: impl FnOnce(&mut Option<Selection>)) {
+        let (folding, folding_index, folding_playlist, changes) = {
             let mut screen = self.library_screen.borrow_mut();
             let folding = screen.selection.clone();
             let folding_index = screen.shown_selection;
+            let folding_playlist = screen.shown_playlist_selection;
             change(&mut screen.selection);
             screen.selection_changes = screen.selection_changes.wrapping_add(1);
-            (folding, folding_index, screen.selection_changes)
+            (
+                folding,
+                folding_index,
+                folding_playlist,
+                screen.selection_changes,
+            )
         };
+        // A playlist's panel folds under its card, in its group's grid.
+        self.playlist_screen.borrow_mut().folding = folding.as_ref().and(folding_playlist);
         self.refresh_library();
 
         let view = self.window.global::<user_interface::Library>();
         // Only a panel that sat under a card folds; another closes at once.
-        match folding.zip(folding_index) {
+        let folds_in_a_grid = folding_index.is_some();
+        let folds = folding_index.or(folding_playlist.map(|_| 0));
+        match folding.zip(folds) {
             Some((folding, index)) => {
-                view.set_folding_index(index as i32);
+                view.set_folding_index(if folds_in_a_grid { index as i32 } else { -1 });
                 view.set_folding_heading(folding.label.as_str().into());
                 self.library_folding_tracks.set_vec(track_rows(
                     &folding.tracks,
@@ -329,8 +346,14 @@ impl Application {
     }
 
     /// Rebuilds what the Library screen shows from the library, the search
-    /// and the selection.
+    /// and the selection: its lists, then its playlists.
     pub(super) fn refresh_library(&self) {
+        self.renew_playlist_selection();
+        self.refresh_library_lists();
+        self.refresh_playlist_sections();
+    }
+
+    fn refresh_library_lists(&self) {
         let translations = self.translations.borrow();
         let tracks = self.tracks.borrow();
         let albums = self.albums.borrow();
@@ -625,6 +648,9 @@ impl Application {
         self.favourite_tracks
             .borrow_mut()
             .restore(snapshot.favourite_track_ids);
+        self.playlists
+            .borrow_mut()
+            .restore(snapshot.playlists, snapshot.playlist_groups);
         self.group_library();
         // A rescan may have changed any file's art.
         self.thumbnails.borrow_mut().clear();
@@ -653,6 +679,8 @@ impl Application {
                     selection,
                     &self.albums.borrow(),
                     &self.artists.borrow(),
+                    self.playlists.borrow().playlists(),
+                    &self.tracks.borrow(),
                 )
             });
         }
@@ -660,7 +688,7 @@ impl Application {
 }
 
 /// Waits for a system dialog on the interface thread's event loop.
-fn await_dialog(dialog: impl std::future::Future<Output = ()> + 'static) {
+pub(super) fn await_dialog(dialog: impl std::future::Future<Output = ()> + 'static) {
     if let Err(error) = slint::spawn_local(dialog) {
         log::error!("open a system dialog: {error}");
     }
@@ -686,6 +714,7 @@ fn album_card(album: &AlbumGroup, translations: &Translations) -> LibraryCard {
             .map(|track| interface_id(track.id))
             .unwrap_or_default(),
         gradient_index: album_gradient_index(album),
+        playlist_id: 0,
     }
 }
 
@@ -703,6 +732,7 @@ fn artist_card(artist: &ArtistGroup, translations: &Translations) -> LibraryCard
             .map(|track| interface_id(track.id))
             .unwrap_or_default(),
         gradient_index: text::art_gradient_index(&artist.artist) as i32,
+        playlist_id: 0,
     }
 }
 
@@ -750,7 +780,7 @@ pub(super) fn track_rows(
             title: match browsed {
                 Some(SelectionKind::Album) => library_view::album_row_title(track, index).into(),
                 Some(SelectionKind::Artist) => library_view::artist_row_title(track).into(),
-                None => track.title.as_str().into(),
+                Some(SelectionKind::Playlist) | None => track.title.as_str().into(),
             },
             artist: track.artist.as_deref().unwrap_or(&unknown_artist).into(),
             composer: track.composer.as_deref().unwrap_or_default().into(),

@@ -12,12 +12,12 @@ Each component belongs to exactly one tier and only uses tiers below it. One com
 | Tier | Where | Components |
 |---|---|---|
 | Tokens and data | `tokens.slint`, `icons.slint`, `shell.slint` | `Tokens` (colours, gradients, shadows), `Fonts`, `Typography`, `Metrics` (radii, frame sizes), `Motion` (durations), `Accent`, `Icons`; `Shell` (open screen, search, equalizer sheet, notifications) |
-| Atoms | `atoms/` | `Glyph`, `IconButton` (with the `IconButtonIdentifier` registry), `Chip`, `Badge`, `PrimaryButton`, `GhostButton`, `SectionLabel`, `Eyebrow`, `Toggle`, `TextField` (with `TextFieldKind`), `ArtTile`, `EmptyState` |
-| Molecules | `molecules/` | `NavItem`, `ToggleRow`, `PlayCircle`, `ScreenHeader`, `ScrollArea` |
+| Atoms | `atoms/` | `Glyph`, `IconButton` (with the `IconButtonIdentifier` registry), `Chip`, `Badge`, `PrimaryButton`, `GhostButton`, `SectionLabel`, `Eyebrow`, `Toggle`, `TextField` (with `TextFieldKind`), `ArtTile`, `EmptyState`, `MenuItem` |
+| Molecules | `molecules/` | `NavItem`, `ToggleRow`, `PlayCircle`, `ScreenHeader`, `ScrollArea`, `MenuPanel`, `Dialog` |
 | Organisms | `organisms/` | `SidebarNav`, `Toaster` |
-| Features | `features/<name>/` | player: `MiniPlayer`, `Waveform`, `TrackOverview`, `TransportControls`, `VolumeSlider`, `NowPlayingQueue` · equalizer: `EqualizerOverlay`, `EqualizerBandSlider`, `OpenEqualizerButton` · library: `CoverArt`, `AlbumCard`, `CardGrid`, `TrackRow`, `TrackList`, `LibraryTrackAccordion`, `LocalRow`, `LocalTable`, `ShelfTile`, `Shelf`, `ArtistSpotlight` · radio: `StationCard` · jellyfin: `JellyfinCard` |
+| Features | `features/<name>/` | player: `MiniPlayer`, `Waveform`, `TrackOverview`, `TransportControls`, `VolumeSlider`, `NowPlayingQueue` · equalizer: `EqualizerOverlay`, `EqualizerBandSlider`, `OpenEqualizerButton` · library: `CoverArt`, `AlbumCard`, `CardGrid`, `TrackRow`, `TrackList`, `LibraryTrackAccordion`, `LocalRow`, `LocalTable`, `ShelfTile`, `Shelf`, `ArtistSpotlight`, `TrackMenu`, `PlaylistGroupMenu`, `PlaylistNameDialog`, `DeletionDialog`, `PlaylistManager` · radio: `StationCard` · jellyfin: `JellyfinCard` |
 | Screens | `screens/` | `AppTitlebar`, `NowPlayingScreen`, `LibraryScreen`, `DiscoverScreen`, `RadioScreen`, `LocalFilesScreen`, `SettingsScreen` |
-| Page | `app.slint` | `AppWindow`: title bar, sidebar, the open screen, the mini player, and what floats above them |
+| Page | `app.slint` | `AppWindow`: title bar, sidebar, the open screen, the mini player, and what floats above them (the equalizer sheet, the playlists' sheet, dialogs and menus) |
 
 Dependencies run one way. The design system (atoms, molecules, organisms) imports tokens and icons only and knows nothing about audio. A feature imports the design system; the allowed feature-to-feature edges are the pair `library ↔ player` (the artist spotlight plays through the player; the queue card shows library covers) and `player → equalizer` (the EQ buttons). Screens import anything. A design-system file importing from `features/`, or another feature edge, is a design smell: surface it.
 
@@ -76,4 +76,4 @@ Dependencies run one way. The design system (atoms, molecules, organisms) import
 
 ## Looking at the result
 
-Compiling is not seeing. Debug builds save what the window shows: `JANIS_SNAPSHOT=<file.png>`, with `JANIS_SCREEN`, `JANIS_LIBRARY`, `JANIS_SEARCH`, `JANIS_EQUALIZER`, `JANIS_AUTOPLAY`, `JANIS_STATION` and `JANIS_FAVOURITES` to reach a state. Say so when something could not be checked this way (anything that needs a pointer: drags, hover, scrolling).
+Compiling is not seeing. Debug builds save what the window shows: `JANIS_SNAPSHOT=<file.png>`, with `JANIS_SCREEN`, `JANIS_LIBRARY`, `JANIS_SEARCH`, `JANIS_EQUALIZER`, `JANIS_AUTOPLAY`, `JANIS_STATION`, `JANIS_FAVOURITES`, `JANIS_TRACK_MENU`, `JANIS_NEW_PLAYLIST` and `JANIS_PLAYLIST_MANAGER` to reach a state. Say so when something could not be checked this way (anything that needs a pointer: drags, hover, scrolling).
