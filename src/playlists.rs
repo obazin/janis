@@ -89,7 +89,11 @@ impl Playlist {
     /// Whether provider-owned content may change. Grouping and pictures are
     /// Janis-local choices for every provider.
     pub fn can_edit_content(&self) -> bool {
-        self.source != PlaylistSource::YouTubeMusic
+        match self.source {
+            PlaylistSource::Local | PlaylistSource::Jellyfin => true,
+            #[cfg(feature = "youtube-music")]
+            PlaylistSource::YouTubeMusic => false,
+        }
     }
 
     /// A local playlist takes persistent files and YouTube Music songs; a Jellyfin
@@ -99,7 +103,9 @@ impl Playlist {
             return false;
         }
         match (self.source, track.source, &self.server, track.server_id) {
-            (PlaylistSource::Local, TrackSource::File | TrackSource::YouTubeMusic, _, _) => true,
+            (PlaylistSource::Local, TrackSource::File, _, _) => true,
+            #[cfg(feature = "youtube-music")]
+            (PlaylistSource::Local, TrackSource::YouTubeMusic, _, _) => true,
             (PlaylistSource::Jellyfin, TrackSource::Jellyfin, Some(home), Some(server_id)) => {
                 home.server_id == server_id && server.is_some_and(|server| server.id == server_id)
             }
@@ -225,6 +231,7 @@ impl Playlists {
         self.playlists.extend(creating);
     }
 
+    #[cfg(feature = "youtube-music")]
     /// Refreshes imported membership without replacing local presentation or
     /// changes still on their way to another provider.
     pub fn restore_youtube_memberships(&mut self, memberships: Vec<(i64, Vec<i64>)>) {
@@ -276,7 +283,9 @@ impl Playlists {
             return Vec::new();
         }
         let home = match track.source {
-            TrackSource::File | TrackSource::YouTubeMusic => None,
+            TrackSource::File => None,
+            #[cfg(feature = "youtube-music")]
+            TrackSource::YouTubeMusic => None,
             TrackSource::Jellyfin => {
                 match server.filter(|server| Some(server.id) == track.server_id) {
                     Some(server) => Some(server),
@@ -855,6 +864,7 @@ impl Playlists {
                 PlaylistSource::Jellyfin => {
                     matches!(key, PlaylistKey::Creating(_)) || server_of(playlist, server).is_some()
                 }
+                #[cfg(feature = "youtube-music")]
                 PlaylistSource::YouTubeMusic => false,
             })
     }
@@ -1373,6 +1383,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "youtube-music")]
     #[test]
     fn imported_content_is_read_only_but_its_local_group_and_picture_are_editable() {
         let mut saved = local(1, "Imported", &[5]);
@@ -1420,6 +1431,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "youtube-music")]
     #[test]
     fn imported_membership_refresh_preserves_every_other_playlist_choice() {
         let mut imported = local(1, "Imported", &[5]);
@@ -1457,6 +1469,7 @@ mod tests {
             .is_empty());
     }
 
+    #[cfg(feature = "youtube-music")]
     #[test]
     fn local_playlists_mix_persistent_files_and_youtube_music_but_reject_anonymous_songs() {
         let mut playlists = with(vec![local(1, "Mixed", &[5]), on_server(2, "Server", &[])]);
@@ -1511,6 +1524,7 @@ mod tests {
         assert_eq!(songs_of(&playlists, mixed), [5, 6]);
     }
 
+    #[cfg(feature = "youtube-music")]
     #[test]
     fn imported_playlists_never_inherit_a_reused_rows_pending_jellyfin_changes() {
         for action in ["rename", "remove", "delete"] {

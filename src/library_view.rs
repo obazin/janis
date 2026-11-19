@@ -964,10 +964,16 @@ mod tests {
     fn local_files_lists_only_the_files_on_disk() {
         let file = track(1, "Alive");
         let song = track(2, "Alive again").server(7, "item");
-        let mut youtube_song = track(3, "Alive online");
-        youtube_song.source = crate::library::TrackSource::YouTubeMusic;
-        youtube_song.path = "youtube-music://abcdefghijk".to_owned();
-        let tracks = vec![file.clone(), song, youtube_song];
+        let tracks = vec![file.clone(), song];
+        #[cfg(feature = "youtube-music")]
+        let tracks = {
+            let mut youtube_song = track(3, "Alive online");
+            youtube_song.source = crate::library::TrackSource::YouTubeMusic;
+            youtube_song.path = "youtube-music://abcdefghijk".to_owned();
+            let mut tracks = tracks;
+            tracks.push(youtube_song);
+            tracks
+        };
 
         assert_eq!(search_local_files(&tracks, ""), vec![file.clone()]);
         assert_eq!(search_local_files(&tracks, "alive"), vec![file]);

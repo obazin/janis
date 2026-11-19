@@ -13,6 +13,16 @@ publish = false
 name = "Janis"
 path = "src/main.rs"
 
+[features]
+default = []
+youtube-music = [
+    "dep:rustypipe",
+    "dep:tempfile",
+    "tokio/process",
+    "tokio/io-util",
+    "tokio/macros",
+]
+
 [build-dependencies]
 slint-build = "1.18"
 serde_json = "1.0.149"
@@ -39,7 +49,7 @@ rfd = "0.15"
 base64 = "0.22"
 # Runs asynchronous service calls and the optional extraction process on workers.
 # A station's runtime outlives the call because its download keeps running on it.
-tokio = { version = "1", features = ["rt-multi-thread", "process", "io-util", "time", "macros"] }
+tokio = { version = "1", features = ["rt-multi-thread", "time"] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
 log = "0.4.29"
@@ -52,7 +62,7 @@ reqwest = { version = "0.13", default-features = false, features = [
     "rustls",
 ] }
 # APIs only: upstream plus owned/empty-playlist parser corrections.
-rustypipe = { git = "https://github.com/calops/rustypipe", rev = "8a239ea336c3da826703c0a8b71cafd9377e6520", default-features = false, features = [
+rustypipe = { git = "https://github.com/calops/rustypipe", rev = "8a239ea336c3da826703c0a8b71cafd9377e6520", optional = true, default-features = false, features = [
     "rustls-tls-webpki-roots",
     "userdata",
 ] }
@@ -66,7 +76,7 @@ rusqlite = { version = "0.31", features = ["bundled"] }
 # through the audio-stack facade).
 walkdir = "2"
 # Private temporary cookie exports for the optional extractor, also used by tests.
-tempfile = "3"
+tempfile = { version = "3", optional = true }
 
 # The whole audio path — engine, web radio, and audio-file metadata parsing —
 # lives in this standalone MIT crate (https://github.com/obazin/audio-stack-rs).
@@ -97,6 +107,7 @@ windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_
 # Property tests: invariants checked over generated inputs, shrunk to the
 # smallest failing case.
 proptest = "1"
+tempfile = "3"
 
 [profile.dev.package."*"]
 opt-level = 2

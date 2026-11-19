@@ -6,8 +6,8 @@
 
 use std::collections::HashMap;
 
-const ENGLISH_CATALOG: &str = include_str!("../translations/en.json");
-const FRENCH_CATALOG: &str = include_str!("../translations/fr.json");
+const ENGLISH_CATALOG: &str = include_str!(concat!(env!("OUT_DIR"), "/en.json"));
+const FRENCH_CATALOG: &str = include_str!(concat!(env!("OUT_DIR"), "/fr.json"));
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Language {
@@ -150,6 +150,30 @@ mod tests {
     }
 
     #[test]
+    fn provider_labels_and_empty_state_wording_follow_the_build_feature() {
+        let mut translations = Translations::new(Language::English);
+        assert_eq!(
+            translations
+                .keys()
+                .any(|key| key.starts_with("youtubeMusic.")),
+            cfg!(feature = "youtube-music")
+        );
+        for language in Language::ALL {
+            translations.set_current(language);
+            for key in [
+                "library.favourites.empty.desc",
+                "library.playlists.empty.desc",
+            ] {
+                assert_eq!(
+                    translations.text(key).contains("YouTube Music"),
+                    cfg!(feature = "youtube-music"),
+                    "{language:?}: {key}"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn placeholders_are_replaced_in_the_current_language() {
         let mut translations = Translations::new(Language::English);
         assert_eq!(
@@ -283,7 +307,7 @@ mod tests {
     fn every_catalog_key_is_used_somewhere() {
         let translations = Translations::new(Language::English);
         let rust = sources(&root().join("src"), "rs").join("\n");
-        let slint = sources(&root().join("ui"), "slint").join("\n");
+        let slint = sources(&std::path::Path::new(env!("OUT_DIR")).join("ui"), "slint").join("\n");
         let stations = std::fs::read_to_string(root().join("data/stations.json"))
             .expect("the station catalog");
         // Keys built at run time from a prefix: `format!("eq.preset.{name}")`.

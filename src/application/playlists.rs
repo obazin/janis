@@ -417,6 +417,7 @@ impl Application {
                             )],
                         ),
                         PlaylistSource::Local => translations.text("playlists.delete.local"),
+                        #[cfg(feature = "youtube-music")]
                         PlaylistSource::YouTubeMusic => return,
                     };
                     (
@@ -917,6 +918,7 @@ fn playlist_provider_label(playlist: &Playlist, translations: &Translations) -> 
     match playlist.source {
         PlaylistSource::Local => translations.text("playlists.source.local"),
         PlaylistSource::Jellyfin => translations.text("jellyfin.title"),
+        #[cfg(feature = "youtube-music")]
         PlaylistSource::YouTubeMusic => translations.translate(
             "playlists.source.readOnly",
             &[("provider", translations.text("youtubeMusic.title"))],

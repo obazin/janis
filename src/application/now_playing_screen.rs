@@ -393,7 +393,9 @@ impl Application {
     /// Advances the waveform by one frame and hands each view its trace.
     pub(super) fn draw_frame(&self) {
         let now = Instant::now();
+        #[cfg(feature = "youtube-music")]
         let effects = self.player.borrow_mut().refresh_source(now);
+        #[cfg(feature = "youtube-music")]
         self.run(effects);
         let elapsed = now.duration_since(self.last_frame.replace(now));
         let player = self.player.borrow();

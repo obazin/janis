@@ -10,6 +10,7 @@ use crate::library::Track;
 use crate::persistence::{MediaServer, PlaybackOption};
 use crate::playlists::{PlaylistChange, PlaylistKey};
 use crate::radio::Station;
+#[cfg(feature = "youtube-music")]
 /// A YouTube Music read, carried out on its worker rather than in the view.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum YouTubeMusicRequest {
@@ -25,6 +26,7 @@ pub enum Effect {
         tracks: Vec<Track>,
         index: usize,
     },
+    #[cfg(feature = "youtube-music")]
     /// Replace cached queue sources and transitions, then restore the kept
     /// track's playhead and transport state.
     ReplaceQueue {
@@ -49,6 +51,7 @@ pub enum Effect {
         track_id: i64,
         position_seconds: f64,
     },
+    #[cfg(feature = "youtube-music")]
     /// Reopen the current source at this position and desired transport state.
     RefreshTrack {
         track_id: i64,
@@ -178,12 +181,14 @@ pub enum Effect {
         favourite: bool,
         sequence: u64,
     },
+    #[cfg(feature = "youtube-music")]
     PushYouTubeMusicFavourite {
         track_id: i64,
         address: String,
         favourite: bool,
         sequence: u64,
     },
+    #[cfg(feature = "youtube-music")]
     PersistYouTubeMusicFavourite {
         track_id: i64,
         address: String,
@@ -202,18 +207,22 @@ pub enum Effect {
     },
 
     // ── YouTube Music ────────────────────────────────────────────────────────
+    #[cfg(feature = "youtube-music")]
     ImportYouTubeMusicBrowser {
         browser: crate::youtube_browser_import::Browser,
         epoch: u64,
     },
+    #[cfg(feature = "youtube-music")]
     /// Read the complete saved library before importing it, then report back
     /// through `YouTubeMusicIntegration::sync_finished` with this `epoch`.
     SyncYouTubeMusicLibrary {
         cookie_file: std::path::PathBuf,
         epoch: u64,
     },
+    #[cfg(feature = "youtube-music")]
     /// Forget this integration's tracks and persisted cookie-file path.
     RemoveYouTubeMusicLibrary,
+    #[cfg(feature = "youtube-music")]
     ReadYouTubeMusic {
         request: YouTubeMusicRequest,
         epoch: u64,

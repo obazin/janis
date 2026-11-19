@@ -148,10 +148,12 @@ where
         self.pending.get(key).map(|pending| &pending.wanted)
     }
 
+    #[cfg(feature = "youtube-music")]
     pub fn retain(&mut self, mut keep: impl FnMut(&Key) -> bool) {
         self.pending.retain(|key, _| keep(key));
     }
 
+    #[cfg(feature = "youtube-music")]
     /// Abandons queued intentions without rewinding their sequence numbers.
     pub fn take_settled(
         &mut self,

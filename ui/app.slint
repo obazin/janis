@@ -28,11 +28,16 @@ import { PlaylistManager } from "features/library/playlist_manager.slint";
 import { PlaylistGroupMenu } from "features/library/playlist_group_menu.slint";
 import { PlaylistNameDialog } from "features/library/playlist_name_dialog.slint";
 import { DeletionDialog } from "features/library/deletion_dialog.slint";
+// janis:youtube-music:begin
 import { YouTubeMusic } from "features/youtube_music/youtube_music.slint";
 import { YouTubeMusicIntegration } from "features/youtube_music/youtube_music_integration.slint";
 import { YouTubeMusicScreen } from "screens/youtube_music_screen.slint";
+// janis:youtube-music:end
 
-export { Strings, Shell, Player, Covers, Equalizer, Library, Radio, Settings, Jellyfin, YouTubeMusic, YouTubeMusicIntegration, Tokens }
+export { Strings, Shell, Player, Covers, Equalizer, Library, Radio, Settings, Jellyfin, Tokens }
+// janis:youtube-music:begin
+export { YouTubeMusic, YouTubeMusicIntegration }
+// janis:youtube-music:end
 
 export component AppWindow inherits Window {
     title: "Janis";
@@ -68,7 +73,9 @@ export component AppWindow inherits Window {
                         items: [
                             { id: "radio", label: Strings.nav-radio, icon: Icons.radio },
                             { id: "local", label: Strings.nav-local, icon: Icons.local-files },
+                            // janis:youtube-music:begin
                             { id: "youtube-music", label: Strings.youtube-music-title, icon: Icons.play }
+                            // janis:youtube-music:end
                         ]
                     }
                 ];
@@ -85,7 +92,9 @@ export component AppWindow inherits Window {
                 if Shell.screen == "library": LibraryScreen { }
                 if Shell.screen == "local": LocalFilesScreen { }
                 if Shell.screen == "radio": RadioScreen { }
+                // janis:youtube-music:begin
                 if Shell.screen == "youtube-music": YouTubeMusicScreen { }
+                // janis:youtube-music:end
                 if Shell.screen == "discover": DiscoverScreen { }
                 if Shell.screen == "settings": SettingsScreen { }
             }

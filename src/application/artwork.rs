@@ -171,6 +171,7 @@ impl Application {
             CoverList::Artists => self.library_artists.row_count(),
             CoverList::Songs => self.library_songs.row_count(),
             CoverList::Favourites => self.library_favourites.row_count(),
+            #[cfg(feature = "youtube-music")]
             CoverList::YoutubeMusic => self.youtube_music.state.borrow().visible_length(),
             CoverList::None => 0,
         }
@@ -195,6 +196,7 @@ impl Application {
                 .library_favourites
                 .row_data(place)
                 .map(|track| track.track_id),
+            #[cfg(feature = "youtube-music")]
             CoverList::YoutubeMusic => self
                 .youtube_music
                 .state
@@ -217,6 +219,7 @@ impl Application {
         let (Some(epoch), Some(track_id)) = (load, track_id) else {
             return;
         };
+        #[cfg(feature = "youtube-music")]
         if track_id < 0 {
             let address = self
                 .youtube_music
@@ -239,12 +242,15 @@ impl Application {
         }
         let database = Arc::clone(&self.database);
         let session = self.media_session();
+        #[cfg(feature = "youtube-music")]
         let youtube_session = self.youtube_music.session();
+        #[cfg(feature = "youtube-music")]
         let youtube_runtime = Arc::clone(&self.youtube_music.runtime);
         self.picture_worker.run(move || {
             let loaded = library_cover(
                 &database,
                 session.as_ref(),
+                #[cfg(feature = "youtube-music")]
                 (&youtube_session, &youtube_runtime),
                 track_id,
                 covers::HERO_SIDE,
@@ -348,11 +354,14 @@ impl Application {
         }
         let session = self.media_session();
         let epoch = self.cover_requests.borrow().epoch();
+        #[cfg(feature = "youtube-music")]
         let youtube_session = self.youtube_music.session();
+        #[cfg(feature = "youtube-music")]
         let youtube_runtime = Arc::clone(&self.youtube_music.runtime);
         for key in keys {
             let database = Arc::clone(&self.database);
             let session = session.clone();
+            #[cfg(feature = "youtube-music")]
             let youtube_address = match &key {
                 CoverKey::Track(track_id) if *track_id < 0 => Some(
                     self.youtube_music
@@ -363,9 +372,12 @@ impl Application {
                 ),
                 _ => None,
             };
+            #[cfg(feature = "youtube-music")]
             let youtube_session = youtube_session.clone();
+            #[cfg(feature = "youtube-music")]
             let youtube_runtime = Arc::clone(&youtube_runtime);
             self.thumbnail_workers.run(move || {
+                #[cfg(feature = "youtube-music")]
                 let loaded = match youtube_address {
                     Some(address) => super::youtube_music_screen::source_picture(
                         &youtube_session,
@@ -381,6 +393,8 @@ impl Application {
                         covers::THUMBNAIL_SIDE,
                     ),
                 };
+                #[cfg(not(feature = "youtube-music"))]
+                let loaded = keyed_cover(&database, session.as_ref(), &key, covers::THUMBNAIL_SIDE);
                 post(move |application| application.thumbnail_loaded(epoch, key, loaded));
             });
         }
@@ -433,20 +447,29 @@ impl Application {
 fn keyed_cover(
     database: &DbState,
     session: Option<&Session>,
-    youtube: (&crate::youtube_music::Session, &tokio::runtime::Runtime),
+    #[cfg(feature = "youtube-music")] youtube: (
+        &crate::youtube_music::Session,
+        &tokio::runtime::Runtime,
+    ),
     key: &CoverKey,
     longest_side: u32,
 ) -> Result<Option<Pixels>, String> {
     match key {
-        CoverKey::Track(track_id) => {
-            library_cover(database, session, youtube, *track_id, longest_side)
-        }
+        CoverKey::Track(track_id) => library_cover(
+            database,
+            session,
+            #[cfg(feature = "youtube-music")]
+            youtube,
+            *track_id,
+            longest_side,
+        ),
         CoverKey::ServerPicture(item) => server_picture(session, item, longest_side),
         CoverKey::PlaylistPicture(playlist_id) => {
             persistence::playlist_picture(database, *playlist_id)?
                 .map(|bytes| covers::picture_cover(bytes, longest_side))
                 .transpose()
         }
+        #[cfg(feature = "youtube-music")]
         CoverKey::Address(address) => super::youtube_music_screen::source_picture(
             youtube.0,
             youtube.1,
@@ -462,7 +485,10 @@ fn keyed_cover(
 fn library_cover(
     database: &DbState,
     session: Option<&Session>,
-    youtube: (&crate::youtube_music::Session, &tokio::runtime::Runtime),
+    #[cfg(feature = "youtube-music")] youtube: (
+        &crate::youtube_music::Session,
+        &tokio::runtime::Runtime,
+    ),
     track_id: i64,
     longest_side: u32,
 ) -> Result<Option<Pixels>, String> {
@@ -474,6 +500,7 @@ fn library_cover(
         CoverSource::Server {
             artwork_item: Some(item),
         } => server_picture(session, &item, longest_side),
+        #[cfg(feature = "youtube-music")]
         CoverSource::Address { artwork_address } => super::youtube_music_screen::source_picture(
             youtube.0,
             youtube.1,

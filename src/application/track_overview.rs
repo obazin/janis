@@ -70,11 +70,13 @@ impl Application {
         };
         let locations = self.overview_locations(&track);
         let engine = Arc::clone(&self.engine);
+        #[cfg(feature = "youtube-music")]
         let resolver = super::youtube_music_screen::PlaybackResolver {
             account_cookie_file: Arc::clone(&self.youtube_music.account_cookie_file),
             generation: Arc::clone(&self.youtube_music.generation),
             extraction_activity: Arc::clone(&self.youtube_music.extraction_activity),
         };
+        #[cfg(feature = "youtube-music")]
         let runtime = Arc::clone(&self.youtube_music.runtime);
         // A thread per read: one stuck connecting to a server, or waiting on
         // a stalled share, notices it is stale only at its next batch, and
@@ -89,10 +91,11 @@ impl Application {
                     locations,
                     &|| job.is_current(),
                     &mut |location, on_batch| {
-                        // Resolve provider sources here rather than through the
-                        // engine's blocking overview opener, which has no token.
+                        #[cfg(feature = "youtube-music")]
                         let resolved;
+                        #[cfg(feature = "youtube-music")]
                         let location = if let crate::audio::Location::Deferred(source) = location {
+                            // The blocking opener has no cancellation token.
                             resolved = crate::audio::Location::Remote(runtime.block_on(
                                 resolver.resolve_source(
                                     &source.id,

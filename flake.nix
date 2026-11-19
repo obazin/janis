@@ -188,6 +188,16 @@
               platforms = pkgs.lib.platforms.linux ++ pkgs.lib.platforms.darwin;
             };
           });
+
+          janis-all-features = janis.overrideAttrs (old: {
+            pname = "janis-all-features";
+            cargoBuildFlags = (old.cargoBuildFlags or [ ]) ++ [ "--all-features" ];
+            nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ [ pkgs.makeWrapper ];
+            postFixup = (old.postFixup or "") + ''
+              wrapProgram "$out/${if pkgs.stdenv.hostPlatform.isDarwin then "Applications/Janis.app/Contents/MacOS" else "bin"}/Janis" \
+                --prefix PATH : "${pkgs.lib.makeBinPath [ pkgs.yt-dlp ]}"
+            '';
+          });
         in
         {
           devShells.default =
@@ -212,7 +222,7 @@
 
           packages = {
             default = janis;
-            inherit janis;
+            inherit janis janis-all-features;
           };
         }
       ) workspace.lib;
@@ -225,6 +235,7 @@
       # NixOS, nix-darwin or Home Manager configuration.
       overlays.default = final: _prev: {
         janis = self.packages.${final.stdenv.hostPlatform.system}.janis;
+        janis-all-features = self.packages.${final.stdenv.hostPlatform.system}.janis-all-features;
       };
     };
 }

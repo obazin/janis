@@ -10,12 +10,12 @@ A native application written in **Rust**, with a **[Slint](https://slint.dev)** 
 - **Now Playing** — hero album art (embedded cover art, or a generated prism gradient), track/artist/composer/album metadata, live waveform with click-to-seek, transport with shuffle/repeat, volume, a queue card (up next / playlist / current album), and an artist spotlight drawn from your library.
 - **Library** — scan folders or import files; albums, artists and songs views grouped from real tags (`lofty`); favourite songs you star from any list or from Now Playing, gathered in a Favourites tab; playlists made from a right-click on any song (Add to playlist, or a new one), shown as cards, sorted into groups and given pictures of your own; search from the titlebar.
 - **Jellyfin** — sign in to your Jellyfin server in Settings and its songs join the library, playing the original files from the server through the same engine (EQ, gapless, normalization with the server's own gains, waveform), with the server's cover art; every library of the server is synced, and each can be switched off to keep its songs out of Janis; favourites and playlists stay in step with the server both ways.
-- **YouTube Music** — anonymous Music search in Sources, and a Settings integration that imports sign-in cookies directly from Firefox, Chrome, Chromium or Brave (or a cookie file) and syncs saved songs, playlists and likes into the shared Library. Stars on imported songs sync with YouTube Music likes both ways. Album artwork requests 256-pixel thumbnails and 800-pixel Now Playing covers where the provider supports them. Imported playlist contents are read-only; grouping and custom pictures remain local, and imported songs can join Janis-owned playlists alongside files. Metadata uses a pinned RustyPipe fork with owned/empty-playlist parser corrections; browser import and audio URL extraction use an optional, separately installed `yt-dlp` on `PATH`. Janis's native engine handles playback, EQ, seeking, the track overview and queue transitions. Janis does not bundle, install or update yt-dlp.
+- **YouTube Music** (opt-in `youtube-music` feature) — anonymous Music search in Sources, and a Settings integration that imports sign-in cookies directly from Firefox, Chrome, Chromium or Brave (or a cookie file) and syncs saved songs, playlists and likes into the shared Library. Stars on imported songs sync with YouTube Music likes both ways. Album artwork requests 256-pixel thumbnails and 800-pixel Now Playing covers where the provider supports them. Imported playlist contents are read-only; grouping and custom pictures remain local, and imported songs can join Janis-owned playlists alongside files. Metadata uses a pinned RustyPipe fork with owned/empty-playlist parser corrections; browser import and audio URL extraction use a separate `yt-dlp` executable on `PATH`. Janis's native engine handles playback, EQ, seeking, the track overview and queue transitions. Janis does not bundle, install or update yt-dlp; the `janis-all-features` Nix package supplies it as a runtime dependency.
 - **Discover** — shelves derived from your own library (recently added albums, artists, rediscoveries).
 - **Web Radio** — curated station list (SomaFM, FIP, Radio Paradise, KEXP, …) with country and genre filters, and favourites you star.
 - **Local Files** — drop zone (real OS drag-and-drop), scanned-library table with format badges, watched-folder management, rescan.
 - **10-band EQ** — bottom-sheet graphic equalizer with presets (Rock, Jazz, Bass Boost, …), applied live to playback, persisted across launches.
-- **Settings** — playback switches (gapless, crossfade and normalization are live in the engine and on by default; exclusive output is persisted only), output info, Jellyfin and YouTube Music integrations, language (English / Français).
+- **Settings** — playback switches (gapless, crossfade and normalization are live in the engine and on by default; exclusive output is persisted only), output info, Jellyfin integration, optional YouTube Music integration, language (English / Français).
 
 User-added stations are on the roadmap.
 
@@ -43,6 +43,8 @@ Every release on the [releases page](https://github.com/obazin/janis/releases) c
 
     In a NixOS, nix-darwin or Home Manager configuration, add `janis.url = "github:obazin/janis";` to the flake inputs and either list `inputs.janis.packages.${pkgs.system}.default` in the packages, or add `inputs.janis.overlays.default` to `nixpkgs.overlays` and use `pkgs.janis`. On macOS the package carries `Applications/Janis.app` next to the `Janis` command, which nix-darwin and Home Manager link where Spotlight finds it.
 
+    `janis` and `default` exclude YouTube Music. Use `nix run github:obazin/janis#janis-all-features` (or `nix build .#janis-all-features` in this checkout) for all optional features, including YouTube Music and its yt-dlp runtime dependency. The overlay also exposes `pkgs.janis-all-features`.
+
 ## Development
 
 Requires [Nix](https://nixos.org) + [direnv](https://direnv.net) (the dev shell pins the Rust toolchain and carries the libraries the window and the audio output need on Linux — see `flake.nix`).
@@ -52,15 +54,19 @@ direnv allow          # once — enters the dev shell automatically
 cargo run             # the app (`just run`, or plain `run`, do the same)
 ```
 
-For YouTube Music development checks, `JANIS_YOUTUBE_SEARCH=<query>` submits a catalog search and `JANIS_YOUTUBE_AUTOPLAY=1` starts its first result silently; combine these with `JANIS_SCREEN=youtube-music` and `JANIS_SNAPSHOT=<file.png>`. Playback requires a separately installed `yt-dlp` on `PATH`.
+Cargo builds have no optional features by default. Enable YouTube Music with `cargo run --features youtube-music` or build every optional feature with `cargo build --all-features`. Switching to a feature-free build hides cached YouTube Music songs and playlists without deleting their stored data or connection.
+
+With the feature enabled, `JANIS_YOUTUBE_SEARCH=<query>` submits a catalog search and `JANIS_YOUTUBE_AUTOPLAY=1` starts its first result silently; combine these with `JANIS_SCREEN=youtube-music` and `JANIS_SNAPSHOT=<file.png>`. Browser import and playback require `yt-dlp` on `PATH`.
 
 Quality gates run locally (the only workflow in CI is the release build):
 
 ```bash
-just check            # all three below
-just fmt-rust-check   # rustfmt verification
-just clippy           # cargo clippy -D warnings
-just test-rust        # cargo test
+just check                   # formatting, both feature variants, catalog builder
+just fmt-rust-check          # rustfmt verification
+just clippy                  # default-feature clippy -D warnings
+just clippy-all-features     # all-feature clippy -D warnings
+just test-rust               # default-feature tests
+just test-rust-all-features  # all-feature tests
 ```
 
 `just release-macos` (or `release-linux`, `release-windows`) builds that platform's installers into `dist/`, ad-hoc signed on macOS; it needs [cargo-packager](https://github.com/crabnebula-dev/cargo-packager), which the Nix dev shell provides on macOS (elsewhere: `cargo install cargo-packager --locked`). `just install-macos` then replaces the Janis in `/Applications` with the one just built. `just release patch` (or `minor`, `major`), in the dev shell on a clean `main`, cuts a version: it bumps `Cargo.toml`, `Cargo.lock` and `flake.nix`, writes [`CHANGELOG.md`](CHANGELOG.md) with [git-cliff](https://git-cliff.org) from the commit messages ([Conventional Commits](https://www.conventionalcommits.org)), shows the notes and asks before it commits, tags and pushes. The tag starts the `release` workflow, which checks that it matches both declared versions, builds every platform and opens a draft release holding the bundles, with that version's changelog as its notes; publishing the draft is the last step, by hand. `just release-preview minor` shows the next notes without changing anything.

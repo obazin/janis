@@ -8,6 +8,7 @@
 
 use std::collections::{HashMap, VecDeque};
 use std::hash::Hash;
+#[cfg(feature = "youtube-music")]
 use std::sync::Arc;
 
 use base64::Engine as _;
@@ -169,6 +170,7 @@ pub enum CoverKey {
     ServerPicture(String),
     /// The picture the listener chose for this playlist.
     PlaylistPicture(i64),
+    #[cfg(feature = "youtube-music")]
     /// A provider image address, never a signed media address.
     Address(Arc<str>),
 }
@@ -184,6 +186,7 @@ impl std::fmt::Debug for CoverKey {
                 .debug_tuple("PlaylistPicture")
                 .field(identifier)
                 .finish(),
+            #[cfg(feature = "youtube-music")]
             Self::Address(_) => formatter.write_str("Address { .. }"),
         }
     }
@@ -202,12 +205,15 @@ impl CoverKeys {
             shared_pictures: tracks
                 .iter()
                 .filter_map(|track| {
-                    let key = if track.source == crate::library::TrackSource::YouTubeMusic {
-                        CoverKey::Address(Arc::from(track.artwork_address.as_deref()?))
-                    } else if track.server_id.is_some() {
-                        CoverKey::ServerPicture(track.artwork_item.clone()?)
-                    } else {
-                        return None;
+                    let key = match track.source {
+                        #[cfg(feature = "youtube-music")]
+                        crate::library::TrackSource::YouTubeMusic => {
+                            CoverKey::Address(Arc::from(track.artwork_address.as_deref()?))
+                        }
+                        _ if track.server_id.is_some() => {
+                            CoverKey::ServerPicture(track.artwork_item.clone()?)
+                        }
+                        _ => return None,
                     };
                     Some((track.id, key))
                 })
@@ -356,6 +362,7 @@ mod tests {
         assert_eq!(keys.key(99), CoverKey::Track(99), "an unknown track too");
     }
 
+    #[cfg(feature = "youtube-music")]
     #[test]
     fn provider_artwork_is_shared_without_using_a_server_picture() {
         let address = "https://i.ytimg.com/album.jpg";

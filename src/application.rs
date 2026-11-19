@@ -17,7 +17,9 @@ mod playlists;
 mod radio_screen;
 mod settings_screen;
 mod track_overview;
+#[cfg(feature = "youtube-music")]
 mod youtube_music_integration;
+#[cfg(feature = "youtube-music")]
 mod youtube_music_screen;
 
 use artwork::{CurrentArt, Thumbnail};
@@ -170,6 +172,7 @@ pub struct Application {
     server_worker: Worker,
     /// How this installation names itself to a media server.
     device_identifier: String,
+    #[cfg(feature = "youtube-music")]
     youtube_music: youtube_music_screen::YouTubeMusicController,
     radio_screen: RefCell<radio_screen::RadioScreen>,
     radio_countries: Rc<VecModel<user_interface::RadioChip>>,
@@ -218,8 +221,11 @@ impl Application {
         );
         let kept_server = persistence::media_server(&database)?;
         let device_identifier = persistence::device_identifier(&database)?;
+        #[cfg(feature = "youtube-music")]
         let kept_youtube_cookie_file = persistence::youtube_music_cookie_file(&database)?;
+        #[cfg(feature = "youtube-music")]
         let kept_youtube_last_sync = persistence::youtube_music_last_sync(&database)?;
+        #[cfg(feature = "youtube-music")]
         let youtube_song_count = all_tracks
             .iter()
             .filter(|track| track.source == library::TrackSource::YouTubeMusic)
@@ -309,6 +315,7 @@ impl Application {
             jellyfin_library_ids: RefCell::new(Vec::new()),
             server_worker: Worker::new("janis media server")?,
             device_identifier,
+            #[cfg(feature = "youtube-music")]
             youtube_music: youtube_music_screen::YouTubeMusicController::new(
                 kept_youtube_cookie_file.clone(),
             )?,
@@ -334,6 +341,7 @@ impl Application {
             equalizer_timer: Timer::default(),
             unsaved_equalizer: RefCell::new(None),
         });
+        #[cfg(feature = "youtube-music")]
         application.engine.set_source_resolver(Arc::new(
             youtube_music_screen::PlaybackResolver {
                 account_cookie_file: Arc::clone(&application.youtube_music.account_cookie_file),
@@ -350,12 +358,15 @@ impl Application {
         // the window opens on the songs already in the library.
         let effects = application.media_server.borrow_mut().restore(kept_server);
         application.run(effects);
-        let effects = application.youtube_music.integration.borrow_mut().restore(
-            kept_youtube_cookie_file,
-            youtube_song_count,
-            kept_youtube_last_sync,
-        );
-        application.run(effects);
+        #[cfg(feature = "youtube-music")]
+        {
+            let effects = application.youtube_music.integration.borrow_mut().restore(
+                kept_youtube_cookie_file,
+                youtube_song_count,
+                kept_youtube_last_sync,
+            );
+            application.run(effects);
+        }
         // The engine answers with its current state, as events.
         application.engine.describe();
         application.refresh_player();
@@ -368,6 +379,7 @@ impl Application {
         application.refresh_radio();
         application.refresh_settings();
         application.refresh_jellyfin();
+        #[cfg(feature = "youtube-music")]
         application.refresh_youtube_music();
         // The files that arrived without a gain are measured meanwhile.
         application.measure_loudness();
@@ -377,12 +389,14 @@ impl Application {
     /// Stops the engine and lets go of the controller. Called once the event
     /// loop has ended, while the process is still alive.
     pub fn shut_down(&self) {
+        #[cfg(feature = "youtube-music")]
         self.youtube_music
             .browser_activity
             .shut_down(&self.youtube_music.sync_generation);
         self.frame_timer.stop();
         self.loudness.stop();
         self.track_overview.borrow().stop();
+        #[cfg(feature = "youtube-music")]
         self.youtube_music.extraction_activity.shut_down();
         // What was still waiting for its slider to settle is saved now.
         self.volume_timer.stop();
@@ -464,6 +478,7 @@ impl Application {
         self.connect_radio();
         self.connect_settings();
         self.connect_jellyfin();
+        #[cfg(feature = "youtube-music")]
         self.connect_youtube_music();
         self.connect_player();
         self.connect_track_overview();
@@ -520,6 +535,7 @@ impl Application {
         self.refresh_radio();
         self.refresh_settings();
         self.refresh_jellyfin();
+        #[cfg(feature = "youtube-music")]
         self.refresh_youtube_music();
         self.refresh_toasts();
     }
@@ -559,6 +575,7 @@ impl Application {
     }
 
     fn on_engine_event(&self, event: EngineEvent) {
+        #[cfg(feature = "youtube-music")]
         let event = match event {
             EngineEvent::Error { message }
                 if message.starts_with("youtubeMusic.error.")
@@ -597,6 +614,7 @@ impl Application {
                     ),
                     index,
                 ),
+                #[cfg(feature = "youtube-music")]
                 Effect::ReplaceQueue {
                     tracks,
                     index,
@@ -626,6 +644,7 @@ impl Application {
                     track_id,
                     position_seconds,
                 } => self.engine.seek_track(track_id, position_seconds),
+                #[cfg(feature = "youtube-music")]
                 Effect::RefreshTrack {
                     track_id,
                     position_seconds,
@@ -701,6 +720,7 @@ impl Application {
                     favourite,
                     sequence,
                 } => self.push_server_favourite(server, track_id, address, favourite, sequence),
+                #[cfg(feature = "youtube-music")]
                 Effect::PushYouTubeMusicFavourite {
                     track_id,
                     address,
@@ -709,6 +729,7 @@ impl Application {
                 } => {
                     self.push_youtube_favourite(track_id, address, favourite, sequence);
                 }
+                #[cfg(feature = "youtube-music")]
                 Effect::PersistYouTubeMusicFavourite {
                     track_id,
                     address,
@@ -777,13 +798,17 @@ impl Application {
                     change,
                     sequence,
                 } => self.push_playlist_change(server, playlist, item, change, sequence),
+                #[cfg(feature = "youtube-music")]
                 Effect::ImportYouTubeMusicBrowser { browser, epoch } => {
                     self.import_youtube_browser(browser, epoch);
                 }
+                #[cfg(feature = "youtube-music")]
                 Effect::SyncYouTubeMusicLibrary { cookie_file, epoch } => {
                     self.sync_youtube_library(cookie_file, epoch);
                 }
+                #[cfg(feature = "youtube-music")]
                 Effect::RemoveYouTubeMusicLibrary => self.remove_youtube_library(),
+                #[cfg(feature = "youtube-music")]
                 Effect::ReadYouTubeMusic { request, epoch } => {
                     self.read_youtube_music(request, epoch)
                 }

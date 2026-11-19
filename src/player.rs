@@ -10,8 +10,11 @@
 //! Every user action updates the mirror at once — the click is visible before
 //! the engine confirms it — and returns the [`Effect`]s that make it real.
 
+#[cfg(feature = "youtube-music")]
 use std::collections::HashMap;
-use std::time::{Instant, SystemTime};
+use std::time::Instant;
+#[cfg(feature = "youtube-music")]
+use std::time::SystemTime;
 
 use crate::audio::{EngineEvent, Mode};
 use crate::effects::Effect;
@@ -36,6 +39,7 @@ pub struct ListsBasis {
 
 pub struct Player {
     queue: Vec<Track>,
+    #[cfg(feature = "youtube-music")]
     source_expiries: HashMap<String, SystemTime>,
     index: usize,
     playing: bool,
@@ -68,6 +72,7 @@ impl Player {
     pub fn new(now: Instant) -> Self {
         Self {
             queue: Vec::new(),
+            #[cfg(feature = "youtube-music")]
             source_expiries: HashMap::new(),
             index: 0,
             playing: false,
@@ -153,6 +158,7 @@ impl Player {
         }
     }
 
+    #[cfg(feature = "youtube-music")]
     /// Records a source deadline only while its track still belongs to this queue.
     /// Resolutions for upcoming tracks remain available when playback advances.
     pub fn source_resolved(&mut self, path: &str, expires_at: SystemTime) {
@@ -169,11 +175,13 @@ impl Player {
         }
     }
 
+    #[cfg(feature = "youtube-music")]
     pub fn current_source_expiry(&self) -> Option<SystemTime> {
         self.current()
             .and_then(|track| self.source_expiries.get(&track.path).copied())
     }
 
+    #[cfg(feature = "youtube-music")]
     /// Reopens an expired playing source without moving the playhead.
     /// Taking its deadline prevents another request before resolution finishes.
     pub fn refresh_source(&mut self, now: Instant) -> Vec<Effect> {
@@ -270,6 +278,7 @@ impl Player {
                 self.shuffle = shuffle;
                 self.repeat = repeat;
                 self.playing = playing;
+                #[cfg(feature = "youtube-music")]
                 if mode != Mode::Local {
                     self.source_expiries.clear();
                 }
@@ -382,6 +391,7 @@ impl Player {
         self.connection_epoch += 1;
         self.index = index.min(tracks.len() - 1);
         self.queue = tracks;
+        #[cfg(feature = "youtube-music")]
         self.source_expiries.clear();
         self.replay_on_resume = false;
         self.mode = Mode::Local;
@@ -399,6 +409,7 @@ impl Player {
         effects
     }
 
+    #[cfg(feature = "youtube-music")]
     /// Removes every account-owned YouTube source, including upcoming entries.
     /// Reloading the kept queue invalidates the engine's cached opens and fades.
     /// Anonymous catalog sources and unrelated playback keep their identity.
@@ -483,6 +494,7 @@ impl Player {
             });
         }
         let mut effects = self.clear_stream_info();
+        #[cfg(feature = "youtube-music")]
         self.source_expiries.clear();
         self.replay_on_resume = false;
         self.station = Some(station.clone());
@@ -550,6 +562,7 @@ impl Player {
         }
         self.playing = !self.playing;
         self.position_at = now;
+        #[cfg(feature = "youtube-music")]
         if self.playing && self.take_expired_source() && !replay {
             return vec![Effect::RefreshTrack {
                 track_id: self
@@ -590,6 +603,7 @@ impl Player {
         self.replay_on_resume = false;
         self.position_seconds = fraction.clamp(0.0, 1.0) * self.duration_seconds;
         self.position_at = now;
+        #[cfg(feature = "youtube-music")]
         if self.take_expired_source() {
             return vec![Effect::RefreshTrack {
                 track_id,
@@ -624,6 +638,7 @@ impl Player {
         vec![Effect::SetRepeat(self.repeat)]
     }
 
+    #[cfg(feature = "youtube-music")]
     fn take_expired_source(&mut self) -> bool {
         if self
             .current_source_expiry()
@@ -714,6 +729,7 @@ mod tests {
         track(id, "t").duration(seconds)
     }
 
+    #[cfg(feature = "youtube-music")]
     fn youtube_track(identifier: i64) -> Track {
         let mut song = timed_track(identifier, 100.0);
         song.source = crate::library::TrackSource::YouTubeMusic;
@@ -721,6 +737,7 @@ mod tests {
         song
     }
 
+    #[cfg(feature = "youtube-music")]
     #[test]
     fn disconnecting_removes_account_successors_and_keeps_unrelated_playback_position() {
         let now = Instant::now();
@@ -756,6 +773,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "youtube-music")]
     #[test]
     fn disconnecting_a_current_account_song_leaves_unrelated_successors_paused() {
         let now = Instant::now();
@@ -780,6 +798,7 @@ mod tests {
         assert!(!player.playing());
     }
 
+    #[cfg(feature = "youtube-music")]
     #[test]
     fn disconnecting_an_account_only_queue_clears_every_engine_entry() {
         let now = Instant::now();
@@ -800,6 +819,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "youtube-music")]
     #[test]
     fn disconnecting_keeps_anonymous_playback_and_a_radio_stream_untouched() {
         let now = Instant::now();
@@ -820,6 +840,7 @@ mod tests {
         assert_eq!(player.queue().len(), 1);
     }
 
+    #[cfg(feature = "youtube-music")]
     #[test]
     fn pruning_account_sources_retires_a_station_claim_replaced_with_the_local_queue() {
         let now = Instant::now();
@@ -1528,6 +1549,7 @@ mod tests {
         assert_eq!(player.jump_to(3), [Effect::JumpTo(3)]);
     }
 
+    #[cfg(feature = "youtube-music")]
     #[test]
     fn source_deadlines_are_recorded_only_for_tracks_in_the_active_queue() {
         let now = Instant::now();
@@ -1546,6 +1568,7 @@ mod tests {
         assert!(player.refresh_source(now).is_empty());
     }
 
+    #[cfg(feature = "youtube-music")]
     #[test]
     fn a_preloaded_source_deadline_survives_advancing_to_its_track() {
         let now = Instant::now();
@@ -1563,6 +1586,7 @@ mod tests {
         assert!(player.refresh_source(now).is_empty());
     }
 
+    #[cfg(feature = "youtube-music")]
     #[test]
     fn replacing_the_queue_discards_current_and_preloaded_source_deadlines() {
         let now = Instant::now();
@@ -1580,6 +1604,7 @@ mod tests {
         assert!(player.refresh_source(now).is_empty());
     }
 
+    #[cfg(feature = "youtube-music")]
     #[test]
     fn starting_a_station_discards_source_deadlines_and_ignores_late_resolutions() {
         let now = Instant::now();
@@ -1595,6 +1620,7 @@ mod tests {
         assert!(player.refresh_source(now).is_empty());
     }
 
+    #[cfg(feature = "youtube-music")]
     #[test]
     fn idle_and_radio_engine_states_discard_source_deadlines() {
         for mode in [Mode::Idle, Mode::Radio] {
@@ -1612,6 +1638,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "youtube-music")]
     #[test]
     fn an_expired_playing_source_reopens_once_at_the_interpolated_position() {
         let now = Instant::now();
@@ -1642,6 +1669,7 @@ mod tests {
         assert!(player.refresh_source(later).is_empty());
     }
 
+    #[cfg(feature = "youtube-music")]
     #[test]
     fn refreshing_clamps_to_a_known_track_end_but_preserves_an_unknown_length_position() {
         for (duration_seconds, expected_position) in [(22.0, 22.0), (0.0, 25.0)] {
@@ -1661,6 +1689,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "youtube-music")]
     #[test]
     fn an_expired_paused_source_waits_for_resume_and_keeps_its_position() {
         let now = Instant::now();
@@ -1686,6 +1715,7 @@ mod tests {
         assert!(player.refresh_source(later).is_empty());
     }
 
+    #[cfg(feature = "youtube-music")]
     #[test]
     fn an_engine_finished_queue_replays_instead_of_refreshing_its_expired_end_position() {
         let now = Instant::now();
@@ -1700,6 +1730,7 @@ mod tests {
         assert_eq!(player.position_seconds(), 0.0);
     }
 
+    #[cfg(feature = "youtube-music")]
     #[test]
     fn pausing_an_expired_source_still_uses_the_ordinary_toggle() {
         let now = Instant::now();
@@ -1712,6 +1743,7 @@ mod tests {
         assert_eq!(player.current_source_expiry(), Some(SystemTime::UNIX_EPOCH));
     }
 
+    #[cfg(feature = "youtube-music")]
     #[test]
     fn seeking_an_expired_source_reopens_at_the_target_with_the_same_transport_state() {
         for playing_after_seek in [false, true] {
@@ -1738,6 +1770,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "youtube-music")]
     #[test]
     fn an_unexpired_source_uses_the_ordinary_seek_pause_and_resume_commands() {
         let now = Instant::now();

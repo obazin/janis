@@ -630,6 +630,7 @@ impl Application {
         *self.cover_keys.borrow_mut() = covers::CoverKeys::new(&snapshot.tracks);
         *self.all_tracks.borrow_mut() = snapshot.tracks;
         *self.folders.borrow_mut() = snapshot.folders;
+        #[cfg(feature = "youtube-music")]
         self.favourite_tracks
             .borrow_mut()
             .retain_youtube_tracks(&self.all_tracks.borrow());

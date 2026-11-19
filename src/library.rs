@@ -25,6 +25,7 @@ use crate::persistence::DbState;
 pub enum TrackSource {
     File,
     Jellyfin,
+    #[cfg(feature = "youtube-music")]
     YouTubeMusic,
 }
 
@@ -33,6 +34,7 @@ impl TrackSource {
         match self {
             Self::File => "file",
             Self::Jellyfin => "jellyfin",
+            #[cfg(feature = "youtube-music")]
             Self::YouTubeMusic => "youtube-music",
         }
     }
@@ -43,6 +45,7 @@ impl rusqlite::types::FromSql for TrackSource {
         match value.as_str()? {
             "file" => Ok(Self::File),
             "jellyfin" => Ok(Self::Jellyfin),
+            #[cfg(feature = "youtube-music")]
             "youtube-music" => Ok(Self::YouTubeMusic),
             source => Err(rusqlite::types::FromSqlError::Other(
                 format!("unknown track source: {source}").into(),
@@ -119,6 +122,7 @@ enum Origin<'a> {
         server_id: i64,
         artwork_item: Option<&'a str>,
     },
+    #[cfg(feature = "youtube-music")]
     YouTubeMusic {
         artwork_address: Option<&'a str>,
     },
@@ -140,7 +144,7 @@ fn upsert_track(
     meta: &Metadata,
 ) -> Result<Upserted, String> {
     let (source, folder_id, server_id, artwork_item, artwork_address) = match origin {
-        Origin::File { folder_id } => (TrackSource::File, folder_id, None, None, None),
+        Origin::File { folder_id } => (TrackSource::File, folder_id, None, None, None::<&str>),
         Origin::Server {
             server_id,
             artwork_item,
@@ -151,6 +155,7 @@ fn upsert_track(
             artwork_item,
             None,
         ),
+        #[cfg(feature = "youtube-music")]
         Origin::YouTubeMusic { artwork_address } => {
             (TrackSource::YouTubeMusic, None, None, None, artwork_address)
         }
@@ -448,6 +453,7 @@ impl LibrarySnapshot {
     }
 }
 
+#[cfg(feature = "youtube-music")]
 /// The only library state changed by an acknowledged YouTube Music like.
 #[derive(Debug)]
 pub struct YouTubeFavouriteSnapshot {
@@ -456,6 +462,7 @@ pub struct YouTubeFavouriteSnapshot {
     pub memberships: Vec<(i64, Vec<i64>)>,
 }
 
+#[cfg(feature = "youtube-music")]
 impl YouTubeFavouriteSnapshot {
     pub fn read(database: &DbState) -> Result<Self, String> {
         let connection = database.lock();
@@ -524,6 +531,10 @@ pub(crate) fn list_tracks_in(conn: &rusqlite::Connection) -> Result<Vec<Track>, 
             Ok(())
         })
         .map_err(|error| format!("read the songs' libraries: {error}"))?;
+    #[cfg(feature = "youtube-music")]
+    let include_provider_tracks = true;
+    #[cfg(not(feature = "youtube-music"))]
+    let include_provider_tracks = false;
     let mut stmt = conn
         .prepare(
             "SELECT id, folder_id, path, title, artist, album, composer, duration_secs,
@@ -533,11 +544,11 @@ pub(crate) fn list_tracks_in(conn: &rusqlite::Connection) -> Result<Vec<Track>, 
                     rg_track_gain_db, rg_track_peak, loudness_lufs, loudness_peak,
                     server_id, artwork_item, rg_album_gain_db, rg_album_peak,
                     source, artwork_address
-             FROM tracks ORDER BY added_at DESC, id DESC",
+             FROM tracks WHERE (?1 OR source != 'youtube-music') ORDER BY added_at DESC, id DESC",
         )
         .map_err(|e| format!("prepare list_tracks: {}", e))?;
     let tracks = stmt
-        .query_map([], |row| {
+        .query_map([include_provider_tracks], |row| {
             Ok(Track {
                 id: row.get(0)?,
                 source: row.get(29)?,
@@ -1112,6 +1123,7 @@ fn set_track_libraries(
     Ok(())
 }
 
+#[cfg(feature = "youtube-music")]
 /// One saved YouTube Music song, with a stable video identifier and cover.
 #[derive(Clone, Debug)]
 pub struct YouTubeMusicTrack {
@@ -1120,6 +1132,7 @@ pub struct YouTubeMusicTrack {
     pub artwork_address: Option<String>,
 }
 
+#[cfg(feature = "youtube-music")]
 /// A complete account library, including songs only present in playlists.
 #[derive(Clone, Debug, Default)]
 pub struct YouTubeMusicLibrary {
@@ -1129,6 +1142,7 @@ pub struct YouTubeMusicLibrary {
     pub liked_track_identifiers: Vec<String>,
 }
 
+#[cfg(feature = "youtube-music")]
 /// One saved playlist, with the available songs in their provider order.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct YouTubeMusicPlaylist {
@@ -1137,6 +1151,7 @@ pub struct YouTubeMusicPlaylist {
     pub track_identifiers: Vec<String>,
 }
 
+#[cfg(feature = "youtube-music")]
 /// Imports a complete account listing. Every network page, including liked songs
 /// and playlist contents, must be read before calling: absent songs, playlists
 /// and likes are removed from this source only. Validation precedes all writes;
@@ -1286,6 +1301,7 @@ pub fn sync_youtube_music_library(
     Ok(report)
 }
 
+#[cfg(feature = "youtube-music")]
 /// Acknowledges a remote like only while the persistent row still names this song.
 /// The source and stable address guard SQLite's reuse of removed row identifiers.
 /// The imported Liked Music playlist follows the acknowledged membership too,
@@ -1340,6 +1356,7 @@ pub fn set_youtube_music_favourite(
     Ok(true)
 }
 
+#[cfg(feature = "youtube-music")]
 fn sync_youtube_music_favourites(
     database: &DbState,
     identifiers: &[String],
@@ -1419,6 +1436,7 @@ fn sync_youtube_music_favourites(
     Ok(())
 }
 
+#[cfg(feature = "youtube-music")]
 /// Writes imported playlists in bounded bursts, preserving Janis-local
 /// customization while replacing provider-owned names and membership.
 fn sync_youtube_music_playlists(
@@ -1509,11 +1527,13 @@ fn sync_youtube_music_playlists(
     Ok(kept)
 }
 
+#[cfg(feature = "youtube-music")]
 enum YouTubeMusicPlaylistWrite<'listing> {
     Keep(&'listing YouTubeMusicPlaylist),
     Entry(&'listing str),
 }
 
+#[cfg(feature = "youtube-music")]
 /// Removes this source's songs, playlists, stars and connection, not other music.
 pub fn remove_youtube_music_tracks(database: &DbState) -> Result<(), String> {
     let connection = database.lock_for_library_change();
@@ -1538,6 +1558,7 @@ pub fn remove_youtube_music_tracks(database: &DbState) -> Result<(), String> {
         .map_err(|error| format!("YouTube Music removal commit: {error}"))
 }
 
+#[cfg(feature = "youtube-music")]
 pub fn count_youtube_music_tracks(database: &DbState) -> Result<usize, String> {
     database
         .lock()
@@ -1556,6 +1577,7 @@ pub enum CoverSource {
     File,
     /// The server's picture of this item; `None` when the server has none.
     Server { artwork_item: Option<String> },
+    #[cfg(feature = "youtube-music")]
     /// A stable remote picture address; `None` when the provider has none.
     Address { artwork_address: Option<String> },
 }
@@ -1564,16 +1586,22 @@ pub enum CoverSource {
 /// lookup then finds nothing.
 pub fn cover_source(database: &DbState, track_id: i64) -> CoverSource {
     let connection = database.lock();
+    #[cfg(feature = "youtube-music")]
+    let include_provider_tracks = true;
+    #[cfg(not(feature = "youtube-music"))]
+    let include_provider_tracks = false;
     connection
         .query_row(
-            "SELECT source, artwork_item, artwork_address FROM tracks WHERE id = ?1",
-            [track_id],
+            "SELECT source, artwork_item, artwork_address FROM tracks
+             WHERE id = ?1 AND (?2 OR source != 'youtube-music')",
+            rusqlite::params![track_id, include_provider_tracks],
             |row| {
                 Ok(match row.get::<_, TrackSource>(0)? {
                     TrackSource::File => CoverSource::File,
                     TrackSource::Jellyfin => CoverSource::Server {
                         artwork_item: row.get(1)?,
                     },
+                    #[cfg(feature = "youtube-music")]
                     TrackSource::YouTubeMusic => CoverSource::Address {
                         artwork_address: row.get(2)?,
                     },
@@ -3282,6 +3310,7 @@ mod tests {
         assert_eq!((report.added, report.skipped), (1, 1));
     }
 
+    #[cfg(feature = "youtube-music")]
     fn youtube_music_song(identifier: &str, title: &str) -> YouTubeMusicTrack {
         let mut metadata = server_song("unused", title).metadata;
         metadata.format = "AAC".to_owned();
@@ -3296,6 +3325,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "youtube-music")]
     fn youtube_music_playlist(
         identifier: &str,
         name: &str,
@@ -3311,6 +3341,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "youtube-music")]
     #[test]
     fn youtube_music_playlists_keep_identity_order_and_local_customization_without_touching_other_sources(
     ) {
@@ -3486,6 +3517,7 @@ mod tests {
         assert_eq!(list_tracks(&database).expect("other sources").len(), 2);
     }
 
+    #[cfg(feature = "youtube-music")]
     #[test]
     fn malformed_youtube_music_listings_are_rejected_before_any_write_or_pruning() {
         let (_directory, database) = fresh_database();
@@ -3589,6 +3621,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "youtube-music")]
     #[test]
     fn youtube_music_playlist_order_spans_write_bursts_without_duplicates_or_gaps() {
         let (_directory, database) = fresh_database();
@@ -3645,6 +3678,7 @@ mod tests {
         assert_eq!(positions, (0..=PLAYLIST_BURST as i64).collect::<Vec<_>>());
     }
 
+    #[cfg(feature = "youtube-music")]
     #[test]
     fn youtube_music_likes_keep_provider_order_across_bursts_and_retained_dates_on_resync() {
         let (_directory, database) = fresh_database();
@@ -3743,6 +3777,7 @@ mod tests {
         assert_eq!(count_youtube_music_tracks(&database), Ok(identifiers.len()));
     }
 
+    #[cfg(feature = "youtube-music")]
     #[test]
     fn acknowledged_youtube_music_likes_update_liked_music_without_changing_playlist_customization()
     {
@@ -3870,6 +3905,7 @@ mod tests {
         assert!(empty.favourite_track_ids.is_empty());
     }
 
+    #[cfg(feature = "youtube-music")]
     #[test]
     fn acknowledged_youtube_music_likes_guard_source_address_and_reused_rows() {
         let (_directory, database) = fresh_database();
@@ -3972,6 +4008,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "youtube-music")]
     #[test]
     fn youtube_music_sync_updates_metadata_and_preserves_retained_track_state() {
         let (directory, database) = fresh_database();
@@ -4091,6 +4128,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "youtube-music")]
     #[test]
     fn provider_sync_and_disconnect_leave_other_sources_and_their_stars_alone() {
         let (directory, database) = fresh_database();
@@ -4209,6 +4247,7 @@ mod tests {
             .is_some());
     }
 
+    #[cfg(feature = "youtube-music")]
     #[test]
     fn file_scans_pruning_covers_and_background_loudness_never_use_youtube_music_rows() {
         let (directory, database) = fresh_database();
@@ -4285,6 +4324,7 @@ mod tests {
         assert_eq!(count_youtube_music_tracks(&database), Ok(1));
     }
 
+    #[cfg(feature = "youtube-music")]
     #[test]
     fn youtube_music_pruning_connection_and_sync_time_commit_as_one_change() {
         let (_directory, database) = fresh_database();
@@ -4348,6 +4388,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "youtube-music")]
     #[cfg(target_os = "linux")]
     #[test]
     fn a_cookie_path_that_is_not_unicode_is_rejected_before_importing_songs() {

@@ -471,6 +471,7 @@ pub fn get_preferences(db: &DbState) -> Result<Preferences, String> {
     .map_err(|e| format!("read preferences: {}", e))
 }
 
+#[cfg(feature = "youtube-music")]
 /// The user-owned cookie file to read on a worker when restoring the source.
 pub fn youtube_music_cookie_file(database: &DbState) -> Result<Option<PathBuf>, String> {
     database
@@ -484,6 +485,7 @@ pub fn youtube_music_cookie_file(database: &DbState) -> Result<Option<PathBuf>, 
         .map_err(|error| format!("read YouTube Music connection: {error}"))
 }
 
+#[cfg(feature = "youtube-music")]
 /// The last complete YouTube Music library import, in Unix seconds.
 pub fn youtube_music_last_sync(database: &DbState) -> Result<Option<i64>, String> {
     database
@@ -610,9 +612,22 @@ pub fn favourite_track_ids(database: &DbState) -> Result<Vec<i64>, String> {
 pub(crate) fn favourite_track_ids_in(
     connection: &rusqlite::Connection,
 ) -> Result<Vec<i64>, String> {
+    #[cfg(feature = "youtube-music")]
+    let include_provider_tracks = true;
+    #[cfg(not(feature = "youtube-music"))]
+    let include_provider_tracks = false;
     connection
-        .prepare("SELECT track_id FROM favourite_tracks ORDER BY added_at DESC, id DESC")
-        .and_then(|mut statement| statement.query_map([], |row| row.get(0))?.collect())
+        .prepare(
+            "SELECT favourite_tracks.track_id FROM favourite_tracks
+             JOIN tracks ON tracks.id = favourite_tracks.track_id
+             WHERE (?1 OR tracks.source != 'youtube-music')
+             ORDER BY favourite_tracks.added_at DESC, favourite_tracks.id DESC",
+        )
+        .and_then(|mut statement| {
+            statement
+                .query_map([include_provider_tracks], |row| row.get(0))?
+                .collect()
+        })
         .map_err(|error| format!("read favourite songs: {error}"))
 }
 
@@ -641,6 +656,7 @@ pub fn set_favourite_track(
 pub enum PlaylistSource {
     Local,
     Jellyfin,
+    #[cfg(feature = "youtube-music")]
     YouTubeMusic,
 }
 
@@ -649,6 +665,7 @@ impl rusqlite::types::FromSql for PlaylistSource {
         match value.as_str()? {
             "local" => Ok(Self::Local),
             "jellyfin" => Ok(Self::Jellyfin),
+            #[cfg(feature = "youtube-music")]
             "youtube-music" => Ok(Self::YouTubeMusic),
             source => Err(rusqlite::types::FromSqlError::Other(
                 format!("unknown playlist source: {source}").into(),
@@ -690,15 +707,19 @@ pub fn playlists(database: &DbState) -> Result<Vec<SavedPlaylist>, String> {
 pub(crate) fn playlists_in(
     connection: &rusqlite::Connection,
 ) -> Result<Vec<SavedPlaylist>, String> {
+    #[cfg(feature = "youtube-music")]
+    let include_provider_tracks = true;
+    #[cfg(not(feature = "youtube-music"))]
+    let include_provider_tracks = false;
     let mut playlists: Vec<SavedPlaylist> = connection
         .prepare(
             "SELECT id, name, server_id, server_item, server_picture, group_id,
                     picture IS NOT NULL, source
-             FROM playlists ORDER BY created_at, id",
+             FROM playlists WHERE (?1 OR source != 'youtube-music') ORDER BY created_at, id",
         )
         .and_then(|mut statement| {
             statement
-                .query_map([], |row| {
+                .query_map([include_provider_tracks], |row| {
                     let server_id: Option<i64> = row.get(2)?;
                     let server_item: Option<String> = row.get(3)?;
                     Ok(SavedPlaylist {
@@ -717,11 +738,16 @@ pub(crate) fn playlists_in(
         .map_err(|error| format!("read the playlists: {error}"))?;
     let entries: Vec<(i64, i64)> = connection
         .prepare(
-            "SELECT playlist_id, track_id FROM playlist_entries ORDER BY playlist_id, position",
+            "SELECT playlist_entries.playlist_id, playlist_entries.track_id FROM playlist_entries
+             JOIN tracks ON tracks.id = playlist_entries.track_id
+             WHERE (?1 OR tracks.source != 'youtube-music')
+             ORDER BY playlist_entries.playlist_id, playlist_entries.position",
         )
         .and_then(|mut statement| {
             statement
-                .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+                .query_map([include_provider_tracks], |row| {
+                    Ok((row.get(0)?, row.get(1)?))
+                })?
                 .collect()
         })
         .map_err(|error| format!("read the playlists' songs: {error}"))?;
@@ -814,16 +840,21 @@ pub fn create_playlist(
 /// Puts an owned song at the end of an editable playlist, unless it is there
 /// already or no longer in the library.
 fn add_entry(connection: &Connection, playlist_id: i64, track_id: i64) -> rusqlite::Result<usize> {
+    #[cfg(feature = "youtube-music")]
+    let include_provider_tracks = true;
+    #[cfg(not(feature = "youtube-music"))]
+    let include_provider_tracks = false;
     connection.execute(
         "INSERT OR IGNORE INTO playlist_entries (playlist_id, track_id, position)
          SELECT ?1, tracks.id,
                 (SELECT COALESCE(MAX(position) + 1, 0) FROM playlist_entries WHERE playlist_id = ?1)
          FROM tracks JOIN playlists ON playlists.id = ?1
          WHERE tracks.id = ?2 AND tracks.id > 0
-           AND ((playlists.source = 'local' AND tracks.source IN ('file', 'youtube-music'))
+           AND ((playlists.source = 'local' AND
+                 (tracks.source = 'file' OR (?3 AND tracks.source = 'youtube-music')))
                 OR (playlists.source = 'jellyfin' AND tracks.source = 'jellyfin'
                     AND playlists.server_id = tracks.server_id))",
-        [playlist_id, track_id],
+        rusqlite::params![playlist_id, track_id, include_provider_tracks],
     )
 }
 
@@ -1395,6 +1426,7 @@ mod tests {
             .expect("seed three songs");
     }
 
+    #[cfg(feature = "youtube-music")]
     #[test]
     fn owned_playlists_mix_saved_sources_without_editing_provider_playlists() {
         let (_directory, database) = fresh_database();
@@ -1669,8 +1701,12 @@ mod tests {
             }
             let database = init(directory.path().to_path_buf()).expect("adopt legacy schema");
             assert_eq!(
-                youtube_music_cookie_file(&database),
-                Ok(Some(PathBuf::from("cookies.txt")))
+                database.lock().query_row(
+                    "SELECT youtube_music_cookie_file FROM user_preferences WHERE id = 1",
+                    [],
+                    |row| row.get::<_, Option<String>>(0),
+                ),
+                Ok(Some("cookies.txt".to_owned()))
             );
             assert_eq!(playlists(&database), Ok(Vec::new()));
             assert_eq!(playlist_groups(&database), Ok(Vec::new()));
@@ -1679,18 +1715,41 @@ mod tests {
                 .expect("saved");
             assert_eq!(playlists(&database).expect("playlists")[0].id, local);
             if legacy_version == 10 {
-                let tracks = crate::library::list_tracks(&database).expect("retained tracks");
-                let song = tracks
-                    .iter()
-                    .find(|song| song.id == 42)
-                    .expect("provider song");
-                assert_eq!(song.source, crate::library::TrackSource::YouTubeMusic);
+                #[cfg(feature = "youtube-music")]
+                {
+                    let tracks = crate::library::list_tracks(&database).expect("retained tracks");
+                    let song = tracks
+                        .iter()
+                        .find(|song| song.id == 42)
+                        .expect("provider song");
+                    assert_eq!(song.source, crate::library::TrackSource::YouTubeMusic);
+                    assert_eq!(favourite_track_ids(&database), Ok(vec![42]));
+                }
+                #[cfg(not(feature = "youtube-music"))]
+                {
+                    assert!(!crate::library::list_tracks(&database)
+                        .expect("visible tracks")
+                        .iter()
+                        .any(|track| track.id == 42));
+                    assert_eq!(favourite_track_ids(&database), Ok(Vec::new()));
+                }
+                let provider: (String, String, i64) = database
+                    .lock()
+                    .query_row(
+                        "SELECT source, artwork_address, youtube_music_last_sync_at
+                         FROM tracks CROSS JOIN user_preferences WHERE tracks.id = 42",
+                        [],
+                        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                    )
+                    .expect("retained provider state");
                 assert_eq!(
-                    song.artwork_address.as_deref(),
-                    Some("https://images.example/cover.jpg")
+                    provider,
+                    (
+                        "youtube-music".to_owned(),
+                        "https://images.example/cover.jpg".to_owned(),
+                        456
+                    )
                 );
-                assert_eq!(favourite_track_ids(&database), Ok(vec![42]));
-                assert_eq!(youtube_music_last_sync(&database), Ok(Some(456)));
                 let loudness: f64 = database
                     .lock()
                     .query_row(
@@ -1793,7 +1852,14 @@ mod tests {
         assert_eq!(server.added_at, 123);
         assert_eq!(favourite_track_ids(&database), Ok(vec![42]));
         assert!(!server_libraries(&database).expect("libraries")[0].shown);
-        assert_eq!(youtube_music_last_sync(&database), Ok(None));
+        assert_eq!(
+            database.lock().query_row(
+                "SELECT youtube_music_last_sync_at FROM user_preferences WHERE id = 1",
+                [],
+                |row| row.get::<_, Option<i64>>(0),
+            ),
+            Ok(None)
+        );
         let connection = database.lock();
         let state: (f64, i64) = connection
             .query_row(
@@ -1828,8 +1894,18 @@ mod tests {
             assert_eq!(favourite_track_ids(&database), Ok(Vec::new()));
             assert_eq!(playlists(&database), Ok(Vec::new()));
             assert_eq!(playlist_groups(&database), Ok(Vec::new()));
-            assert_eq!(youtube_music_cookie_file(&database), Ok(None));
-            assert_eq!(youtube_music_last_sync(&database), Ok(None));
+            assert_eq!(
+                database.lock().query_row(
+                    "SELECT youtube_music_cookie_file, youtube_music_last_sync_at
+                     FROM user_preferences WHERE id = 1",
+                    [],
+                    |row| Ok((
+                        row.get::<_, Option<String>>(0)?,
+                        row.get::<_, Option<i64>>(1)?
+                    )),
+                ),
+                Ok((None, None))
+            );
             let connection = database.lock();
             let (title, server_id): (String, Option<i64>) = connection
                 .query_row(
@@ -2108,5 +2184,82 @@ mod tests {
         let (_directory, database) = fresh_database();
         let saved = save_media_server(&database, &new).expect("saved");
         assert!(!format!("{saved:?}").contains("secret-token"));
+    }
+
+    #[cfg(not(feature = "youtube-music"))]
+    #[test]
+    fn disabled_provider_rows_stars_and_mixed_memberships_survive_reads_writes_and_restart() {
+        let (directory, database) = fresh_database();
+        seed_songs(&database);
+        database
+            .lock()
+            .execute_batch(
+                "INSERT INTO tracks (id, path, title, format, source, artwork_address)
+                 VALUES (42, 'youtube-music://abcdefghijk', 'Cached', 'AAC',
+                         'youtube-music', 'https://images.example/cover.jpg');
+                 INSERT INTO favourite_tracks (track_id, added_at) VALUES (42, 123);
+                 INSERT INTO playlists (id, name, source, provider_identifier, picture)
+                 VALUES (50, 'Imported', 'youtube-music', 'LM', X'0102'),
+                        (51, 'Mixed', 'local', NULL, NULL);
+                 INSERT INTO playlist_entries (playlist_id, track_id, position)
+                 VALUES (50, 42, 0), (51, 42, 0), (51, 1, 1);
+                 UPDATE user_preferences SET youtube_music_cookie_file = 'cookies.txt',
+                     youtube_music_last_sync_at = 456;",
+            )
+            .expect("cached provider state");
+        let assert_preserved = |database: &DbState| {
+            let snapshot =
+                crate::library::LibrarySnapshot::read(database).expect("visible library");
+            assert_eq!(snapshot.tracks.len(), 3);
+            assert!(snapshot.tracks.iter().all(|track| track.id != 42));
+            assert!(snapshot.favourite_track_ids.is_empty());
+            assert_eq!(snapshot.playlists.len(), 1);
+            assert_eq!(snapshot.playlists[0].id, 51);
+            assert_eq!(snapshot.playlists[0].track_ids, [1, 2]);
+            let connection = database.lock();
+            let retained: (String, i64, i64, String, i64, String, Vec<u8>) = connection
+                .query_row(
+                    "SELECT tracks.source, favourite_tracks.added_at,
+                            (SELECT COUNT(*) FROM playlist_entries WHERE track_id = 42),
+                            youtube_music_cookie_file, youtube_music_last_sync_at,
+                            playlists.name, playlists.picture
+                     FROM tracks JOIN favourite_tracks ON track_id = tracks.id
+                     CROSS JOIN user_preferences CROSS JOIN playlists
+                     WHERE tracks.id = 42 AND playlists.id = 50",
+                    [],
+                    |row| {
+                        Ok((
+                            row.get(0)?,
+                            row.get(1)?,
+                            row.get(2)?,
+                            row.get(3)?,
+                            row.get(4)?,
+                            row.get(5)?,
+                            row.get(6)?,
+                        ))
+                    },
+                )
+                .expect("provider rows remain stored");
+            assert_eq!(
+                retained,
+                (
+                    "youtube-music".to_owned(),
+                    123,
+                    2,
+                    "cookies.txt".to_owned(),
+                    456,
+                    "Imported".to_owned(),
+                    vec![1, 2],
+                )
+            );
+        };
+        set_playlist_entry(&database, 51, 2, true).expect("add a visible file");
+        rename_playlist(&database, 51, "Renamed").expect("rename mixed playlist");
+        set_volume(&database, 0.42).expect("save a preference");
+        assert_preserved(&database);
+        drop(database);
+        let reopened =
+            init(directory.path().to_path_buf()).expect("reopen disabled build database");
+        assert_preserved(&reopened);
     }
 }

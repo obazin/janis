@@ -17,13 +17,18 @@
 //! server before a push reached it, takes the star the listener gave over
 //! what it read.
 
-use std::collections::{HashMap, HashSet};
+#[cfg(feature = "youtube-music")]
+use std::collections::HashMap;
+use std::collections::HashSet;
 
 use crate::effects::Effect;
 use crate::jellyfin::Failure;
-use crate::library::{Track, TrackSource};
+use crate::library::Track;
+#[cfg(feature = "youtube-music")]
+use crate::library::TrackSource;
 use crate::persistence::MediaServer;
 use crate::server_pushes::{PendingPushes, Settled};
+#[cfg(feature = "youtube-music")]
 use crate::youtube_music;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -33,11 +38,14 @@ pub struct FavouriteTracks {
     members: HashSet<i64>,
     /// The songs whose stars are on their way to a server, by track id.
     pending: PendingPushes<i64, bool>,
+    #[cfg(feature = "youtube-music")]
     youtube_pending: PendingPushes<i64, bool>,
+    #[cfg(feature = "youtube-music")]
     youtube_identities: HashMap<i64, (String, u64)>,
 }
 
 impl FavouriteTracks {
+    #[cfg(feature = "youtube-music")]
     /// Pruned or reused rows cannot inherit an old account's pending star.
     pub fn retain_youtube_tracks(&mut self, tracks: &[Track]) {
         self.youtube_identities.retain(|track_id, (address, _)| {
@@ -51,6 +59,7 @@ impl FavouriteTracks {
             .retain(|track_id| self.youtube_identities.contains_key(track_id));
     }
 
+    #[cfg(feature = "youtube-music")]
     pub fn forget_youtube_track(&mut self, track_id: i64, address: &str) {
         if self
             .youtube_identities
@@ -70,24 +79,27 @@ impl FavouriteTracks {
         let previous = std::mem::replace(&mut self.track_ids, track_ids);
         self.members.clear();
         self.members.extend(self.track_ids.iter().copied());
-        if self.pending.wanted().next().is_none() && self.youtube_pending.wanted().next().is_none()
-        {
+        let has_pending = self.pending.wanted().next().is_some();
+        #[cfg(feature = "youtube-music")]
+        let has_pending = has_pending || self.youtube_pending.wanted().next().is_some();
+        if !has_pending {
             return;
         }
         for track_id in previous.into_iter().rev() {
-            let wanted = self
-                .pending
-                .wanted_for(&track_id)
-                .or_else(|| self.youtube_pending.wanted_for(&track_id))
-                .copied();
+            let wanted = self.pending.wanted_for(&track_id);
+            #[cfg(feature = "youtube-music")]
+            let wanted = wanted.or_else(|| self.youtube_pending.wanted_for(&track_id));
+            let wanted = wanted.copied();
             if wanted == Some(true) {
                 self.set(track_id, false, 0);
                 self.set(track_id, true, 0);
             }
         }
         self.members.retain(|track_id| {
-            self.pending.wanted_for(track_id) != Some(&false)
-                && self.youtube_pending.wanted_for(track_id) != Some(&false)
+            let keep = self.pending.wanted_for(track_id) != Some(&false);
+            #[cfg(feature = "youtube-music")]
+            let keep = keep && self.youtube_pending.wanted_for(track_id) != Some(&false);
+            keep
         });
         self.track_ids
             .retain(|track_id| self.members.contains(track_id));
@@ -112,6 +124,7 @@ impl FavouriteTracks {
         let favourite = !was_favourite;
         let place = self.place_of(track.id);
         self.set(track.id, favourite, 0);
+        #[cfg(feature = "youtube-music")]
         if track.source == TrackSource::YouTubeMusic {
             let sequence = self
                 .youtube_pending
@@ -176,6 +189,7 @@ impl FavouriteTracks {
         )
     }
 
+    #[cfg(feature = "youtube-music")]
     pub fn youtube_push_finished(
         &mut self,
         track_id: i64,
@@ -214,6 +228,7 @@ impl FavouriteTracks {
         )
     }
 
+    #[cfg(feature = "youtube-music")]
     /// A changed connection cannot settle the old account's intentions.
     pub fn cancel_youtube_pushes(&mut self) -> Vec<i64> {
         let mut cancelled: Vec<_> = self.youtube_pending.take_settled().collect();
@@ -295,6 +310,7 @@ mod tests {
     use super::*;
     use crate::library::test_support::track;
 
+    #[cfg(feature = "youtube-music")]
     fn youtube_song(track_id: i64) -> Track {
         let mut song = track(track_id, "Song");
         song.source = TrackSource::YouTubeMusic;
@@ -302,6 +318,7 @@ mod tests {
         song
     }
 
+    #[cfg(feature = "youtube-music")]
     fn youtube_push(favourites: &mut FavouriteTracks, track_id: i64) -> (u64, bool) {
         match favourites.toggle(&youtube_song(track_id), None).as_slice() {
             [Effect::PushYouTubeMusicFavourite {
@@ -313,6 +330,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "youtube-music")]
     #[test]
     fn youtube_like_waits_for_acknowledgment_and_a_failed_unlike_restores_the_star() {
         let mut favourites = FavouriteTracks::default();
@@ -345,6 +363,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "youtube-music")]
     #[test]
     fn pending_youtube_likes_keep_click_order_over_a_stale_library_read() {
         let mut favourites = FavouriteTracks::default();
@@ -355,6 +374,7 @@ mod tests {
         assert_eq!(favourites.track_ids(), [2, 1, 9]);
     }
 
+    #[cfg(feature = "youtube-music")]
     #[test]
     fn only_the_last_youtube_push_settles_the_server_value() {
         let mut favourites = FavouriteTracks::default();
@@ -381,6 +401,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "youtube-music")]
     #[test]
     fn replacing_youtube_cancels_its_stars_without_losing_server_pushes() {
         let mut favourites = FavouriteTracks::default();
@@ -398,6 +419,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "youtube-music")]
     #[test]
     fn anonymous_youtube_rows_cannot_become_account_favorites() {
         let mut favourites = FavouriteTracks::default();
@@ -636,6 +658,7 @@ mod tests {
         assert_eq!(favourites.track_ids(), [3, 2]);
     }
 
+    #[cfg(feature = "youtube-music")]
     #[test]
     fn a_reused_file_row_cannot_inherit_a_pending_youtube_star() {
         let mut favourites = FavouriteTracks::default();
@@ -649,6 +672,7 @@ mod tests {
         assert!(!favourites.contains(41));
     }
 
+    #[cfg(feature = "youtube-music")]
     #[test]
     fn changed_provider_addresses_drop_pending_stars_but_preserve_saved_favourites() {
         let mut favourites = FavouriteTracks::default();
@@ -663,6 +687,7 @@ mod tests {
         assert_eq!(favourites.track_ids(), [41]);
     }
 
+    #[cfg(feature = "youtube-music")]
     #[test]
     fn cancelling_multiple_unlikes_restores_the_original_order() {
         for removed in [[9, 5], [5, 9]] {
@@ -676,6 +701,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "youtube-music")]
     #[test]
     fn a_pruned_song_reimported_with_the_same_identity_ignores_its_old_acknowledgement() {
         let mut favourites = FavouriteTracks::default();
@@ -696,6 +722,7 @@ mod tests {
         assert!(!favourites.contains(41));
     }
 
+    #[cfg(feature = "youtube-music")]
     #[test]
     fn a_rejected_old_address_cannot_discard_a_replacement_songs_pending_star() {
         let mut favourites = FavouriteTracks::default();
@@ -716,6 +743,7 @@ mod tests {
         assert!(!favourites.contains(41));
     }
 
+    #[cfg(feature = "youtube-music")]
     #[test]
     fn a_rejected_database_identity_cannot_replay_its_star_over_authoritative_ids() {
         let mut favourites = FavouriteTracks::default();
