@@ -29,6 +29,7 @@ pub(super) struct YouTubeMusicController {
     pub(super) sync_generation: Arc<AtomicU64>,
     pub(super) favourite_generation: Arc<AtomicU64>,
     pub(super) browser_activity: Arc<BrowserImportActivity>,
+    pub(super) extraction_activity: Arc<ExtractionActivity>,
     pub(super) runtime: Arc<tokio::runtime::Runtime>,
     pub(super) account_worker: Worker,
     worker: Worker,
@@ -52,6 +53,7 @@ impl YouTubeMusicController {
             sync_generation: Arc::new(AtomicU64::new(0)),
             favourite_generation: Arc::new(AtomicU64::new(0)),
             browser_activity: Arc::new(BrowserImportActivity::default()),
+            extraction_activity: Arc::new(ExtractionActivity::default()),
             runtime: Arc::new(runtime),
             account_worker: Worker::new("janis youtube account")?,
             worker: Worker::new("janis youtube browsing")?,
@@ -117,9 +119,152 @@ impl Drop for BrowserImportGuard {
     }
 }
 
+/// Extraction tasks outlive an abandoned resolver future only long enough to
+/// reap their child. Closing registration and joining them precedes runtime exit.
+#[derive(Default)]
+pub(super) struct ExtractionActivity {
+    state: Mutex<(bool, usize)>,
+    finished: Condvar,
+}
+
+impl ExtractionActivity {
+    fn begin(self: &Arc<Self>) -> Option<ExtractionGuard> {
+        let mut state = self
+            .state
+            .lock()
+            .expect("extraction activity lock poisoned");
+        if state.0 {
+            return None;
+        }
+        state.1 += 1;
+        Some(ExtractionGuard(Arc::clone(self)))
+    }
+
+    fn closing(&self) -> bool {
+        self.state
+            .lock()
+            .expect("extraction activity lock poisoned")
+            .0
+    }
+
+    pub(super) fn shut_down(&self) {
+        let mut state = self
+            .state
+            .lock()
+            .expect("extraction activity lock poisoned");
+        state.0 = true;
+        while state.1 != 0 {
+            state = self
+                .finished
+                .wait(state)
+                .expect("extraction activity lock poisoned");
+        }
+    }
+}
+
+struct ExtractionGuard(Arc<ExtractionActivity>);
+
+impl Drop for ExtractionGuard {
+    fn drop(&mut self) {
+        self.0
+            .state
+            .lock()
+            .expect("extraction activity lock poisoned")
+            .1 -= 1;
+        self.0.finished.notify_all();
+    }
+}
+
 pub(super) struct PlaybackResolver {
     pub(super) account_cookie_file: Arc<RwLock<Option<PathBuf>>>,
     pub(super) generation: Arc<AtomicU64>,
+    pub(super) extraction_activity: Arc<ExtractionActivity>,
+}
+
+impl PlaybackResolver {
+    pub(super) async fn resolve_source(
+        &self,
+        identifier: &str,
+        overview_epoch: Option<(Arc<AtomicU64>, u64)>,
+    ) -> Result<crate::audio::RemoteFile, String> {
+        let (video_identifier, overview, account) = [
+            ("youtube-music://", false, false),
+            ("youtube-music-overview://", true, false),
+            ("youtube-music-account://", false, true),
+            ("youtube-music-account-overview://", true, true),
+        ]
+        .into_iter()
+        .find_map(|(prefix, overview, account)| {
+            identifier
+                .strip_prefix(prefix)
+                .map(|video| (video, overview, account))
+        })
+        .ok_or_else(|| Failure::InvalidInput.translation_key().to_owned())?;
+        let (cookie_file, generation) = if account {
+            let cookie_file = self
+                .account_cookie_file
+                .read()
+                .expect("YouTube Music cookie path lock poisoned");
+            let path = cookie_file
+                .clone()
+                .ok_or_else(|| Failure::CredentialsRejected.translation_key().to_owned())?;
+            (Some(path), self.generation.load(Ordering::Acquire))
+        } else {
+            (None, 0)
+        };
+        let activity = Arc::clone(&self.extraction_activity);
+        let guard = activity
+            .begin()
+            .ok_or_else(|| Failure::Extraction.translation_key().to_owned())?;
+        let account_generation = Arc::clone(&self.generation);
+        let video = video_identifier.to_owned();
+        let (sender, receiver) = tokio::sync::oneshot::channel();
+        // The owning future may be dropped by the engine. A detached task
+        // observes its closed receiver and explicitly reaps before finishing.
+        tokio::spawn(async move {
+            let guard = Arc::new(guard);
+            let resolved = crate::youtube_extraction::resolve(
+                &video,
+                cookie_file.as_deref(),
+                || {
+                    sender.is_closed()
+                        || activity.closing()
+                        || (account && account_generation.load(Ordering::Acquire) != generation)
+                        || overview_epoch
+                            .as_ref()
+                            .is_some_and(|(shared, epoch)| shared.load(Ordering::Relaxed) != *epoch)
+                },
+                guard,
+            )
+            .await;
+            let _ = sender.send(resolved);
+        });
+        let resolved = receiver
+            .await
+            .map_err(|_| Failure::Extraction.translation_key().to_owned())?
+            .map_err(|error| error.translation_key().to_owned())?;
+        if account && self.generation.load(Ordering::Acquire) != generation {
+            return Err(Failure::CredentialsRejected.translation_key().to_owned());
+        }
+        if !overview {
+            let path = format!("youtube-music://{video_identifier}");
+            let expires_at = resolved.expires_at;
+            post(move |application| {
+                if !account
+                    || application.youtube_music.generation.load(Ordering::Acquire) == generation
+                {
+                    application
+                        .player
+                        .borrow_mut()
+                        .source_resolved(&path, expires_at);
+                }
+            });
+        }
+        match resolved.location {
+            crate::audio::Location::Remote(remote) => Ok(remote),
+            _ => Err(Failure::UnsupportedAudio.translation_key().to_owned()),
+        }
+    }
 }
 
 impl crate::audio::SourceResolver for PlaybackResolver {
@@ -127,59 +272,7 @@ impl crate::audio::SourceResolver for PlaybackResolver {
         &'a self,
         identifier: &'a str,
     ) -> Pin<Box<dyn Future<Output = Result<crate::audio::RemoteFile, String>> + Send + 'a>> {
-        Box::pin(async move {
-            let (video_identifier, overview, account) = [
-                ("youtube-music://", false, false),
-                ("youtube-music-overview://", true, false),
-                ("youtube-music-account://", false, true),
-                ("youtube-music-account-overview://", true, true),
-            ]
-            .into_iter()
-            .find_map(|(prefix, overview, account)| {
-                identifier
-                    .strip_prefix(prefix)
-                    .map(|video| (video, overview, account))
-            })
-            .ok_or_else(|| Failure::InvalidInput.translation_key().to_owned())?;
-            let (cookie_file, generation) = if account {
-                let cookie_file = self
-                    .account_cookie_file
-                    .read()
-                    .expect("YouTube Music cookie path lock poisoned");
-                let path = cookie_file
-                    .clone()
-                    .ok_or_else(|| Failure::CredentialsRejected.translation_key().to_owned())?;
-                (Some(path), self.generation.load(Ordering::Acquire))
-            } else {
-                (None, 0)
-            };
-            let resolved =
-                crate::youtube_extraction::resolve(video_identifier, cookie_file.as_deref())
-                    .await
-                    .map_err(|error| error.translation_key().to_owned())?;
-            if account && self.generation.load(Ordering::Acquire) != generation {
-                return Err(Failure::CredentialsRejected.translation_key().to_owned());
-            }
-            if !overview {
-                let path = format!("youtube-music://{video_identifier}");
-                let expires_at = resolved.expires_at;
-                post(move |application| {
-                    if !account
-                        || application.youtube_music.generation.load(Ordering::Acquire)
-                            == generation
-                    {
-                        application
-                            .player
-                            .borrow_mut()
-                            .source_resolved(&path, expires_at);
-                    }
-                });
-            }
-            match resolved.location {
-                crate::audio::Location::Remote(remote) => Ok(remote),
-                _ => Err(Failure::UnsupportedAudio.translation_key().to_owned()),
-            }
-        })
+        Box::pin(self.resolve_source(identifier, None))
     }
 }
 
@@ -298,4 +391,33 @@ pub(super) fn source_picture(
             covers::picture_cover(bytes, longest_side)
         })
         .transpose()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn shutdown_waits_for_extraction_cleanup_and_rejects_new_tasks() {
+        let activity = Arc::new(ExtractionActivity::default());
+        let guard = activity.begin().expect("active request");
+        let closing = Arc::clone(&activity);
+        let (finished, receiver) = std::sync::mpsc::channel();
+        let shutdown = std::thread::spawn(move || {
+            closing.shut_down();
+            finished.send(()).expect("completion receiver");
+        });
+        let started = std::time::Instant::now();
+        while !activity.closing() {
+            assert!(started.elapsed() < std::time::Duration::from_secs(2));
+            std::thread::yield_now();
+        }
+        assert!(activity.begin().is_none());
+        assert!(receiver.try_recv().is_err());
+        drop(guard);
+        receiver
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .expect("cleanup unblocks shutdown");
+        shutdown.join().expect("shutdown thread");
+    }
 }

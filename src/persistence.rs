@@ -819,8 +819,8 @@ fn add_entry(connection: &Connection, playlist_id: i64, track_id: i64) -> rusqli
          SELECT ?1, tracks.id,
                 (SELECT COALESCE(MAX(position) + 1, 0) FROM playlist_entries WHERE playlist_id = ?1)
          FROM tracks JOIN playlists ON playlists.id = ?1
-         WHERE tracks.id = ?2
-           AND ((playlists.source = 'local' AND tracks.source = 'file')
+         WHERE tracks.id = ?2 AND tracks.id > 0
+           AND ((playlists.source = 'local' AND tracks.source IN ('file', 'youtube-music'))
                 OR (playlists.source = 'jellyfin' AND tracks.source = 'jellyfin'
                     AND playlists.server_id = tracks.server_id))",
         [playlist_id, track_id],
@@ -1393,6 +1393,75 @@ mod tests {
                      (3, '/c.flac', 'C', 'FLAC');",
             )
             .expect("seed three songs");
+    }
+
+    #[test]
+    fn owned_playlists_mix_saved_sources_without_editing_provider_playlists() {
+        let (_directory, database) = fresh_database();
+        seed_songs(&database);
+        database
+            .lock()
+            .execute_batch(
+                "INSERT INTO media_servers
+                     (id, address, server_identifier, user_identifier, user_name, access_token)
+                 VALUES (7, 'http://server', 'server', 'user', 'Listener', 'token'),
+                        (8, 'http://other', 'other', 'user', 'Listener', 'token');
+                 INSERT INTO tracks (id, path, title, format, source, server_id) VALUES
+                     (4, 'youtube-music://saved', 'Saved', 'AAC', 'youtube-music', NULL),
+                     (-1, 'youtube-music://anonymous', 'Anonymous', 'AAC', 'youtube-music', NULL),
+                     (5, 'jellyfin://server/song', 'Server', 'FLAC', 'jellyfin', 7),
+                     (6, 'jellyfin://other/song', 'Other', 'FLAC', 'jellyfin', 8);
+                 INSERT INTO playlists (id, name, source) VALUES (50, 'Imported', 'youtube-music');
+                 INSERT INTO playlist_entries (playlist_id, track_id, position) VALUES (50, 4, 0);",
+            )
+            .expect("seed provider songs and imported playlist");
+        let mixed = create_playlist(&database, "Mixed", None, &[4, 1, -1, 5])
+            .expect("create mixed playlist")
+            .expect("saved playlist");
+        set_playlist_entry(&database, mixed, 2, true).expect("add file");
+        set_playlist_entry(&database, mixed, 4, true).expect("deduplicate saved song");
+        set_playlist_entry(&database, mixed, -1, true).expect("reject anonymous song");
+        set_playlist_entry(&database, mixed, 6, true).expect("reject server song");
+        let server = create_playlist(&database, "Server", Some((7, "playlist")), &[5, 6, 4, 1])
+            .expect("create server playlist")
+            .expect("saved server playlist");
+        set_playlist_entry(&database, 50, 1, true).expect("reject imported addition");
+        set_playlist_entry(&database, 50, 4, false).expect("reject imported removal");
+        rename_playlist(&database, 50, "Changed").expect("reject imported rename");
+        remove_playlist(&database, 50).expect("reject imported deletion");
+        let saved = playlists(&database).expect("read playlists");
+        assert_eq!(
+            saved
+                .iter()
+                .find(|playlist| playlist.id == mixed)
+                .expect("mixed")
+                .track_ids,
+            [4, 1, 2]
+        );
+        assert_eq!(
+            saved
+                .iter()
+                .find(|playlist| playlist.id == server)
+                .expect("server")
+                .track_ids,
+            [5]
+        );
+        let imported = saved
+            .iter()
+            .find(|playlist| playlist.id == 50)
+            .expect("imported");
+        assert_eq!(imported.name, "Imported");
+        assert_eq!(imported.track_ids, [4]);
+        set_playlist_entry(&database, mixed, 4, false).expect("remove saved song");
+        assert_eq!(
+            playlists(&database)
+                .expect("read playlists")
+                .iter()
+                .find(|playlist| playlist.id == mixed)
+                .expect("mixed")
+                .track_ids,
+            [1, 2]
+        );
     }
 
     #[test]

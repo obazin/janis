@@ -148,6 +148,10 @@ where
         self.pending.get(key).map(|pending| &pending.wanted)
     }
 
+    pub fn retain(&mut self, mut keep: impl FnMut(&Key) -> bool) {
+        self.pending.retain(|key, _| keep(key));
+    }
+
     /// Abandons queued intentions without rewinding their sequence numbers.
     pub fn take_settled(
         &mut self,

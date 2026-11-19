@@ -7,6 +7,7 @@ use std::fs::File;
 use std::io::{Read, Write};
 use std::path::Path;
 use std::process::Stdio;
+use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use serde::Deserialize;
@@ -25,12 +26,36 @@ const LONGEST_AUDIO_ADDRESS: usize = 16 * 1024;
 
 /// Uses only yt-dlp on PATH; Janis neither installs nor updates an extractor.
 /// The child is killed on cancellation, and all explicit exits reap it.
+/// The request lease also follows a blocking cookie copy and its unclaimed
+/// result, so its owner can join credential cleanup even after a copy timeout.
 pub async fn resolve(
     identifier: &str,
     cookie_file: Option<&Path>,
+    cancelled: impl Fn() -> bool,
+    request_lifetime: Arc<dyn Send + Sync>,
+) -> Result<ResolvedAudio, Failure> {
+    resolve_with_command(
+        identifier,
+        cookie_file,
+        cancelled,
+        Command::new("yt-dlp"),
+        request_lifetime,
+    )
+    .await
+}
+
+async fn resolve_with_command(
+    identifier: &str,
+    cookie_file: Option<&Path>,
+    cancelled: impl Fn() -> bool,
+    mut command: Command,
+    request_lifetime: Arc<dyn Send + Sync>,
 ) -> Result<ResolvedAudio, Failure> {
     if !is_video_identifier(identifier) {
         return Err(Failure::InvalidInput);
+    }
+    if cancelled() {
+        return Err(Failure::Extraction);
     }
 
     let temporary_cookies = if let Some(path) = cookie_file {
@@ -38,7 +63,9 @@ pub async fn resolve(
         Some(
             tokio::time::timeout(
                 COOKIE_COPY_TIMEOUT,
-                tokio::task::spawn_blocking(move || copy_cookie_file(&path)),
+                tokio::task::spawn_blocking(move || {
+                    copy_owned_cookie_file(&path, request_lifetime)
+                }),
             )
             .await
             .map_err(|_| Failure::CookieFileUnreadable)?
@@ -48,7 +75,9 @@ pub async fn resolve(
         None
     };
 
-    let mut command = Command::new("yt-dlp");
+    if cancelled() {
+        return Err(Failure::Extraction);
+    }
     command
         .args([
             "--ignore-config",
@@ -93,15 +122,17 @@ pub async fn resolve(
         let _ = child.wait().await;
         return Err(Failure::Extraction);
     };
-    let extracted = tokio::time::timeout(PROCESS_TIMEOUT, async {
-        tokio::try_join!(read_output(stdout), async {
-            child.wait().await.map_err(|_| Failure::Extraction)
-        })
-    })
-    .await;
+    let extracted = tokio::select! {
+        outcome = tokio::time::timeout(PROCESS_TIMEOUT, async {
+            tokio::try_join!(read_output(stdout), async {
+                child.wait().await.map_err(|_| Failure::Extraction)
+            })
+        }) => outcome.ok(),
+        () = wait_for_cancellation(&cancelled) => None,
+    };
 
     let output = match extracted {
-        Ok(Ok((output, status))) if status.success() => output,
+        Some(Ok((output, status))) if status.success() => output,
         _ => {
             // kill() waits for the child; wait() also covers an already-exited
             // child and a failed kill. No subprocess diagnostic is retained.
@@ -112,6 +143,35 @@ pub async fn resolve(
     };
     drop(temporary_cookies);
     parse_audio(&output, identifier, SystemTime::now())
+}
+
+/// Fields drop in declaration order: remove the credential before releasing
+/// the request lease, including when Tokio discards a detached copy's result.
+struct CopiedCookies {
+    file: NamedTempFile,
+    _request_lifetime: Arc<dyn Send + Sync>,
+}
+
+impl CopiedCookies {
+    fn path(&self) -> &Path {
+        self.file.path()
+    }
+}
+
+fn copy_owned_cookie_file(
+    path: &Path,
+    request_lifetime: Arc<dyn Send + Sync>,
+) -> Result<CopiedCookies, Failure> {
+    Ok(CopiedCookies {
+        file: copy_cookie_file(path)?,
+        _request_lifetime: request_lifetime,
+    })
+}
+
+async fn wait_for_cancellation(cancelled: &impl Fn() -> bool) {
+    while !cancelled() {
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
 }
 
 fn is_video_identifier(identifier: &str) -> bool {
@@ -292,6 +352,153 @@ fn audio_expiry(address: &str, now: SystemTime) -> Result<SystemTime, Failure> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_detached_cookie_copy_keeps_its_request_alive_until_the_unclaimed_jar_is_removed() {
+        struct CleanupLease {
+            copied_path: Arc<std::sync::Mutex<Option<std::path::PathBuf>>>,
+            finished: std::sync::mpsc::Sender<bool>,
+        }
+
+        impl Drop for CleanupLease {
+            fn drop(&mut self) {
+                let removed = self
+                    .copied_path
+                    .lock()
+                    .expect("copied path")
+                    .as_ref()
+                    .is_some_and(|path| !path.exists());
+                let _ = self.finished.send(removed);
+            }
+        }
+
+        let original = NamedTempFile::new().expect("synthetic original");
+        std::fs::write(original.path(), "# Netscape HTTP Cookie File\nsynthetic\n")
+            .expect("synthetic jar");
+        let copied_path = Arc::new(std::sync::Mutex::new(None));
+        let (finished, receiver) = std::sync::mpsc::channel();
+        let lease: Arc<dyn Send + Sync> = Arc::new(CleanupLease {
+            copied_path: Arc::clone(&copied_path),
+            finished,
+        });
+        let (started, copy_started) = std::sync::mpsc::channel();
+        let release = Arc::new(std::sync::Barrier::new(2));
+        let worker_release = Arc::clone(&release);
+        let original_path = original.path().to_path_buf();
+        let runtime = tokio::runtime::Runtime::new().expect("copy runtime");
+        let task = runtime.spawn_blocking(move || {
+            let copied = copy_owned_cookie_file(&original_path, lease).expect("owned copy");
+            let path = copied.path().to_path_buf();
+            *copied_path.lock().expect("copied path") = Some(path.clone());
+            started.send(path).expect("copy observer");
+            worker_release.wait();
+            copied
+        });
+        let path = copy_started
+            .recv_timeout(Duration::from_secs(2))
+            .expect("active copy");
+        // A timed-out await drops this handle but cannot stop its blocking copy.
+        drop(task);
+        let copied_file_exists = path.exists();
+        let request_is_active = receiver.try_recv().is_err();
+        release.wait();
+        assert!(receiver
+            .recv_timeout(Duration::from_secs(2))
+            .expect("request cleanup"));
+        assert!(copied_file_exists);
+        assert!(request_is_active);
+        assert!(!path.exists());
+        assert!(original.path().exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn obsolete_overview_or_account_extraction_reaps_its_child_and_removes_copied_cookies() {
+        for cancellation_reason in ["skip", "stop", "disconnect"] {
+            let directory = tempfile::tempdir().expect("isolated extractor");
+            let script = directory.path().join("extractor.sh");
+            let marker = directory.path().join("started");
+            let original = directory.path().join("original.txt");
+            std::fs::write(
+                &original,
+                "# Netscape HTTP Cookie File\n.youtube.com\tTRUE\t/\tTRUE\t0\tSID\tsynthetic\n",
+            )
+            .expect("synthetic jar");
+            std::fs::write(
+                &script,
+                format!(
+                    "while [ \"$1\" != --cookies ]; do shift; done\nshift\nprintf '%s\\n%s\\n' \"$$\" \"$1\" > '{}'\nexec sleep 60\n",
+                    marker.display()
+                ),
+            ).expect("held extractor script");
+            let mut reads = crate::overview_reads::OverviewReads::default();
+            let crate::overview_reads::Start::Shown { job: Some(job) } = reads.start(Some(1))
+            else {
+                panic!("an uncached overview needs a job");
+            };
+            let generation = std::sync::atomic::AtomicU64::new(0);
+            let runtime = tokio::runtime::Runtime::new().expect("extractor runtime");
+            runtime.block_on(async {
+                let mut command = Command::new("sh");
+                command.arg(&script);
+                let extraction = resolve_with_command(
+                    IDENTIFIER,
+                    Some(&original),
+                    || {
+                        !job.is_current()
+                            || generation.load(std::sync::atomic::Ordering::Acquire) != 0
+                    },
+                    command,
+                    Arc::new(()),
+                );
+                let cancellation = async {
+                    tokio::time::timeout(Duration::from_secs(2), async {
+                        while std::fs::read_to_string(&marker)
+                            .unwrap_or_default()
+                            .lines()
+                            .count()
+                            < 2
+                        {
+                            tokio::time::sleep(Duration::from_millis(10)).await;
+                        }
+                    })
+                    .await
+                    .expect("the child starts");
+                    let marker = std::fs::read_to_string(&marker).expect("child marker");
+                    let mut lines = marker.lines();
+                    let process = lines.next().expect("child process").to_owned();
+                    let copied = std::path::PathBuf::from(lines.next().expect("copied jar"));
+                    assert!(copied.exists());
+                    assert_ne!(copied, original);
+                    match cancellation_reason {
+                        "skip" => {
+                            reads.start(Some(2));
+                        }
+                        "stop" => reads.stop(),
+                        _ => {
+                            generation.fetch_add(1, std::sync::atomic::Ordering::Release);
+                        }
+                    }
+                    (process, copied)
+                };
+                let (outcome, (process, copied)) =
+                    tokio::time::timeout(Duration::from_secs(3), async {
+                        tokio::join!(extraction, cancellation)
+                    })
+                    .await
+                    .expect("obsolete extraction is promptly cancelled");
+                assert_eq!(outcome.err(), Some(Failure::Extraction));
+                assert!(!copied.exists());
+                assert!(original.exists());
+                assert!(!std::process::Command::new("kill")
+                    .args(["-0", &process])
+                    .stderr(Stdio::null())
+                    .status()
+                    .expect("probe reaped child")
+                    .success());
+            });
+        }
+    }
 
     const IDENTIFIER: &str = "dQw4w9WgXcQ";
 

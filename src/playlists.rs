@@ -92,14 +92,14 @@ impl Playlist {
         self.source != PlaylistSource::YouTubeMusic
     }
 
-    /// A local playlist takes persistent files; a Jellyfin playlist takes
-    /// persistent songs of its signed-in server. Imported playlists take none.
+    /// A local playlist takes persistent files and YouTube Music songs; a Jellyfin
+    /// playlist takes songs of its signed-in server. Imported playlists take none.
     pub fn takes(&self, track: &Track, server: Option<&MediaServer>) -> bool {
         if track.id <= 0 {
             return false;
         }
         match (self.source, track.source, &self.server, track.server_id) {
-            (PlaylistSource::Local, TrackSource::File, _, _) => true,
+            (PlaylistSource::Local, TrackSource::File | TrackSource::YouTubeMusic, _, _) => true,
             (PlaylistSource::Jellyfin, TrackSource::Jellyfin, Some(home), Some(server_id)) => {
                 home.server_id == server_id && server.is_some_and(|server| server.id == server_id)
             }
@@ -225,6 +225,19 @@ impl Playlists {
         self.playlists.extend(creating);
     }
 
+    /// Refreshes imported membership without replacing local presentation or
+    /// changes still on their way to another provider.
+    pub fn restore_youtube_memberships(&mut self, memberships: Vec<(i64, Vec<i64>)>) {
+        for (playlist_id, track_ids) in memberships {
+            if let Some(playlist) = self
+                .find_mut(PlaylistKey::Saved(playlist_id))
+                .filter(|playlist| playlist.source == PlaylistSource::YouTubeMusic)
+            {
+                playlist.track_ids = track_ids;
+            }
+        }
+    }
+
     /// Every playlist on show, the oldest first.
     pub fn playlists(&self) -> &[Playlist] {
         &self.playlists
@@ -249,9 +262,9 @@ impl Playlists {
         accepting
     }
 
-    /// Makes a playlist named `name` holding `track`. A file makes one of
-    /// Janis's own, saved at once; a song of the signed-in server makes one
-    /// on the server, saved once the server has made it.
+    /// Makes a playlist named `name` holding `track`. A file or saved YouTube Music
+    /// song makes one of Janis's own, saved at once; a song of the signed-in server
+    /// makes one on the server, saved once the server has made it.
     pub fn create(
         &mut self,
         name: &str,
@@ -263,14 +276,13 @@ impl Playlists {
             return Vec::new();
         }
         let home = match track.source {
-            TrackSource::File => None,
+            TrackSource::File | TrackSource::YouTubeMusic => None,
             TrackSource::Jellyfin => {
                 match server.filter(|server| Some(server.id) == track.server_id) {
                     Some(server) => Some(server),
                     None => return Vec::new(),
                 }
             }
-            TrackSource::YouTubeMusic => return Vec::new(),
         };
         self.last_creation += 1;
         let creation = self.last_creation;
@@ -1386,7 +1398,6 @@ mod tests {
             .rename(imported, "Changed", Some(&server()))
             .is_empty());
         assert!(playlists.delete(imported, Some(&server())).is_empty());
-        assert!(playlists.create("New", &song, Some(&server())).is_empty());
         assert_eq!(playlists, before);
 
         playlists.group_created(7, "Moods".to_owned(), None);
@@ -1410,23 +1421,94 @@ mod tests {
     }
 
     #[test]
-    fn local_playlists_never_accept_youtube_music_or_transient_catalog_tracks() {
-        let mut playlists = with(vec![local(1, "Files", &[5])]);
-        let files = PlaylistKey::Saved(1);
-        let mut remote = track(6, "Remote without a Jellyfin server");
-        remote.source = TrackSource::YouTubeMusic;
-        assert_eq!(remote.server_id, None);
-        assert!(playlists.accepting(&remote, None).is_empty());
-        assert!(playlists.set(files, &remote, true, None).is_empty());
-        assert!(playlists.create("Not a file", &remote, None).is_empty());
-        let transient = track(-1, "Anonymous catalog song");
-        assert!(playlists.accepting(&transient, None).is_empty());
-        assert!(playlists.set(files, &transient, true, None).is_empty());
+    fn imported_membership_refresh_preserves_every_other_playlist_choice() {
+        let mut imported = local(1, "Imported", &[5]);
+        imported.source = PlaylistSource::YouTubeMusic;
+        let mut untouched = local(4, "Other import", &[9]);
+        untouched.source = PlaylistSource::YouTubeMusic;
+        let mut playlists = with(vec![
+            imported,
+            local(2, "Mine", &[6]),
+            on_server(3, "Server", &[7]),
+            untouched,
+        ]);
+        playlists.group_created(8, "Moods".to_owned(), None);
+        playlists.set_group(PlaylistKey::Saved(1), Some(8));
+        playlists.picture_saved(1);
+        playlists.rename(PlaylistKey::Saved(3), "Pending name", Some(&server()));
+        playlists.create("Creating", &track(10, "File"), None);
+        let mut expected = playlists.clone();
+        expected
+            .find_mut(PlaylistKey::Saved(1))
+            .expect("imported playlist")
+            .track_ids = vec![11, 12];
+        playlists.restore_youtube_memberships(vec![
+            (1, vec![11, 12]),
+            (2, vec![]),
+            (3, vec![]),
+            (99, vec![13]),
+        ]);
+        assert_eq!(playlists, expected);
+        playlists.restore_youtube_memberships(vec![(1, vec![])]);
         assert!(playlists
-            .create("Not persisted", &transient, None)
+            .find(PlaylistKey::Saved(1))
+            .expect("empty imported playlist")
+            .track_ids
             .is_empty());
-        assert_eq!(songs_of(&playlists, files), [5]);
-        assert_eq!(playlists.playlists().len(), 1);
+    }
+
+    #[test]
+    fn local_playlists_mix_persistent_files_and_youtube_music_but_reject_anonymous_songs() {
+        let mut playlists = with(vec![local(1, "Mixed", &[5]), on_server(2, "Server", &[])]);
+        let mixed = PlaylistKey::Saved(1);
+        let mut remote = track(6, "Saved YouTube Music song");
+        remote.source = TrackSource::YouTubeMusic;
+        assert_eq!(playlists.accepting(&remote, Some(&server())).len(), 1);
+        assert_eq!(
+            playlists.set(mixed, &remote, true, None),
+            [Effect::PersistPlaylistEntry {
+                playlist_id: 1,
+                track_id: 6,
+                present: true,
+            }]
+        );
+        assert_eq!(songs_of(&playlists, mixed), [5, 6]);
+        assert!(playlists
+            .set(PlaylistKey::Saved(2), &remote, true, Some(&server()))
+            .is_empty());
+        assert!(playlists
+            .set(mixed, &server_song(7), true, Some(&server()))
+            .is_empty());
+        let effects = playlists.create("Saved songs", &remote, None);
+        assert!(matches!(
+            effects.as_slice(),
+            [Effect::SavePlaylist { server: None, track_ids, .. }] if track_ids == &[6]
+        ));
+        let creation = match playlists.playlists().last().expect("created playlist").key {
+            PlaylistKey::Creating(creation) => creation,
+            PlaylistKey::Saved(_) => panic!("new playlist awaits persistence"),
+        };
+        playlists.creation_saved(creation, Some(3), None);
+        let created = PlaylistKey::Saved(3);
+        assert_eq!(
+            playlists.set(created, &track(8, "File"), true, None),
+            [Effect::PersistPlaylistEntry {
+                playlist_id: 3,
+                track_id: 8,
+                present: true,
+            }]
+        );
+        assert_eq!(songs_of(&playlists, created), [6, 8]);
+        for source in [TrackSource::File, TrackSource::YouTubeMusic] {
+            let mut transient = track(-1, "Anonymous catalog song");
+            transient.source = source;
+            assert!(playlists.accepting(&transient, None).is_empty());
+            assert!(playlists.set(mixed, &transient, true, None).is_empty());
+            assert!(playlists
+                .create("Not persisted", &transient, None)
+                .is_empty());
+        }
+        assert_eq!(songs_of(&playlists, mixed), [5, 6]);
     }
 
     #[test]

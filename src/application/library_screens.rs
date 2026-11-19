@@ -632,6 +632,9 @@ impl Application {
         *self.folders.borrow_mut() = snapshot.folders;
         self.favourite_tracks
             .borrow_mut()
+            .retain_youtube_tracks(&self.all_tracks.borrow());
+        self.favourite_tracks
+            .borrow_mut()
             .restore(snapshot.favourite_track_ids);
         self.playlists
             .borrow_mut()

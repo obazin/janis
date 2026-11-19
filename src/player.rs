@@ -399,6 +399,73 @@ impl Player {
         effects
     }
 
+    /// Removes every account-owned YouTube source, including upcoming entries.
+    /// Reloading the kept queue invalidates the engine's cached opens and fades.
+    /// Anonymous catalog sources and unrelated playback keep their identity.
+    pub fn remove_youtube_account(&mut self, now: Instant) -> Vec<Effect> {
+        let removed = |track: &Track| {
+            track.id > 0 && track.source == crate::library::TrackSource::YouTubeMusic
+        };
+        if !self.queue.iter().any(removed) {
+            return Vec::new();
+        }
+        let mut effects = Vec::new();
+        if self.mode == Mode::Local && self.connecting {
+            // Replacing the engine queue also retires its pending station
+            // claim. Restore the local presentation and retire our claim too.
+            self.connecting = false;
+            self.connection_epoch += 1;
+            let before = self.before_connecting.take();
+            effects = self.show_again(before);
+        }
+        let current_removed = self.current().is_some_and(removed);
+        let kept_before = self
+            .queue
+            .iter()
+            .take(self.index)
+            .filter(|track| !removed(track))
+            .count();
+        self.queue.retain(|track| !removed(track));
+        self.source_expiries
+            .retain(|path, _| self.queue.iter().any(|track| &track.path == path));
+        self.index = kept_before.min(self.queue.len().saturating_sub(1));
+        // A radio stream has already released the engine's local opens. Its
+        // retained presentation queue can be pruned without replacing the stream.
+        if self.mode != Mode::Local {
+            return Vec::new();
+        }
+        if current_removed || self.queue.is_empty() {
+            effects.clear();
+            self.playing = false;
+            self.position_seconds = 0.0;
+            self.duration_seconds = self
+                .queue
+                .get(self.index)
+                .map_or(0.0, |track| track.duration_secs);
+            self.replay_on_resume = false;
+            let track_id = self.queue.get(self.index).map(|track| track.id);
+            effects.extend([Effect::LoadCover(track_id), Effect::LoadOverview(track_id)]);
+        } else if self.playing {
+            self.position_seconds += now
+                .saturating_duration_since(self.position_at)
+                .as_secs_f64();
+            if self.duration_seconds > 0.0 {
+                self.position_seconds = self.position_seconds.min(self.duration_seconds);
+            }
+        }
+        self.position_at = now;
+        if self.queue.is_empty() {
+            self.mode = Mode::Idle;
+        }
+        effects.push(Effect::ReplaceQueue {
+            tracks: self.queue.clone(),
+            index: self.index,
+            position_seconds: self.position_seconds,
+            playing: self.playing,
+        });
+        effects
+    }
+
     /// Starts connecting to a station. `connecting` stays true until
     /// [`Player::station_connection_finished`], which is why a station card
     /// can show a connecting state rather than pretending.
@@ -645,6 +712,132 @@ mod tests {
 
     fn timed_track(id: i64, seconds: f64) -> Track {
         track(id, "t").duration(seconds)
+    }
+
+    fn youtube_track(identifier: i64) -> Track {
+        let mut song = timed_track(identifier, 100.0);
+        song.source = crate::library::TrackSource::YouTubeMusic;
+        song.path = format!("youtube-music://{identifier}");
+        song
+    }
+
+    #[test]
+    fn disconnecting_removes_account_successors_and_keeps_unrelated_playback_position() {
+        let now = Instant::now();
+        for playing in [false, true] {
+            let mut player = Player::new(now);
+            let kept = timed_track(2, 100.0);
+            let anonymous = youtube_track(-1);
+            player.play_queue(
+                vec![
+                    youtube_track(1),
+                    kept.clone(),
+                    youtube_track(3),
+                    anonymous.clone(),
+                ],
+                1,
+                now,
+            );
+            player.playing = playing;
+            player.position_seconds = 20.0;
+            let effects = player.remove_youtube_account(now + Duration::from_secs(2));
+            assert_eq!(player.current().map(|track| track.id), Some(2));
+            assert_eq!(player.current_index(), Some(0));
+            assert_eq!(player.playing(), playing);
+            assert_eq!(
+                effects,
+                [Effect::ReplaceQueue {
+                    tracks: vec![kept, anonymous],
+                    index: 0,
+                    position_seconds: if playing { 22.0 } else { 20.0 },
+                    playing,
+                }]
+            );
+        }
+    }
+
+    #[test]
+    fn disconnecting_a_current_account_song_leaves_unrelated_successors_paused() {
+        let now = Instant::now();
+        let mut player = Player::new(now);
+        let kept = timed_track(2, 100.0);
+        player.play_queue(vec![youtube_track(1), kept.clone()], 0, now);
+        player.position_seconds = 30.0;
+        assert_eq!(
+            player.remove_youtube_account(now),
+            [
+                Effect::LoadCover(Some(2)),
+                Effect::LoadOverview(Some(2)),
+                Effect::ReplaceQueue {
+                    tracks: vec![kept],
+                    index: 0,
+                    position_seconds: 0.0,
+                    playing: false
+                },
+            ]
+        );
+        assert_eq!(player.current().map(|track| track.id), Some(2));
+        assert!(!player.playing());
+    }
+
+    #[test]
+    fn disconnecting_an_account_only_queue_clears_every_engine_entry() {
+        let now = Instant::now();
+        let mut player = Player::new(now);
+        player.play_queue(vec![youtube_track(1), youtube_track(2)], 1, now);
+        let effects = player.remove_youtube_account(now);
+        assert_eq!(player.mode(), Mode::Idle);
+        assert!(player.current().is_none());
+        assert!(player.queue().is_empty());
+        assert_eq!(
+            effects.last(),
+            Some(&Effect::ReplaceQueue {
+                tracks: Vec::new(),
+                index: 0,
+                position_seconds: 0.0,
+                playing: false,
+            })
+        );
+    }
+
+    #[test]
+    fn disconnecting_keeps_anonymous_playback_and_a_radio_stream_untouched() {
+        let now = Instant::now();
+        let mut player = Player::new(now);
+        player.play_queue(vec![youtube_track(-1)], 0, now);
+        assert!(player.remove_youtube_account(now).is_empty());
+        assert!(player.playing());
+        player.play_queue(vec![youtube_track(1), timed_track(2, 100.0)], 0, now);
+        player.mode = Mode::Radio;
+        player.station = Some(station("kept"));
+        assert!(player.remove_youtube_account(now).is_empty());
+        assert_eq!(player.mode(), Mode::Radio);
+        assert_eq!(
+            player.station().map(|station| station.id.as_str()),
+            Some("kept")
+        );
+        assert!(player.playing());
+        assert_eq!(player.queue().len(), 1);
+    }
+
+    #[test]
+    fn pruning_account_sources_retires_a_station_claim_replaced_with_the_local_queue() {
+        let now = Instant::now();
+        let mut player = Player::new(now);
+        player.play_queue(vec![timed_track(1, 100.0), youtube_track(2)], 0, now);
+        player.position_seconds = 25.0;
+        let station = station("pending");
+        player.play_station(station.clone());
+        let epoch = player.connection_epoch;
+        player.remove_youtube_account(now);
+        assert!(!player.connecting());
+        assert!(player.station().is_none());
+        assert_eq!(player.current().map(|track| track.id), Some(1));
+        assert_eq!(player.position_seconds(), 25.0);
+        assert!(player
+            .station_connection_finished(&station, epoch, Ok(()))
+            .is_empty());
+        assert!(player.station().is_none());
     }
 
     #[test]

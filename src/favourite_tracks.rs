@@ -17,7 +17,7 @@
 //! server before a push reached it, takes the star the listener gave over
 //! what it read.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use crate::effects::Effect;
 use crate::jellyfin::Failure;
@@ -34,9 +34,35 @@ pub struct FavouriteTracks {
     /// The songs whose stars are on their way to a server, by track id.
     pending: PendingPushes<i64, bool>,
     youtube_pending: PendingPushes<i64, bool>,
+    youtube_identities: HashMap<i64, (String, u64)>,
 }
 
 impl FavouriteTracks {
+    /// Pruned or reused rows cannot inherit an old account's pending star.
+    pub fn retain_youtube_tracks(&mut self, tracks: &[Track]) {
+        self.youtube_identities.retain(|track_id, (address, _)| {
+            tracks.iter().any(|track| {
+                track.id == *track_id
+                    && track.source == TrackSource::YouTubeMusic
+                    && track.path == *address
+            })
+        });
+        self.youtube_pending
+            .retain(|track_id| self.youtube_identities.contains_key(track_id));
+    }
+
+    pub fn forget_youtube_track(&mut self, track_id: i64, address: &str) {
+        if self
+            .youtube_identities
+            .get(&track_id)
+            .is_some_and(|(current, _)| current == address)
+        {
+            self.youtube_identities.remove(&track_id);
+            self.youtube_pending
+                .retain(|pending_id| *pending_id != track_id);
+        }
+    }
+
     /// Takes the favourites as `janis.db` lists them, the newest first: at
     /// boot, and after every read of the library. A star still on its way to
     /// a server wins over what was read.
@@ -90,6 +116,9 @@ impl FavouriteTracks {
             let sequence = self
                 .youtube_pending
                 .push(track.id, favourite, was_favourite, place);
+            self.youtube_identities
+                .entry(track.id)
+                .or_insert_with(|| (track.path.clone(), sequence));
             return vec![Effect::PushYouTubeMusicFavourite {
                 track_id: track.id,
                 address: track.path.clone(),
@@ -155,12 +184,22 @@ impl FavouriteTracks {
         favourite: bool,
         outcome: Result<(), youtube_music::Failure>,
     ) -> Vec<Effect> {
+        if self
+            .youtube_identities
+            .get(&track_id)
+            .is_none_or(|(current, first_sequence)| {
+                current != &address || sequence < *first_sequence
+            })
+        {
+            return Vec::new();
+        }
         let Some(settled) =
             self.youtube_pending
                 .answer(&track_id, sequence, favourite, outcome.is_ok())
         else {
             return Vec::new();
         };
+        self.youtube_identities.remove(&track_id);
         let persist = Effect::PersistYouTubeMusicFavourite {
             track_id,
             address,
@@ -177,8 +216,17 @@ impl FavouriteTracks {
 
     /// A changed connection cannot settle the old account's intentions.
     pub fn cancel_youtube_pushes(&mut self) -> Vec<i64> {
-        self.youtube_pending
-            .take_settled()
+        let mut cancelled: Vec<_> = self.youtube_pending.take_settled().collect();
+        cancelled.sort_unstable_by_key(|(track_id, _)| {
+            std::cmp::Reverse(
+                self.youtube_identities
+                    .get(track_id)
+                    .map(|(_, sequence)| *sequence),
+            )
+        });
+        self.youtube_identities.clear();
+        cancelled
+            .into_iter()
             .map(|(track_id, settled)| {
                 self.set(
                     track_id,
@@ -586,5 +634,97 @@ mod tests {
         favourites.restore(vec![3, 2]);
         assert!(!favourites.contains(1));
         assert_eq!(favourites.track_ids(), [3, 2]);
+    }
+
+    #[test]
+    fn a_reused_file_row_cannot_inherit_a_pending_youtube_star() {
+        let mut favourites = FavouriteTracks::default();
+        let (sequence, _) = youtube_push(&mut favourites, 41);
+        favourites.retain_youtube_tracks(&[track(41, "New file")]);
+        favourites.restore(Vec::new());
+        assert!(!favourites.contains(41));
+        assert!(favourites
+            .youtube_push_finished(41, youtube_song(41).path, sequence, true, Ok(()))
+            .is_empty());
+        assert!(!favourites.contains(41));
+    }
+
+    #[test]
+    fn changed_provider_addresses_drop_pending_stars_but_preserve_saved_favourites() {
+        let mut favourites = FavouriteTracks::default();
+        let (sequence, _) = youtube_push(&mut favourites, 41);
+        let mut replacement = youtube_song(41);
+        replacement.path = youtube_song(42).path;
+        favourites.retain_youtube_tracks(&[replacement]);
+        favourites.restore(vec![41]);
+        assert!(favourites
+            .youtube_push_finished(41, youtube_song(41).path, sequence, true, Ok(()))
+            .is_empty());
+        assert_eq!(favourites.track_ids(), [41]);
+    }
+
+    #[test]
+    fn cancelling_multiple_unlikes_restores_the_original_order() {
+        for removed in [[9, 5], [5, 9]] {
+            let mut favourites = FavouriteTracks::default();
+            favourites.restore(vec![9, 5, 2]);
+            for track_id in removed {
+                youtube_push(&mut favourites, track_id);
+            }
+            favourites.cancel_youtube_pushes();
+            assert_eq!(favourites.track_ids(), [9, 5, 2]);
+        }
+    }
+
+    #[test]
+    fn a_pruned_song_reimported_with_the_same_identity_ignores_its_old_acknowledgement() {
+        let mut favourites = FavouriteTracks::default();
+        let (old_sequence, _) = youtube_push(&mut favourites, 41);
+        favourites.retain_youtube_tracks(&[]);
+        favourites.restore(Vec::new());
+        let (new_sequence, _) = youtube_push(&mut favourites, 41);
+        assert!(favourites
+            .youtube_push_finished(41, youtube_song(41).path, old_sequence, true, Ok(()))
+            .is_empty());
+        favourites.youtube_push_finished(
+            41,
+            youtube_song(41).path,
+            new_sequence,
+            true,
+            Err(youtube_music::Failure::Network),
+        );
+        assert!(!favourites.contains(41));
+    }
+
+    #[test]
+    fn a_rejected_old_address_cannot_discard_a_replacement_songs_pending_star() {
+        let mut favourites = FavouriteTracks::default();
+        let mut replacement = youtube_song(41);
+        replacement.path = youtube_song(42).path;
+        let sequence = match favourites.toggle(&replacement, None).as_slice() {
+            [Effect::PushYouTubeMusicFavourite { sequence, .. }] => *sequence,
+            effects => panic!("expected a source push, got {effects:?}"),
+        };
+        favourites.forget_youtube_track(41, &youtube_song(41).path);
+        favourites.youtube_push_finished(
+            41,
+            replacement.path,
+            sequence,
+            true,
+            Err(youtube_music::Failure::Network),
+        );
+        assert!(!favourites.contains(41));
+    }
+
+    #[test]
+    fn a_rejected_database_identity_cannot_replay_its_star_over_authoritative_ids() {
+        let mut favourites = FavouriteTracks::default();
+        let (sequence, _) = youtube_push(&mut favourites, 41);
+        favourites.forget_youtube_track(41, &youtube_song(41).path);
+        favourites.restore(vec![9]);
+        assert!(favourites
+            .youtube_push_finished(41, youtube_song(41).path, sequence, true, Ok(()))
+            .is_empty());
+        assert_eq!(favourites.track_ids(), [9]);
     }
 }

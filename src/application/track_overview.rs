@@ -70,6 +70,12 @@ impl Application {
         };
         let locations = self.overview_locations(&track);
         let engine = Arc::clone(&self.engine);
+        let resolver = super::youtube_music_screen::PlaybackResolver {
+            account_cookie_file: Arc::clone(&self.youtube_music.account_cookie_file),
+            generation: Arc::clone(&self.youtube_music.generation),
+            extraction_activity: Arc::clone(&self.youtube_music.extraction_activity),
+        };
+        let runtime = Arc::clone(&self.youtube_music.runtime);
         // A thread per read: one stuck connecting to a server, or waiting on
         // a stalled share, notices it is stale only at its next batch, and
         // must not hold up the next track's read meanwhile.
@@ -82,7 +88,26 @@ impl Application {
                 let outcome = overview_reads::read_first_answering(
                     locations,
                     &|| job.is_current(),
-                    &mut |location, on_batch| engine.read_overview(location, on_batch),
+                    &mut |location, on_batch| {
+                        // Resolve provider sources here rather than through the
+                        // engine's blocking overview opener, which has no token.
+                        let resolved;
+                        let location = if let crate::audio::Location::Deferred(source) = location {
+                            resolved = crate::audio::Location::Remote(runtime.block_on(
+                                resolver.resolve_source(
+                                    &source.id,
+                                    Some((Arc::clone(&job.shared_epoch), job.epoch)),
+                                ),
+                            )?);
+                            &resolved
+                        } else {
+                            location
+                        };
+                        if !job.is_current() {
+                            return Ok(false);
+                        }
+                        engine.read_overview(location, on_batch)
+                    },
                     &mut |batch| {
                         overview_reads::lock(&job.slices).extend_from_slice(batch);
                         if last_redraw.elapsed() >= REDRAW_INTERVAL {

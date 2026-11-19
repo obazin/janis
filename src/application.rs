@@ -338,6 +338,7 @@ impl Application {
             youtube_music_screen::PlaybackResolver {
                 account_cookie_file: Arc::clone(&application.youtube_music.account_cookie_file),
                 generation: Arc::clone(&application.youtube_music.generation),
+                extraction_activity: Arc::clone(&application.youtube_music.extraction_activity),
             },
         ))?;
         APPLICATION.with(|cell| *cell.borrow_mut() = Some(Rc::clone(&application)));
@@ -382,6 +383,7 @@ impl Application {
         self.frame_timer.stop();
         self.loudness.stop();
         self.track_overview.borrow().stop();
+        self.youtube_music.extraction_activity.shut_down();
         // What was still waiting for its slider to settle is saved now.
         self.volume_timer.stop();
         self.save_volume();
@@ -595,6 +597,26 @@ impl Application {
                     ),
                     index,
                 ),
+                Effect::ReplaceQueue {
+                    tracks,
+                    index,
+                    position_seconds,
+                    playing,
+                } => {
+                    let current = tracks.get(index).map(|track| track.id);
+                    self.engine.load_queue(
+                        audio::queue_entries(
+                            &tracks,
+                            |track| self.track_location(track),
+                            |track| self.loudness.gain_of(track),
+                        ),
+                        index,
+                    );
+                    if let Some(track_id) = current {
+                        self.engine
+                            .refresh_track(track_id, position_seconds, playing);
+                    }
+                }
                 Effect::ConnectStation { station, epoch } => self.connect_station(station, epoch),
                 Effect::Toggle => self.engine.toggle(),
                 Effect::Next => self.engine.next(),

@@ -448,6 +448,60 @@ impl LibrarySnapshot {
     }
 }
 
+/// The only library state changed by an acknowledged YouTube Music like.
+#[derive(Debug)]
+pub struct YouTubeFavouriteSnapshot {
+    pub revision: u64,
+    pub favourite_track_ids: Vec<i64>,
+    pub memberships: Vec<(i64, Vec<i64>)>,
+}
+
+impl YouTubeFavouriteSnapshot {
+    pub fn read(database: &DbState) -> Result<Self, String> {
+        let connection = database.lock();
+        let entries: Vec<(i64, Option<i64>)> = connection
+            .prepare(
+                "SELECT playlists.id, playlist_entries.track_id
+                 FROM playlists LEFT JOIN playlist_entries
+                   ON playlist_entries.playlist_id = playlists.id
+                 WHERE playlists.source = 'youtube-music'
+                   AND playlists.provider_identifier = 'LM'
+                 ORDER BY playlists.id, playlist_entries.position",
+            )
+            .and_then(|mut statement| {
+                statement
+                    .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+                    .collect()
+            })
+            .map_err(|error| format!("read YouTube Music liked membership: {error}"))?;
+        let mut memberships: Vec<(i64, Vec<i64>)> = Vec::new();
+        for (playlist_id, track_id) in entries {
+            if memberships
+                .last()
+                .is_none_or(|(last, _)| *last != playlist_id)
+            {
+                memberships.push((playlist_id, Vec::new()));
+            }
+            if let Some(track_id) = track_id {
+                memberships
+                    .last_mut()
+                    .expect("the playlist was inserted")
+                    .1
+                    .push(track_id);
+            }
+        }
+        Ok(Self {
+            revision: database.library_revision(),
+            favourite_track_ids: crate::persistence::favourite_track_ids_in(&connection)?,
+            memberships,
+        })
+    }
+
+    pub fn is_current(&self, database: &DbState) -> bool {
+        self.revision == database.library_revision()
+    }
+}
+
 pub fn list_tracks(db: &DbState) -> Result<Vec<Track>, String> {
     list_tracks_in(&db.lock())
 }
@@ -3351,7 +3405,12 @@ mod tests {
         persistence::set_playlist_entry(&database, imported.id, file_id, true)
             .expect("addition protected");
         persistence::set_playlist_entry(&database, local_id, playlist_only_id, true)
-            .expect("local playlist rejects remote song");
+            .expect("local playlist accepts a saved YouTube Music song");
+        let owned_playlists: Vec<_> = persistence::playlists(&database)
+            .expect("local membership before resync")
+            .into_iter()
+            .filter(|playlist| playlist.source != PlaylistSource::YouTubeMusic)
+            .collect();
         assert!(persistence::playlists(&database)
             .expect("read-only content")
             .contains(&imported));
@@ -3388,7 +3447,7 @@ mod tests {
                 .into_iter()
                 .filter(|playlist| playlist.source != PlaylistSource::YouTubeMusic)
                 .collect::<Vec<_>>(),
-            other_playlists
+            owned_playlists
         );
         assert_eq!(
             persistence::favourite_track_ids(&database),
@@ -3696,6 +3755,56 @@ mod tests {
                 Ok(Some(PathBuf::from("cookies.txt")))
             );
         }
+    }
+
+    #[test]
+    fn favourite_snapshots_keep_only_liked_membership_and_reject_older_revisions() {
+        let (_directory, database) = fresh_database();
+        let listing = YouTubeMusicLibrary {
+            tracks: vec![
+                youtube_music_song("abcdefghijk", "First"),
+                youtube_music_song("lmnopqrstuv", "Second"),
+            ],
+            playlists: vec![
+                youtube_music_playlist("LM", "Liked Music", &["abcdefghijk"]),
+                youtube_music_playlist("other", "Other", &["lmnopqrstuv"]),
+            ],
+            liked_track_identifiers: vec!["abcdefghijk".to_owned()],
+        };
+        sync_youtube_music_library(&database, &listing, Path::new("cookies.txt"))
+            .expect("initial listing");
+        let songs = list_tracks(&database).expect("songs");
+        let first = songs
+            .iter()
+            .find(|track| track.path.ends_with("abcdefghijk"))
+            .expect("first");
+        let second = songs
+            .iter()
+            .find(|track| track.path.ends_with("lmnopqrstuv"))
+            .expect("second");
+        let playlists = crate::persistence::playlists(&database).expect("playlists");
+        let liked = playlists
+            .iter()
+            .find(|playlist| playlist.name == "Liked Music")
+            .expect("liked");
+        let before = YouTubeFavouriteSnapshot::read(&database).expect("narrow snapshot");
+        assert!(before.is_current(&database));
+        assert_eq!(before.memberships, vec![(liked.id, vec![first.id])]);
+        set_youtube_music_favourite(&database, second.id, &second.path, true)
+            .expect("acknowledged like");
+        assert!(!before.is_current(&database));
+        let after = YouTubeFavouriteSnapshot::read(&database).expect("updated narrow snapshot");
+        assert_eq!(after.favourite_track_ids, vec![second.id, first.id]);
+        assert_eq!(
+            after.memberships,
+            vec![(liked.id, vec![second.id, first.id])]
+        );
+        set_youtube_music_favourite(&database, first.id, &first.path, false).expect("first unlike");
+        set_youtube_music_favourite(&database, second.id, &second.path, false)
+            .expect("second unlike");
+        let empty = YouTubeFavouriteSnapshot::read(&database).expect("empty liked membership");
+        assert_eq!(empty.memberships, vec![(liked.id, Vec::new())]);
+        assert!(empty.favourite_track_ids.is_empty());
     }
 
     #[test]

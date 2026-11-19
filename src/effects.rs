@@ -25,6 +25,14 @@ pub enum Effect {
         tracks: Vec<Track>,
         index: usize,
     },
+    /// Replace cached queue sources and transitions, then restore the kept
+    /// track's playhead and transport state.
+    ReplaceQueue {
+        tracks: Vec<Track>,
+        index: usize,
+        position_seconds: f64,
+        playing: bool,
+    },
     /// Connect to a station off the user-interface thread, then report back
     /// through `Player::station_connection_finished` with the same `epoch`.
     ConnectStation {

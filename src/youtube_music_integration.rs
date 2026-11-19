@@ -181,7 +181,8 @@ impl YouTubeMusicIntegration {
         self.failure(Failure::CredentialsRejected)
     }
 
-    /// Called only after the full listing has been imported and the library reloaded.
+    /// Completes a sync attempt. Success requires the full listing to have been
+    /// imported and the library reloaded; a failed read or import reports its error.
     pub fn sync_finished(
         &mut self,
         epoch: u64,

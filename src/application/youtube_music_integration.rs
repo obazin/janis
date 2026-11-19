@@ -177,6 +177,12 @@ impl Application {
         {
             return;
         }
+        if !self.youtube_favourite_identity_matches(track_id, &address) {
+            return;
+        }
+        self.favourite_tracks
+            .borrow_mut()
+            .retain_youtube_tracks(&self.all_tracks.borrow());
         let rejected = outcome.is_err_and(|failure| failure.credentials_rejected());
         let effects = self
             .favourite_tracks
@@ -214,11 +220,10 @@ impl Application {
                 return;
             }
             let outcome = (|| {
-                if !library::set_youtube_music_favourite(&database, track_id, &address, favourite)?
-                {
-                    return Ok(None);
-                }
-                LibrarySnapshot::read(&database).map(Some)
+                let matched =
+                    library::set_youtube_music_favourite(&database, track_id, &address, favourite)?;
+                library::YouTubeFavouriteSnapshot::read(&database)
+                    .map(|snapshot| (matched, snapshot))
             })();
             post(move |application| {
                 if application
@@ -230,13 +235,10 @@ impl Application {
                     return;
                 }
                 match outcome {
-                    Ok(Some(snapshot)) => {
-                        application.take_library(snapshot);
-                        application.refresh_favourite(track_id);
-                        application.refresh_playlists();
-                        application.refresh_player();
+                    Ok((matched, snapshot)) => {
+                        application
+                            .youtube_favourites_saved(epoch, track_id, address, matched, snapshot);
                     }
-                    Ok(None) => {}
                     Err(error) => {
                         log::error!("save YouTube Music favourite: {error}");
                         application.notify_error("error.library", vec![("message", error)], None);
@@ -244,6 +246,65 @@ impl Application {
                 }
             });
         });
+    }
+
+    fn youtube_favourite_identity_matches(&self, track_id: i64, address: &str) -> bool {
+        self.all_tracks.borrow().iter().any(|track| {
+            track.id == track_id
+                && track.source == library::TrackSource::YouTubeMusic
+                && track.path == address
+        })
+    }
+
+    fn youtube_favourites_saved(
+        &self,
+        epoch: u64,
+        track_id: i64,
+        address: String,
+        matched: bool,
+        snapshot: library::YouTubeFavouriteSnapshot,
+    ) {
+        if self
+            .youtube_music
+            .favourite_generation
+            .load(Ordering::Acquire)
+            != epoch
+        {
+            return;
+        }
+        if !matched {
+            self.favourite_tracks
+                .borrow_mut()
+                .forget_youtube_track(track_id, &address);
+        } else if !self.youtube_favourite_identity_matches(track_id, &address) {
+            return;
+        }
+        if !snapshot.is_current(&self.database) {
+            let database = Arc::clone(&self.database);
+            self.library_worker.run(move || {
+                let outcome = library::YouTubeFavouriteSnapshot::read(&database);
+                post(move |application| match outcome {
+                    Ok(snapshot) => application
+                        .youtube_favourites_saved(epoch, track_id, address, matched, snapshot),
+                    Err(error) => {
+                        log::error!("read YouTube Music favourites: {error}");
+                        application.notify_error("error.library", vec![("message", error)], None);
+                    }
+                });
+            });
+            return;
+        }
+        {
+            let mut favourites = self.favourite_tracks.borrow_mut();
+            favourites.retain_youtube_tracks(&self.all_tracks.borrow());
+            favourites.restore(snapshot.favourite_track_ids);
+        }
+        self.playlists
+            .borrow_mut()
+            .restore_youtube_memberships(snapshot.memberships);
+        self.refresh_favourite(track_id);
+        self.refresh_playlists();
+        self.refresh_player();
     }
 
     pub(super) fn import_youtube_browser(&self, browser: Browser, epoch: u64) {
@@ -405,18 +466,18 @@ impl Application {
         }
         let result = match outcome {
             Ok((snapshot, count, last_sync)) => {
-                {
-                    let mut current = self
-                        .youtube_music
-                        .account_cookie_file
-                        .write()
-                        .expect("YouTube Music cookie path lock poisoned");
-                    if current.as_ref() != Some(&cookie_file) {
-                        *current = Some(cookie_file);
-                        self.youtube_music
-                            .generation
-                            .fetch_add(1, Ordering::Release);
-                    }
+                let replacing = self
+                    .youtube_music
+                    .integration
+                    .borrow()
+                    .replacing_connection();
+                if replace_account_connection(
+                    &self.youtube_music.account_cookie_file,
+                    &self.youtube_music.generation,
+                    Some(cookie_file),
+                    replacing,
+                ) {
+                    self.remove_youtube_queue_sources();
                 }
                 self.take_library(snapshot);
                 Ok((count, last_sync))
@@ -441,26 +502,13 @@ impl Application {
         self.youtube_music
             .sync_generation
             .fetch_add(1, Ordering::AcqRel);
-        {
-            let mut path = self
-                .youtube_music
-                .account_cookie_file
-                .write()
-                .expect("YouTube Music cookie path lock poisoned");
-            *path = None;
-            self.youtube_music
-                .generation
-                .fetch_add(1, Ordering::Release);
-        }
-        // Anonymous playback has no dependency on this connection.
-        if self
-            .player
-            .borrow()
-            .current()
-            .is_some_and(|track| track.id > 0 && track.source == library::TrackSource::YouTubeMusic)
-        {
-            self.engine.stop();
-        }
+        replace_account_connection(
+            &self.youtube_music.account_cookie_file,
+            &self.youtube_music.generation,
+            None,
+            true,
+        );
+        self.remove_youtube_queue_sources();
         let database = Arc::clone(&self.database);
         self.library_worker.run(move || {
             let outcome = (|| {
@@ -482,6 +530,16 @@ impl Application {
                 }
             });
         });
+    }
+
+    fn remove_youtube_queue_sources(&self) {
+        let effects = self
+            .player
+            .borrow_mut()
+            .remove_youtube_account(std::time::Instant::now());
+        self.run(effects);
+        self.refresh_player();
+        self.refresh_now_playing_lists();
     }
 
     pub(super) fn refresh_youtube_integration(&self) {
@@ -526,5 +584,59 @@ fn remove_managed_cookie(path: &std::path::Path) {
         .and_then(|directory| youtube_browser_import::remove_managed(path, &directory))
     {
         log::warn!("remove managed YouTube cookies: {failure}");
+    }
+}
+
+/// The epoch and path change under the same lock used when a resolver captures
+/// them. Replacing credentials at the same path still retires the old account.
+fn replace_account_connection(
+    cookie_file: &std::sync::RwLock<Option<PathBuf>>,
+    generation: &AtomicU64,
+    next: Option<PathBuf>,
+    replacing: bool,
+) -> bool {
+    let mut current = cookie_file
+        .write()
+        .expect("YouTube Music cookie path lock poisoned");
+    if !replacing && *current == next {
+        return false;
+    }
+    *current = next;
+    generation.fetch_add(1, Ordering::Release);
+    true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn replacing_an_account_at_the_same_cookie_path_retires_its_old_sources() {
+        let path = PathBuf::from("synthetic-cookies.txt");
+        let current = std::sync::RwLock::new(Some(path.clone()));
+        let generation = AtomicU64::new(4);
+        assert!(!replace_account_connection(
+            &current,
+            &generation,
+            Some(path.clone()),
+            false
+        ));
+        assert_eq!(generation.load(Ordering::Acquire), 4);
+        assert!(replace_account_connection(
+            &current,
+            &generation,
+            Some(path.clone()),
+            true
+        ));
+        assert_eq!(generation.load(Ordering::Acquire), 5);
+        assert_eq!(*current.read().expect("current path"), Some(path));
+        assert!(replace_account_connection(
+            &current,
+            &generation,
+            None,
+            true
+        ));
+        assert_eq!(generation.load(Ordering::Acquire), 6);
+        assert!(current.read().expect("disconnected path").is_none());
     }
 }
