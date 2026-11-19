@@ -37,9 +37,9 @@ rfd = "0.15"
 # Cover art reaches Janis base64-encoded, from the audio facade and from
 # stations alike.
 base64 = "0.22"
-# Drives the one asynchronous facade call, connecting to a station. The
-# runtime outlives the call: the station's download keeps running on it.
-tokio = { version = "1", features = ["rt-multi-thread"] }
+# Runs asynchronous service calls and the optional extraction process on workers.
+# A station's runtime outlives the call because its download keeps running on it.
+tokio = { version = "1", features = ["rt-multi-thread", "process", "io-util", "time", "macros"] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
 log = "0.4.29"
@@ -51,6 +51,11 @@ reqwest = { version = "0.13", default-features = false, features = [
     "json",
     "rustls",
 ] }
+# Upstream main supplies catalog and account APIs; playback extraction is separate.
+rustypipe = { git = "https://codeberg.org/ThetaDev/rustypipe", rev = "c93bafd8416843fc68251f9ce8830a89504c185e", default-features = false, features = [
+    "rustls-tls-webpki-roots",
+    "userdata",
+] }
 # Resolves the per-user data directory on every platform.
 dirs = "6"
 # `bundled` ships SQLite with the binary so we don't depend on the system
@@ -60,14 +65,15 @@ rusqlite = { version = "0.31", features = ["bundled"] }
 # Janis keeps — everything the scanner reads *from* each file comes back
 # through the audio-stack facade).
 walkdir = "2"
+# Private temporary cookie exports for the optional extractor, also used by tests.
+tempfile = "3"
 
 # The whole audio path — engine, web radio, and audio-file metadata parsing —
 # lives in this standalone MIT crate (https://github.com/obazin/audio-stack-rs).
 # Janis imports only its facade: none of the audio/metadata crates (cpal,
 # symphonia, lofty, stream-download, opus, …) are direct dependencies here.
-# Pinned to a tag; `Cargo.lock` records the exact commit. The dev-profile
-# `opt-level = 2` override below still applies to it (and its transitive
-# deps), so realtime DSP stays fast.
+# Upstream's merged bounded HTTP, deferred-source and identity-scoped seek APIs.
+# `Cargo.lock` records the tagged revision. The override below keeps realtime DSP fast.
 #
 # `fir-eq` opts into the linear-phase EQ: the same ten bands with no
 # inter-band phase distortion, offered by the equalizer sheet as a quality
@@ -88,9 +94,6 @@ libc = "0.2"
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Threading"] }
 
 [dev-dependencies]
-# Unique temporary directories, removed when a test ends, so concurrent test
-# runs never share or delete each other's databases and folders.
-tempfile = "3"
 # Property tests: invariants checked over generated inputs, shrunk to the
 # smallest failing case.
 proptest = "1"

@@ -11,10 +11,10 @@ use std::sync::{Arc, Mutex};
 // Re-export the facade items the rest of Janis uses, so nothing outside this
 // module names `audio_stack_rs` directly.
 pub use audio_stack_rs::{
-    audio_extension, gain_db, measure_file, read_cover, read_metadata, AudioEngine, CoverArt,
-    EngineEvent, Location, Measured, Metadata, Mode, OverviewSlice, QueueEntry, RemoteFile, Source,
-    Store, AUDIO_EXTENSIONS, CENTER_FREQS, EQ_BAND_COUNT, FRAME_BYTES, LOSSLESS_EXTENSIONS,
-    OVERVIEW_SLICES_PER_SECOND,
+    audio_extension, gain_db, measure_file, read_cover, read_metadata, AudioEngine, BoundedRange,
+    CoverArt, DeferredSource, EngineEvent, Location, Measured, Metadata, Mode, OverviewSlice,
+    QueueEntry, RemoteFile, Source, SourceResolver, Store, AUDIO_EXTENSIONS, CENTER_FREQS,
+    EQ_BAND_COUNT, FRAME_BYTES, LOSSLESS_EXTENSIONS, OVERVIEW_SLICES_PER_SECOND,
 };
 
 use crate::library::Track;

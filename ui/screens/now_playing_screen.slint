@@ -251,8 +251,8 @@ export component NowPlayingScreen inherits Rectangle {
                             horizontal-alignment: left;
                             wrap: word-wrap;
                         }
-                        // A track can be starred; a station is starred by its name.
-                        if Player.local: VerticalLayout {
+                        // Library tracks can be starred; stations have their own star.
+                        if Player.local && Player.favourite-available: VerticalLayout {
                             alignment: start;
                             padding-top: 12px;
                             IconButton {

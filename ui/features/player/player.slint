@@ -54,6 +54,8 @@ export global Player {
     in property <string> initials;
     // The track that plays is one the listener starred.
     in property <bool> favourite;
+    // Transient source tracks do not participate in library favourites.
+    in property <bool> favourite-available: true;
     // The rotating glow behind the Now Playing art.
     in property <image> halo;
 

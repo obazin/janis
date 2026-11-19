@@ -17,13 +17,15 @@
 //!
 //! A song is in a playlist at most once. Groups and the pictures the
 //! listener chooses are Janis's own: no server keeps them.
+//! YouTube Music playlists are imported read-only. Their provider owns names
+//! and songs; the listener can still choose their Janis group and picture.
 
 use std::collections::HashMap;
 
 use crate::effects::Effect;
 use crate::jellyfin::Failure;
-use crate::library::Track;
-use crate::persistence::{MediaServer, PlaylistGroup, SavedPlaylist};
+use crate::library::{Track, TrackSource};
+use crate::persistence::{MediaServer, PlaylistGroup, PlaylistSource, SavedPlaylist};
 use crate::server_pushes::PendingPushes;
 use crate::text::compare_labels;
 
@@ -48,7 +50,8 @@ impl PlaylistKey {
 pub struct Playlist {
     pub key: PlaylistKey,
     pub name: String,
-    /// The media server it lives on; none for a playlist of Janis's own.
+    pub source: PlaylistSource,
+    /// The Jellyfin server it lives on; none for other providers.
     pub server: Option<ServerHome>,
     /// The server has a picture of it.
     pub server_picture: bool,
@@ -71,6 +74,7 @@ impl Playlist {
         Self {
             key: PlaylistKey::Saved(saved.id),
             name: saved.name,
+            source: saved.source,
             server: saved.server.map(|(server_id, item)| ServerHome {
                 server_id,
                 item: Some(item),
@@ -82,12 +86,21 @@ impl Playlist {
         }
     }
 
-    /// Whether `track` may go in: a file in a playlist of Janis's own, a
-    /// server's song in a playlist of that server while it is signed in to.
+    /// Whether provider-owned content may change. Grouping and pictures are
+    /// Janis-local choices for every provider.
+    pub fn can_edit_content(&self) -> bool {
+        self.source != PlaylistSource::YouTubeMusic
+    }
+
+    /// A local playlist takes persistent files; a Jellyfin playlist takes
+    /// persistent songs of its signed-in server. Imported playlists take none.
     pub fn takes(&self, track: &Track, server: Option<&MediaServer>) -> bool {
-        match (&self.server, track.server_id) {
-            (None, None) => true,
-            (Some(home), Some(server_id)) => {
+        if track.id <= 0 {
+            return false;
+        }
+        match (self.source, track.source, &self.server, track.server_id) {
+            (PlaylistSource::Local, TrackSource::File, _, _) => true,
+            (PlaylistSource::Jellyfin, TrackSource::Jellyfin, Some(home), Some(server_id)) => {
                 home.server_id == server_id && server.is_some_and(|server| server.id == server_id)
             }
             _ => false,
@@ -174,7 +187,10 @@ impl Playlists {
             .map(|(key, present)| (*key, *present))
             .collect();
         for ((playlist_id, track_id), present) in entries {
-            if let Some(playlist) = self.find_mut(PlaylistKey::Saved(playlist_id)) {
+            if let Some(playlist) = self
+                .find_mut(PlaylistKey::Saved(playlist_id))
+                .filter(|playlist| playlist.source == PlaylistSource::Jellyfin)
+            {
                 set_entry(playlist, track_id, present, None);
             }
         }
@@ -184,7 +200,10 @@ impl Playlists {
             .map(|(playlist_id, name)| (*playlist_id, name.clone()))
             .collect();
         for (playlist_id, name) in names {
-            if let Some(playlist) = self.find_mut(PlaylistKey::Saved(playlist_id)) {
+            if let Some(playlist) = self
+                .find_mut(PlaylistKey::Saved(playlist_id))
+                .filter(|playlist| playlist.source == PlaylistSource::Jellyfin)
+            {
                 playlist.name = name;
             }
         }
@@ -195,7 +214,10 @@ impl Playlists {
             .map(|(playlist_id, _)| *playlist_id)
             .collect();
         for playlist_id in deleted {
-            if let Some(place) = self.place_of(PlaylistKey::Saved(playlist_id)) {
+            if let Some(place) = self
+                .place_of(PlaylistKey::Saved(playlist_id))
+                .filter(|place| self.playlists[*place].source == PlaylistSource::Jellyfin)
+            {
                 let playlist = self.playlists.remove(place);
                 self.deleting.insert(playlist_id, playlist);
             }
@@ -237,21 +259,29 @@ impl Playlists {
         server: Option<&MediaServer>,
     ) -> Vec<Effect> {
         let name = name.trim().to_owned();
-        if name.is_empty() {
+        if name.is_empty() || track.id <= 0 {
             return Vec::new();
         }
-        let home = match track.server_id {
-            None => None,
-            Some(server_id) => match server.filter(|server| server.id == server_id) {
-                Some(server) => Some(server),
-                None => return Vec::new(),
-            },
+        let home = match track.source {
+            TrackSource::File => None,
+            TrackSource::Jellyfin => {
+                match server.filter(|server| Some(server.id) == track.server_id) {
+                    Some(server) => Some(server),
+                    None => return Vec::new(),
+                }
+            }
+            TrackSource::YouTubeMusic => return Vec::new(),
         };
         self.last_creation += 1;
         let creation = self.last_creation;
         self.playlists.push(Playlist {
             key: PlaylistKey::Creating(creation),
             name: name.clone(),
+            source: if home.is_some() {
+                PlaylistSource::Jellyfin
+            } else {
+                PlaylistSource::Local
+            },
             server: home.map(|server| ServerHome {
                 server_id: server.id,
                 item: None,
@@ -592,6 +622,12 @@ impl Playlists {
                 let Some(settled) = self.names.answer(&playlist_id, sequence, name, took) else {
                     return Vec::new();
                 };
+                if self
+                    .find(key)
+                    .is_some_and(|playlist| playlist.source != PlaylistSource::Jellyfin)
+                {
+                    return Vec::new();
+                }
                 effects.push(Effect::PersistPlaylistName {
                     playlist_id,
                     name: settled.server_value.clone(),
@@ -609,6 +645,12 @@ impl Playlists {
                     return Vec::new();
                 };
                 let playlist = self.deleting.remove(&playlist_id);
+                if self
+                    .find(key)
+                    .is_some_and(|playlist| playlist.source != PlaylistSource::Jellyfin)
+                {
+                    return Vec::new();
+                }
                 if settled.server_value {
                     if let Some(playlist) = playlist {
                         let place = settled
@@ -649,6 +691,12 @@ impl Playlists {
         let settled = self
             .entries
             .answer(&(playlist_id, track_id), sequence, present, took)?;
+        if self
+            .find(PlaylistKey::Saved(playlist_id))
+            .is_some_and(|playlist| playlist.source != PlaylistSource::Jellyfin)
+        {
+            return None;
+        }
         effects.push(Effect::PersistPlaylistEntry {
             playlist_id,
             track_id,
@@ -786,17 +834,17 @@ impl Playlists {
         }]
     }
 
-    /// Whether a change to the playlist can be made: one of Janis's own, or
-    /// one being created, always; a server's only while that server is
-    /// signed in to, since the server is where the change has to go.
+    /// Content of imported playlists is read-only. Local content is editable;
+    /// Jellyfin changes require its signed-in server, except during creation.
     fn changeable(&self, key: PlaylistKey, server: Option<&MediaServer>) -> bool {
-        match (key, self.find(key)) {
-            (PlaylistKey::Creating(_), Some(_)) => true,
-            (PlaylistKey::Saved(_), Some(playlist)) => {
-                playlist.server.is_none() || server_of(playlist, server).is_some()
-            }
-            (_, None) => false,
-        }
+        self.find(key)
+            .is_some_and(|playlist| match playlist.source {
+                PlaylistSource::Local => true,
+                PlaylistSource::Jellyfin => {
+                    matches!(key, PlaylistKey::Creating(_)) || server_of(playlist, server).is_some()
+                }
+                PlaylistSource::YouTubeMusic => false,
+            })
     }
 
     fn place_of(&self, key: PlaylistKey) -> Option<usize> {
@@ -818,6 +866,9 @@ fn server_of<'server>(
     playlist: &Playlist,
     server: Option<&'server MediaServer>,
 ) -> Option<(&'server MediaServer, String)> {
+    if playlist.source != PlaylistSource::Jellyfin {
+        return None;
+    }
     let home = playlist.server.as_ref()?;
     let server = server.filter(|server| server.id == home.server_id)?;
     Some((server, home.item.clone()?))
@@ -866,6 +917,7 @@ mod tests {
         SavedPlaylist {
             id,
             name: name.to_owned(),
+            source: PlaylistSource::Local,
             server: None,
             server_picture: false,
             group_id: None,
@@ -876,6 +928,7 @@ mod tests {
 
     fn on_server(id: i64, name: &str, track_ids: &[i64]) -> SavedPlaylist {
         SavedPlaylist {
+            source: PlaylistSource::Jellyfin,
             server: Some((1, format!("list{id}"))),
             ..local(id, name, track_ids)
         }
@@ -1306,6 +1359,105 @@ mod tests {
             (playlist.name.as_str(), playlist.track_ids.as_slice()),
             ("Road", &[5][..])
         );
+    }
+
+    #[test]
+    fn imported_content_is_read_only_but_its_local_group_and_picture_are_editable() {
+        let mut saved = local(1, "Imported", &[5]);
+        saved.source = PlaylistSource::YouTubeMusic;
+        let mut playlists = with(vec![saved]);
+        let imported = PlaylistKey::Saved(1);
+        let mut song = track(5, "YouTube song");
+        song.source = TrackSource::YouTubeMusic;
+        song.path = "youtube-music://abcdefghijk".to_owned();
+        let before = playlists.clone();
+        assert!(!playlists
+            .find(imported)
+            .expect("imported")
+            .can_edit_content());
+        assert!(playlists.accepting(&song, Some(&server())).is_empty());
+        assert!(playlists
+            .set(imported, &song, false, Some(&server()))
+            .is_empty());
+        assert!(playlists
+            .set(imported, &track(6, "File"), true, None)
+            .is_empty());
+        assert!(playlists
+            .rename(imported, "Changed", Some(&server()))
+            .is_empty());
+        assert!(playlists.delete(imported, Some(&server())).is_empty());
+        assert!(playlists.create("New", &song, Some(&server())).is_empty());
+        assert_eq!(playlists, before);
+
+        playlists.group_created(7, "Moods".to_owned(), None);
+        assert_eq!(
+            playlists.set_group(imported, Some(7)),
+            [Effect::PersistPlaylistGroup {
+                playlist_id: 1,
+                group_id: Some(7)
+            }]
+        );
+        playlists.picture_saved(1);
+        assert!(playlists.find(imported).expect("imported").picture);
+        assert_eq!(
+            playlists.remove_picture(1),
+            [Effect::RemovePlaylistPicture { playlist_id: 1 }]
+        );
+        assert_eq!(
+            playlists.find(imported).expect("imported").group_id,
+            Some(7)
+        );
+    }
+
+    #[test]
+    fn local_playlists_never_accept_youtube_music_or_transient_catalog_tracks() {
+        let mut playlists = with(vec![local(1, "Files", &[5])]);
+        let files = PlaylistKey::Saved(1);
+        let mut remote = track(6, "Remote without a Jellyfin server");
+        remote.source = TrackSource::YouTubeMusic;
+        assert_eq!(remote.server_id, None);
+        assert!(playlists.accepting(&remote, None).is_empty());
+        assert!(playlists.set(files, &remote, true, None).is_empty());
+        assert!(playlists.create("Not a file", &remote, None).is_empty());
+        let transient = track(-1, "Anonymous catalog song");
+        assert!(playlists.accepting(&transient, None).is_empty());
+        assert!(playlists.set(files, &transient, true, None).is_empty());
+        assert!(playlists
+            .create("Not persisted", &transient, None)
+            .is_empty());
+        assert_eq!(songs_of(&playlists, files), [5]);
+        assert_eq!(playlists.playlists().len(), 1);
+    }
+
+    #[test]
+    fn imported_playlists_never_inherit_a_reused_rows_pending_jellyfin_changes() {
+        for action in ["rename", "remove", "delete"] {
+            let mut playlists = with(vec![on_server(1, "Server playlist", &[5])]);
+            let key = PlaylistKey::Saved(1);
+            let effects = match action {
+                "rename" => playlists.rename(key, "Pending name", Some(&server())),
+                "remove" => playlists.set(key, &server_song(5), false, Some(&server())),
+                "delete" => playlists.delete(key, Some(&server())),
+                _ => unreachable!("the test enumerates its actions"),
+            };
+            let (key, change, sequence) = pushed(&effects);
+            let mut imported = local(1, "Imported", &[5]);
+            imported.source = PlaylistSource::YouTubeMusic;
+            playlists.restore(vec![imported.clone()], Vec::new());
+            assert_eq!(
+                playlists.playlists(),
+                [Playlist::from_saved(imported.clone())],
+                "{action}: pending content does not override a new provider"
+            );
+            assert!(playlists
+                .push_finished(key, change, sequence, unreachable())
+                .is_empty());
+            assert_eq!(
+                playlists.playlists(),
+                [Playlist::from_saved(imported)],
+                "{action}: a late failure does not roll back imported content"
+            );
+        }
     }
 
     #[test]

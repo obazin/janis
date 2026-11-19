@@ -10,6 +10,12 @@ use crate::library::Track;
 use crate::persistence::{MediaServer, PlaybackOption};
 use crate::playlists::{PlaylistChange, PlaylistKey};
 use crate::radio::Station;
+/// A YouTube Music read, carried out on its worker rather than in the view.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum YouTubeMusicRequest {
+    Search(String),
+    MoreSongs,
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Effect {
@@ -34,6 +40,12 @@ pub enum Effect {
     Seek {
         track_id: i64,
         position_seconds: f64,
+    },
+    /// Reopen the current source at this position and desired transport state.
+    RefreshTrack {
+        track_id: i64,
+        position_seconds: f64,
+        playing: bool,
     },
     SetShuffle(bool),
     SetRepeat(bool),
@@ -168,6 +180,24 @@ pub enum Effect {
         item: Option<String>,
         change: PlaylistChange,
         sequence: u64,
+    },
+
+    // ── YouTube Music ────────────────────────────────────────────────────────
+    ImportYouTubeMusicBrowser {
+        browser: crate::youtube_browser_import::Browser,
+        epoch: u64,
+    },
+    /// Read the complete saved library before importing it, then report back
+    /// through `YouTubeMusicIntegration::sync_finished` with this `epoch`.
+    SyncYouTubeMusicLibrary {
+        cookie_file: std::path::PathBuf,
+        epoch: u64,
+    },
+    /// Forget this integration's tracks and persisted cookie-file path.
+    RemoveYouTubeMusicLibrary,
+    ReadYouTubeMusic {
+        request: YouTubeMusicRequest,
+        epoch: u64,
     },
 
     // ── Presentation ─────────────────────────────────────────────────────────

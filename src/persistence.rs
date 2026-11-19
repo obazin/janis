@@ -151,7 +151,7 @@ CREATE INDEX IF NOT EXISTS idx_tracks_added ON tracks(added_at DESC);
 /// `SCHEMA` above is frozen at version 1 — it only ever creates a fresh file.
 /// Every change since is a migration, so a new database and an existing one
 /// converge on the same shape.
-const SCHEMA_VERSION: i64 = 9;
+const SCHEMA_VERSION: i64 = 12;
 
 // The migrations reach the version a fresh database is stamped with.
 const _: () = assert!(MIGRATIONS.len() as i64 + 1 == SCHEMA_VERSION);
@@ -271,6 +271,23 @@ const MIGRATIONS: &[&str] = &[
          PRIMARY KEY (playlist_id, track_id)
      ) WITHOUT ROWID;
      CREATE INDEX IF NOT EXISTS idx_playlist_entries_track ON playlist_entries(track_id);",
+    // → 10: only the path of a user-owned cookie file is remembered. Google
+    //       session cookies themselves never enter the database.
+    "ALTER TABLE user_preferences ADD COLUMN youtube_music_cookie_file TEXT;",
+    // → 11: provider ownership separates remote songs from local-file work.
+    //       Existing Jellyfin rows keep their identity and associated state.
+    "ALTER TABLE tracks ADD COLUMN source TEXT NOT NULL DEFAULT 'file';
+     UPDATE tracks SET source = 'jellyfin' WHERE server_id IS NOT NULL;
+     ALTER TABLE tracks ADD COLUMN artwork_address TEXT;
+     CREATE INDEX IF NOT EXISTS idx_tracks_source ON tracks(source);
+     ALTER TABLE user_preferences ADD COLUMN youtube_music_last_sync_at INTEGER;",
+    // → 12: playlists have an explicit provider, with stable identities for
+    //       read-only YouTube Music imports independent of Jellyfin rows.
+    "ALTER TABLE playlists ADD COLUMN source TEXT NOT NULL DEFAULT 'local';
+     UPDATE playlists SET source = 'jellyfin' WHERE server_id IS NOT NULL;
+     ALTER TABLE playlists ADD COLUMN provider_identifier TEXT;
+     CREATE UNIQUE INDEX idx_playlists_provider
+         ON playlists(source, provider_identifier);",
 ];
 
 /// Opens (creating if needed) `janis.db` under the app-data directory and
@@ -307,6 +324,41 @@ fn migrate(conn: &Connection) -> Result<(), String> {
     // `SCHEMA` produces — the version it would have been stamped with.
     if version == 0 {
         version = 1;
+    }
+
+    // The YouTube Music feature's databases used versions 9 and 10 before
+    // upstream introduced playlists at 9. Their shape identifies them
+    // unambiguously: adopt the missing upstream tables without replaying
+    // provider ALTERs over existing tracks.
+    if matches!(version, 9 | 10) {
+        let legacy_youtube_music: bool = conn
+            .query_row(
+                "SELECT EXISTS (
+                     SELECT 1 FROM pragma_table_info('user_preferences')
+                     WHERE name = 'youtube_music_cookie_file'
+                 ) AND NOT EXISTS (
+                     SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'playlists'
+                 )",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(|error| format!("recognize provider schema: {error}"))?;
+        if legacy_youtube_music {
+            let adopted_version = version + 1;
+            let transaction = conn
+                .unchecked_transaction()
+                .map_err(|error| format!("adopt provider schema: {error}"))?;
+            transaction
+                .execute_batch(MIGRATIONS[7])
+                .map_err(|error| format!("adopt upstream playlists: {error}"))?;
+            transaction
+                .pragma_update(None, "user_version", adopted_version)
+                .map_err(|error| format!("stamp adopted provider schema: {error}"))?;
+            transaction
+                .commit()
+                .map_err(|error| format!("commit adopted provider schema: {error}"))?;
+            version = adopted_version;
+        }
     }
 
     for (index, sql) in MIGRATIONS.iter().enumerate() {
@@ -417,6 +469,31 @@ pub fn get_preferences(db: &DbState) -> Result<Preferences, String> {
         },
     )
     .map_err(|e| format!("read preferences: {}", e))
+}
+
+/// The user-owned cookie file to read on a worker when restoring the source.
+pub fn youtube_music_cookie_file(database: &DbState) -> Result<Option<PathBuf>, String> {
+    database
+        .lock()
+        .query_row(
+            "SELECT youtube_music_cookie_file FROM user_preferences WHERE id = 1",
+            [],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .map(|path| path.map(PathBuf::from))
+        .map_err(|error| format!("read YouTube Music connection: {error}"))
+}
+
+/// The last complete YouTube Music library import, in Unix seconds.
+pub fn youtube_music_last_sync(database: &DbState) -> Result<Option<i64>, String> {
+    database
+        .lock()
+        .query_row(
+            "SELECT youtube_music_last_sync_at FROM user_preferences WHERE id = 1",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|error| format!("read YouTube Music sync time: {error}"))
 }
 
 pub fn set_volume(db: &DbState, volume: f64) -> Result<(), String> {
@@ -559,13 +636,35 @@ pub fn set_favourite_track(
     Ok(())
 }
 
+/// The owner of a playlist, independent of provider-specific columns.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PlaylistSource {
+    Local,
+    Jellyfin,
+    YouTubeMusic,
+}
+
+impl rusqlite::types::FromSql for PlaylistSource {
+    fn column_result(value: rusqlite::types::ValueRef<'_>) -> rusqlite::types::FromSqlResult<Self> {
+        match value.as_str()? {
+            "local" => Ok(Self::Local),
+            "jellyfin" => Ok(Self::Jellyfin),
+            "youtube-music" => Ok(Self::YouTubeMusic),
+            source => Err(rusqlite::types::FromSqlError::Other(
+                format!("unknown playlist source: {source}").into(),
+            )),
+        }
+    }
+}
+
 /// A playlist as `janis.db` keeps it, with its songs in order.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SavedPlaylist {
     pub id: i64,
     pub name: String,
-    /// The media server it lives on, and its item there; none for a
-    /// playlist of Janis's own.
+    pub source: PlaylistSource,
+    /// The Jellyfin server it lives on, and its item there; none for other
+    /// providers.
     pub server: Option<(i64, String)>,
     /// The server has a picture of it.
     pub server_picture: bool,
@@ -594,7 +693,7 @@ pub(crate) fn playlists_in(
     let mut playlists: Vec<SavedPlaylist> = connection
         .prepare(
             "SELECT id, name, server_id, server_item, server_picture, group_id,
-                    picture IS NOT NULL
+                    picture IS NOT NULL, source
              FROM playlists ORDER BY created_at, id",
         )
         .and_then(|mut statement| {
@@ -605,6 +704,7 @@ pub(crate) fn playlists_in(
                     Ok(SavedPlaylist {
                         id: row.get(0)?,
                         name: row.get(1)?,
+                        source: row.get(7)?,
                         server: server_id.zip(server_item),
                         server_picture: row.get::<_, i64>(4)? != 0,
                         group_id: row.get(5)?,
@@ -685,8 +785,8 @@ pub fn create_playlist(
             .map(Some),
         Some((server_id, item)) => transaction
             .query_row(
-                "INSERT INTO playlists (name, server_id, server_item)
-                 SELECT ?1, id, ?3 FROM media_servers WHERE id = ?2
+                "INSERT INTO playlists (name, server_id, server_item, source)
+                 SELECT ?1, id, ?3, 'jellyfin' FROM media_servers WHERE id = ?2
                  ON CONFLICT (server_id, server_item) DO UPDATE SET name = excluded.name
                  RETURNING id",
                 rusqlite::params![name, server_id, item],
@@ -711,14 +811,18 @@ pub fn create_playlist(
     Ok(playlist_id)
 }
 
-/// Puts a song at the end of a playlist, unless it is there already or no
-/// longer in the library.
+/// Puts an owned song at the end of an editable playlist, unless it is there
+/// already or no longer in the library.
 fn add_entry(connection: &Connection, playlist_id: i64, track_id: i64) -> rusqlite::Result<usize> {
     connection.execute(
         "INSERT OR IGNORE INTO playlist_entries (playlist_id, track_id, position)
          SELECT ?1, tracks.id,
                 (SELECT COALESCE(MAX(position) + 1, 0) FROM playlist_entries WHERE playlist_id = ?1)
-         FROM tracks WHERE tracks.id = ?2 AND EXISTS (SELECT 1 FROM playlists WHERE id = ?1)",
+         FROM tracks JOIN playlists ON playlists.id = ?1
+         WHERE tracks.id = ?2
+           AND ((playlists.source = 'local' AND tracks.source = 'file')
+                OR (playlists.source = 'jellyfin' AND tracks.source = 'jellyfin'
+                    AND playlists.server_id = tracks.server_id))",
         [playlist_id, track_id],
     )
 }
@@ -735,7 +839,9 @@ pub fn set_playlist_entry(
         add_entry(&connection, playlist_id, track_id)
     } else {
         connection.execute(
-            "DELETE FROM playlist_entries WHERE playlist_id = ?1 AND track_id = ?2",
+            "DELETE FROM playlist_entries WHERE playlist_id = ?1 AND track_id = ?2
+             AND EXISTS (SELECT 1 FROM playlists
+                         WHERE id = ?1 AND source != 'youtube-music')",
             [playlist_id, track_id],
         )
     };
@@ -748,7 +854,7 @@ pub fn rename_playlist(database: &DbState, playlist_id: i64, name: &str) -> Resu
     let connection = database.lock_for_library_change();
     connection
         .execute(
-            "UPDATE playlists SET name = ?1 WHERE id = ?2",
+            "UPDATE playlists SET name = ?1 WHERE id = ?2 AND source != 'youtube-music'",
             rusqlite::params![name, playlist_id],
         )
         .map(|_| ())
@@ -758,7 +864,10 @@ pub fn rename_playlist(database: &DbState, playlist_id: i64, name: &str) -> Resu
 pub fn remove_playlist(database: &DbState, playlist_id: i64) -> Result<(), String> {
     let connection = database.lock_for_library_change();
     connection
-        .execute("DELETE FROM playlists WHERE id = ?1", [playlist_id])
+        .execute(
+            "DELETE FROM playlists WHERE id = ?1 AND source != 'youtube-music'",
+            [playlist_id],
+        )
         .map(|_| ())
         .map_err(|error| format!("remove a playlist: {error}"))
 }
@@ -1302,6 +1411,7 @@ mod tests {
             Ok(vec![SavedPlaylist {
                 id: playlist_id,
                 name: "Road".to_owned(),
+                source: PlaylistSource::Local,
                 server: None,
                 server_picture: false,
                 group_id: None,
@@ -1453,6 +1563,181 @@ mod tests {
     }
 
     #[test]
+    fn legacy_youtube_music_versions_adopt_upstream_playlists_without_losing_provider_rows() {
+        for legacy_version in [9, 10] {
+            let directory = tempfile::tempdir().expect("temporary directory");
+            database_at_version(directory.path(), 8);
+            {
+                let connection = Connection::open(directory.path().join(DATABASE_FILE))
+                    .expect("legacy database");
+                connection
+                    .execute_batch(MIGRATIONS[8])
+                    .expect("legacy cookie path");
+                connection
+                    .execute(
+                        "UPDATE user_preferences SET youtube_music_cookie_file = 'cookies.txt'",
+                        [],
+                    )
+                    .expect("saved connection");
+                if legacy_version == 10 {
+                    connection
+                        .execute_batch(MIGRATIONS[9])
+                        .expect("legacy providers");
+                    connection
+                        .execute_batch(
+                            "INSERT INTO tracks
+                                 (id, path, title, format, source, artwork_address, loudness_lufs)
+                             VALUES (42, 'youtube-music://abcdefghijk', 'Saved', 'AAC',
+                                     'youtube-music', 'https://images.example/cover.jpg', -14);
+                             INSERT INTO favourite_tracks (track_id, added_at) VALUES (42, 123);
+                             UPDATE user_preferences SET youtube_music_last_sync_at = 456;",
+                        )
+                        .expect("legacy saved library");
+                }
+                connection
+                    .pragma_update(None, "user_version", legacy_version)
+                    .expect("legacy version");
+            }
+            let database = init(directory.path().to_path_buf()).expect("adopt legacy schema");
+            assert_eq!(
+                youtube_music_cookie_file(&database),
+                Ok(Some(PathBuf::from("cookies.txt")))
+            );
+            assert_eq!(playlists(&database), Ok(Vec::new()));
+            assert_eq!(playlist_groups(&database), Ok(Vec::new()));
+            let local = create_playlist(&database, "Local", None, &[1])
+                .expect("create after migration")
+                .expect("saved");
+            assert_eq!(playlists(&database).expect("playlists")[0].id, local);
+            if legacy_version == 10 {
+                let tracks = crate::library::list_tracks(&database).expect("retained tracks");
+                let song = tracks
+                    .iter()
+                    .find(|song| song.id == 42)
+                    .expect("provider song");
+                assert_eq!(song.source, crate::library::TrackSource::YouTubeMusic);
+                assert_eq!(
+                    song.artwork_address.as_deref(),
+                    Some("https://images.example/cover.jpg")
+                );
+                assert_eq!(favourite_track_ids(&database), Ok(vec![42]));
+                assert_eq!(youtube_music_last_sync(&database), Ok(Some(456)));
+                let loudness: f64 = database
+                    .lock()
+                    .query_row(
+                        "SELECT loudness_lufs FROM tracks WHERE id = 42",
+                        [],
+                        |row| row.get(0),
+                    )
+                    .expect("retained loudness");
+                assert_eq!(loudness, -14.0);
+            }
+            assert_eq!(
+                database
+                    .lock()
+                    .query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
+                    .expect("migrated version"),
+                SCHEMA_VERSION
+            );
+            drop(database);
+            init(directory.path().to_path_buf()).expect("reopening remains idempotent");
+        }
+    }
+
+    #[test]
+    fn playlist_provider_migration_preserves_local_and_server_customization() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        database_at_version(directory.path(), 9);
+        {
+            let connection =
+                Connection::open(directory.path().join(DATABASE_FILE)).expect("upstream database");
+            connection
+                .execute_batch(
+                    "INSERT INTO media_servers
+                         (id, address, server_identifier, user_identifier, user_name, access_token)
+                     VALUES (7, 'http://server', 'server', 'user', 'Listener', 'token');
+                     INSERT INTO playlist_groups (id, name) VALUES (3, 'Moods');
+                     INSERT INTO playlists (id, name, group_id, picture, created_at)
+                         VALUES (4, 'Local', 3, X'0102', 123);
+                     INSERT INTO playlists
+                         (id, name, server_id, server_item, server_picture, group_id, created_at)
+                         VALUES (5, 'Remote', 7, 'playlist', 1, 3, 456);
+                     INSERT INTO playlist_entries (playlist_id, track_id, position) VALUES (4, 1, 0);",
+                )
+                .expect("upstream playlist state");
+        }
+        let database = init(directory.path().to_path_buf()).expect("migrate playlist sources");
+        let saved = playlists(&database).expect("saved playlists");
+        assert_eq!(saved.len(), 2);
+        assert_eq!(saved[0].source, PlaylistSource::Local);
+        assert_eq!(saved[0].id, 4);
+        assert_eq!(saved[0].group_id, Some(3));
+        assert_eq!(saved[0].track_ids, [1]);
+        assert_eq!(playlist_picture(&database, 4), Ok(Some(vec![1, 2])));
+        assert_eq!(saved[1].source, PlaylistSource::Jellyfin);
+        assert_eq!(saved[1].server, Some((7, "playlist".to_owned())));
+        assert_eq!(saved[1].group_id, Some(3));
+        assert!(saved[1].server_picture);
+    }
+
+    #[test]
+    fn provider_migration_tags_existing_server_rows_without_replacing_their_state() {
+        let directory = tempfile::tempdir().expect("a temporary directory");
+        database_at_version(directory.path(), 9);
+        {
+            let connection =
+                Connection::open(directory.path().join(DATABASE_FILE)).expect("open old database");
+            connection
+                .execute_batch(
+                    "INSERT INTO media_servers
+                         (id, address, server_identifier, user_identifier, user_name, access_token)
+                     VALUES (7, 'http://server', 'server', 'user', 'Listener', 'token');
+                     INSERT INTO tracks
+                         (id, server_id, path, title, format, artwork_item, added_at, loudness_lufs)
+                     VALUES (42, 7, 'jellyfin://server/song', 'Server Song', 'FLAC', 'picture', 123, -14);
+                     INSERT INTO favourite_tracks (track_id, added_at) VALUES (42, 456);
+                     INSERT INTO server_libraries
+                         (id, server_id, library_identifier, name, shown)
+                     VALUES (3, 7, 'music', 'Music', 0);
+                     INSERT INTO track_libraries (track_id, library_id) VALUES (42, 3);",
+                )
+                .expect("seed old server state");
+        }
+
+        let database = init(directory.path().to_path_buf()).expect("migrate");
+        let tracks = crate::library::list_tracks(&database).expect("mapped tracks");
+        let file = tracks
+            .iter()
+            .find(|track| track.path == "/a.flac")
+            .expect("file");
+        assert_eq!(file.source, crate::library::TrackSource::File);
+        assert_eq!(file.artwork_address, None);
+        let server = tracks
+            .iter()
+            .find(|track| track.id == 42)
+            .expect("server song");
+        assert_eq!(server.source, crate::library::TrackSource::Jellyfin);
+        assert_eq!(server.server_id, Some(7));
+        assert_eq!(server.artwork_item.as_deref(), Some("picture"));
+        assert_eq!(server.artwork_address, None);
+        assert_eq!(server.server_libraries, [3]);
+        assert_eq!(server.added_at, 123);
+        assert_eq!(favourite_track_ids(&database), Ok(vec![42]));
+        assert!(!server_libraries(&database).expect("libraries")[0].shown);
+        assert_eq!(youtube_music_last_sync(&database), Ok(None));
+        let connection = database.lock();
+        let state: (f64, i64) = connection
+            .query_row(
+                "SELECT loudness_lufs, favourite_tracks.added_at
+                 FROM tracks JOIN favourite_tracks ON track_id = tracks.id WHERE tracks.id = 42",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("retained state");
+        assert_eq!(state, (-14.0, 456));
+    }
+
+    #[test]
     fn a_database_from_every_earlier_version_upgrades_and_keeps_what_it_held() {
         // Version 0 is a file from before migrations; 1 to 5 are each release
         // since. Every one must land on the current shape with nothing lost.
@@ -1474,6 +1759,8 @@ mod tests {
             assert_eq!(favourite_track_ids(&database), Ok(Vec::new()));
             assert_eq!(playlists(&database), Ok(Vec::new()));
             assert_eq!(playlist_groups(&database), Ok(Vec::new()));
+            assert_eq!(youtube_music_cookie_file(&database), Ok(None));
+            assert_eq!(youtube_music_last_sync(&database), Ok(None));
             let connection = database.lock();
             let (title, server_id): (String, Option<i64>) = connection
                 .query_row(
@@ -1510,7 +1797,7 @@ mod tests {
         database
             .lock()
             .execute(
-                "INSERT INTO tracks (server_id, path, title, format) VALUES (?1, ?2, 'T', 'FLAC')",
+                "INSERT INTO tracks (server_id, source, path, title, format) VALUES (?1, 'jellyfin', ?2, 'T', 'FLAC')",
                 rusqlite::params![server_id, format!("jellyfin://server/{item}")],
             )
             .expect("insert a server track");

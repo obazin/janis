@@ -2,6 +2,11 @@
 /target/
 .cargo/
 
+# JavaScript dependencies and generated web tooling
+/node_modules/
+/.svelte-kit/
+/src-tauri/gen/
+
 # Installers built by `just release`
 /dist/
 *.dmg

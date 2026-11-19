@@ -145,7 +145,7 @@ impl Application {
             for place in cover_requests::nearby(window.first, window.count, length, direction) {
                 let Some(track_id) = self
                     .list_track_id(window.list, place)
-                    .filter(|track_id| *track_id > 0)
+                    .filter(|track_id| *track_id != 0)
                 else {
                     continue;
                 };
@@ -171,6 +171,7 @@ impl Application {
             CoverList::Artists => self.library_artists.row_count(),
             CoverList::Songs => self.library_songs.row_count(),
             CoverList::Favourites => self.library_favourites.row_count(),
+            CoverList::YoutubeMusic => self.youtube_music.state.borrow().visible_length(),
             CoverList::None => 0,
         }
     }
@@ -194,6 +195,12 @@ impl Application {
                 .library_favourites
                 .row_data(place)
                 .map(|track| track.track_id),
+            CoverList::YoutubeMusic => self
+                .youtube_music
+                .state
+                .borrow()
+                .visible_track_id(place)
+                .map(super::interface_id),
             CoverList::None => None,
         }
     }
@@ -210,10 +217,38 @@ impl Application {
         let (Some(epoch), Some(track_id)) = (load, track_id) else {
             return;
         };
+        if track_id < 0 {
+            let address = self
+                .youtube_music
+                .state
+                .borrow()
+                .cover_url(track_id)
+                .map(str::to_owned);
+            let session = self.youtube_music.session();
+            let runtime = Arc::clone(&self.youtube_music.runtime);
+            self.picture_worker.run(move || {
+                let loaded = super::youtube_music_screen::source_picture(
+                    &session,
+                    &runtime,
+                    address.as_deref(),
+                    covers::HERO_SIDE,
+                );
+                post(move |application| application.current_cover_loaded(epoch, loaded));
+            });
+            return;
+        }
         let database = Arc::clone(&self.database);
         let session = self.media_session();
+        let youtube_session = self.youtube_music.session();
+        let youtube_runtime = Arc::clone(&self.youtube_music.runtime);
         self.picture_worker.run(move || {
-            let loaded = library_cover(&database, session.as_ref(), track_id, covers::HERO_SIDE);
+            let loaded = library_cover(
+                &database,
+                session.as_ref(),
+                (&youtube_session, &youtube_runtime),
+                track_id,
+                covers::HERO_SIDE,
+            );
             post(move |application| application.current_cover_loaded(epoch, loaded));
         });
     }
@@ -269,7 +304,7 @@ impl Application {
     /// The cover of a library track for a list or grid tile. Asking for one
     /// that is not cached requests it; the tile is told when it lands.
     pub(super) fn thumbnail(&self, track_id: i64) -> Image {
-        if track_id <= 0 {
+        if track_id == 0 {
             return Image::default();
         }
         let key = self.cover_keys.borrow().key(track_id);
@@ -313,11 +348,39 @@ impl Application {
         }
         let session = self.media_session();
         let epoch = self.cover_requests.borrow().epoch();
+        let youtube_session = self.youtube_music.session();
+        let youtube_runtime = Arc::clone(&self.youtube_music.runtime);
         for key in keys {
             let database = Arc::clone(&self.database);
             let session = session.clone();
+            let youtube_address = match &key {
+                CoverKey::Track(track_id) if *track_id < 0 => Some(
+                    self.youtube_music
+                        .state
+                        .borrow()
+                        .cover_url(*track_id)
+                        .map(str::to_owned),
+                ),
+                _ => None,
+            };
+            let youtube_session = youtube_session.clone();
+            let youtube_runtime = Arc::clone(&youtube_runtime);
             self.thumbnail_workers.run(move || {
-                let loaded = keyed_cover(&database, session.as_ref(), &key, covers::THUMBNAIL_SIDE);
+                let loaded = match youtube_address {
+                    Some(address) => super::youtube_music_screen::source_picture(
+                        &youtube_session,
+                        &youtube_runtime,
+                        address.as_deref(),
+                        covers::THUMBNAIL_SIDE,
+                    ),
+                    None => keyed_cover(
+                        &database,
+                        session.as_ref(),
+                        (&youtube_session, &youtube_runtime),
+                        &key,
+                        covers::THUMBNAIL_SIDE,
+                    ),
+                };
                 post(move |application| application.thumbnail_loaded(epoch, key, loaded));
             });
         }
@@ -370,17 +433,26 @@ impl Application {
 fn keyed_cover(
     database: &DbState,
     session: Option<&Session>,
+    youtube: (&crate::youtube_music::Session, &tokio::runtime::Runtime),
     key: &CoverKey,
     longest_side: u32,
 ) -> Result<Option<Pixels>, String> {
     match key {
-        CoverKey::Track(track_id) => library_cover(database, session, *track_id, longest_side),
+        CoverKey::Track(track_id) => {
+            library_cover(database, session, youtube, *track_id, longest_side)
+        }
         CoverKey::ServerPicture(item) => server_picture(session, item, longest_side),
         CoverKey::PlaylistPicture(playlist_id) => {
             persistence::playlist_picture(database, *playlist_id)?
                 .map(|bytes| covers::picture_cover(bytes, longest_side))
                 .transpose()
         }
+        CoverKey::Address(address) => super::youtube_music_screen::source_picture(
+            youtube.0,
+            youtube.1,
+            Some(address),
+            longest_side,
+        ),
     }
 }
 
@@ -390,6 +462,7 @@ fn keyed_cover(
 fn library_cover(
     database: &DbState,
     session: Option<&Session>,
+    youtube: (&crate::youtube_music::Session, &tokio::runtime::Runtime),
     track_id: i64,
     longest_side: u32,
 ) -> Result<Option<Pixels>, String> {
@@ -401,6 +474,12 @@ fn library_cover(
         CoverSource::Server {
             artwork_item: Some(item),
         } => server_picture(session, &item, longest_side),
+        CoverSource::Address { artwork_address } => super::youtube_music_screen::source_picture(
+            youtube.0,
+            youtube.1,
+            artwork_address.as_deref(),
+            longest_side,
+        ),
     }
 }
 

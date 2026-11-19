@@ -1,0 +1,157 @@
+import { Tokens, Typography, Metrics } from "../../tokens.slint";
+import { Strings } from "strings.slint";
+import { Chip } from "../../atoms/chip.slint";
+import { GhostButton } from "../../atoms/ghost_button.slint";
+import { PrimaryButton } from "../../atoms/primary_button.slint";
+import { YouTubeMusicIntegration } from "youtube_music_integration.slint";
+
+// Imports a saved-song library from a browser or cookie file, and shows sync status.
+export component YouTubeMusicCard inherits Rectangle {
+    border-radius: Metrics.radius-card;
+    border-width: 1px;
+    border-color: Tokens.border;
+    height: self.preferred-height;
+
+    VerticalLayout {
+        padding: 18px;
+        spacing: 14px;
+
+        Text {
+            text: YouTubeMusicIntegration.connected ? Strings.youtube-music-account-connected : Strings.youtube-music-account-title;
+            font-size: Typography.heading-sm;
+            font-weight: Typography.semibold;
+            color: Tokens.text;
+            horizontal-alignment: left;
+            wrap: word-wrap;
+        }
+        Text {
+            text: Strings.youtube-music-account-description;
+            font-size: Typography.caption;
+            color: Tokens.text-muted;
+            horizontal-alignment: left;
+            wrap: word-wrap;
+        }
+        if YouTubeMusicIntegration.configured: Text {
+            text: YouTubeMusicIntegration.summary;
+            font-size: Typography.caption;
+            color: Tokens.text-soft;
+            horizontal-alignment: left;
+            wrap: word-wrap;
+        }
+        Text {
+            text: Strings.youtube-music-account-instructions;
+            font-size: Typography.caption;
+            color: Tokens.text-soft;
+            horizontal-alignment: left;
+            wrap: word-wrap;
+        }
+        Text {
+            text: Strings.youtube-music-account-browser-privacy;
+            font-size: Typography.caption;
+            color: Tokens.text-soft;
+            horizontal-alignment: left;
+            wrap: word-wrap;
+        }
+        Text {
+            text: Strings.youtube-music-browser-label;
+            font-size: Typography.caption;
+            font-weight: Typography.semibold;
+            color: Tokens.text-soft;
+            horizontal-alignment: left;
+        }
+        FlexboxLayout {
+            spacing: 8px;
+            Chip {
+                label: Strings.youtube-music-browser-firefox;
+                active: YouTubeMusicIntegration.browser == "firefox";
+                clicked => {
+                    if !YouTubeMusicIntegration.busy {
+                        YouTubeMusicIntegration.browser-selected("firefox");
+                    }
+                }
+            }
+            Chip {
+                label: Strings.youtube-music-browser-chrome;
+                active: YouTubeMusicIntegration.browser == "chrome";
+                clicked => {
+                    if !YouTubeMusicIntegration.busy {
+                        YouTubeMusicIntegration.browser-selected("chrome");
+                    }
+                }
+            }
+            Chip {
+                label: Strings.youtube-music-browser-chromium;
+                active: YouTubeMusicIntegration.browser == "chromium";
+                clicked => {
+                    if !YouTubeMusicIntegration.busy {
+                        YouTubeMusicIntegration.browser-selected("chromium");
+                    }
+                }
+            }
+            Chip {
+                label: Strings.youtube-music-browser-brave;
+                active: YouTubeMusicIntegration.browser == "brave";
+                clicked => {
+                    if !YouTubeMusicIntegration.busy {
+                        YouTubeMusicIntegration.browser-selected("brave");
+                    }
+                }
+            }
+        }
+        Text {
+            text: Strings.youtube-music-account-manual-instructions;
+            font-size: Typography.caption;
+            color: Tokens.text-soft;
+            horizontal-alignment: left;
+            wrap: word-wrap;
+        }
+        Text {
+            text: Strings.youtube-music-account-warning;
+            font-size: Typography.caption;
+            color: Tokens.warning;
+            horizontal-alignment: left;
+            wrap: word-wrap;
+        }
+        FlexboxLayout {
+            spacing: 12px;
+            PrimaryButton {
+                label: Strings.youtube-music-import-browser;
+                clicked => {
+                    if !YouTubeMusicIntegration.busy {
+                        YouTubeMusicIntegration.browser-import-clicked();
+                    }
+                }
+            }
+        }
+        FlexboxLayout {
+            spacing: 12px;
+            GhostButton {
+                label: Strings.youtube-music-connect;
+                clicked => {
+                    if !YouTubeMusicIntegration.busy {
+                        YouTubeMusicIntegration.connect-clicked();
+                    }
+                }
+            }
+            if YouTubeMusicIntegration.connected: GhostButton {
+                label: Strings.youtube-music-sync;
+                clicked => {
+                    if !YouTubeMusicIntegration.busy {
+                        YouTubeMusicIntegration.sync-clicked();
+                    }
+                }
+            }
+            if YouTubeMusicIntegration.configured || YouTubeMusicIntegration.busy: GhostButton {
+                label: YouTubeMusicIntegration.configured ? Strings.youtube-music-disconnect : Strings.youtube-music-cancel;
+                clicked => { YouTubeMusicIntegration.disconnect-clicked(); }
+            }
+        }
+        if YouTubeMusicIntegration.status != "": Text {
+            text: YouTubeMusicIntegration.status;
+            font-size: Typography.caption;
+            color: YouTubeMusicIntegration.status-failed ? Tokens.error : Tokens.text-soft;
+            horizontal-alignment: left;
+            wrap: word-wrap;
+        }
+    }
+}

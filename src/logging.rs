@@ -35,6 +35,17 @@ impl Log for StandardErrorLogger {
 
     fn log(&self, record: &Record) {
         if self.enabled(record.metadata()) {
+            if record.target().starts_with("rustypipe::") {
+                // Upstream tracing spans include account continuations and visitor
+                // identifiers. Keep the diagnostic, never its request fields;
+                // the controller reports classified failures separately.
+                eprintln!(
+                    "{:5} {}: YouTube API diagnostic (request details omitted)",
+                    record.level(),
+                    record.target(),
+                );
+                return;
+            }
             eprintln!(
                 "{:5} {}: {}",
                 record.level(),

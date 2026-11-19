@@ -10,7 +10,8 @@
 //! Every user action updates the mirror at once — the click is visible before
 //! the engine confirms it — and returns the [`Effect`]s that make it real.
 
-use std::time::Instant;
+use std::collections::HashMap;
+use std::time::{Instant, SystemTime};
 
 use crate::audio::{EngineEvent, Mode};
 use crate::effects::Effect;
@@ -35,8 +36,11 @@ pub struct ListsBasis {
 
 pub struct Player {
     queue: Vec<Track>,
+    source_expiries: HashMap<String, SystemTime>,
     index: usize,
     playing: bool,
+    /// A local stop not requested by the listener means Play replays the track.
+    replay_on_resume: bool,
     mode: Mode,
     stream: StreamInfo,
     connecting: bool,
@@ -64,8 +68,10 @@ impl Player {
     pub fn new(now: Instant) -> Self {
         Self {
             queue: Vec::new(),
+            source_expiries: HashMap::new(),
             index: 0,
             playing: false,
+            replay_on_resume: false,
             mode: Mode::Idle,
             stream: StreamInfo::default(),
             connecting: false,
@@ -147,6 +153,51 @@ impl Player {
         }
     }
 
+    /// Records a source deadline only while its track still belongs to this queue.
+    /// Resolutions for upcoming tracks remain available when playback advances.
+    pub fn source_resolved(&mut self, path: &str, expires_at: SystemTime) {
+        if self.mode != Mode::Local
+            || self.station.is_some()
+            || !self.queue.iter().any(|track| track.path == path)
+        {
+            return;
+        }
+        if let Some(expiry) = self.source_expiries.get_mut(path) {
+            *expiry = expires_at;
+        } else {
+            self.source_expiries.insert(path.to_owned(), expires_at);
+        }
+    }
+
+    pub fn current_source_expiry(&self) -> Option<SystemTime> {
+        self.current()
+            .and_then(|track| self.source_expiries.get(&track.path).copied())
+    }
+
+    /// Reopens an expired playing source without moving the playhead.
+    /// Taking its deadline prevents another request before resolution finishes.
+    pub fn refresh_source(&mut self, now: Instant) -> Vec<Effect> {
+        if !self.playing || !self.take_expired_source() {
+            return Vec::new();
+        }
+        let elapsed = now
+            .saturating_duration_since(self.position_at)
+            .as_secs_f64();
+        self.position_seconds += elapsed;
+        if self.duration_seconds > 0.0 {
+            self.position_seconds = self.position_seconds.min(self.duration_seconds);
+        }
+        self.position_at = now;
+        vec![Effect::RefreshTrack {
+            track_id: self
+                .current()
+                .expect("an expired source belongs to the current track")
+                .id,
+            position_seconds: self.position_seconds,
+            playing: true,
+        }]
+    }
+
     /// What the Now Playing lists are built from: they change with the
     /// current track and the shuffle switch, and nothing else the engine
     /// reports — position reports ten times a second among it.
@@ -209,11 +260,19 @@ impl Player {
                 queue_len: _,
                 has_next: _,
             } => {
+                if playing || mode != Mode::Local {
+                    self.replay_on_resume = false;
+                } else if self.mode == Mode::Local && self.playing {
+                    self.replay_on_resume = true;
+                }
                 self.mode = mode;
                 self.index = index;
                 self.shuffle = shuffle;
                 self.repeat = repeat;
                 self.playing = playing;
+                if mode != Mode::Local {
+                    self.source_expiries.clear();
+                }
                 if mode == Mode::Radio {
                     let current_id = self.station.as_ref().map(|station| station.id.as_str());
                     if current_id != station_id.as_deref() {
@@ -263,6 +322,7 @@ impl Player {
                 vec![Effect::ShowStreamCover(cover)]
             }
             EngineEvent::TrackChanged { index } => {
+                self.replay_on_resume = false;
                 self.index = index;
                 // The new track starts from its beginning; the engine's next
                 // position report confirms its exact length.
@@ -322,6 +382,8 @@ impl Player {
         self.connection_epoch += 1;
         self.index = index.min(tracks.len() - 1);
         self.queue = tracks;
+        self.source_expiries.clear();
+        self.replay_on_resume = false;
         self.mode = Mode::Local;
         self.playing = true;
         self.position_seconds = 0.0;
@@ -354,6 +416,8 @@ impl Player {
             });
         }
         let mut effects = self.clear_stream_info();
+        self.source_expiries.clear();
+        self.replay_on_resume = false;
         self.station = Some(station.clone());
         self.position_seconds = 0.0;
         self.duration_seconds = 0.0;
@@ -412,8 +476,23 @@ impl Player {
                 .as_secs_f64();
             self.position_seconds = (self.position_seconds + elapsed).min(self.duration_seconds);
         }
+        let replay = self.replay_on_resume && !self.playing;
+        self.replay_on_resume = false;
+        if replay {
+            self.position_seconds = 0.0;
+        }
         self.playing = !self.playing;
         self.position_at = now;
+        if self.playing && self.take_expired_source() && !replay {
+            return vec![Effect::RefreshTrack {
+                track_id: self
+                    .current()
+                    .expect("an expired source belongs to the current track")
+                    .id,
+                position_seconds: self.position_seconds,
+                playing: true,
+            }];
+        }
         vec![Effect::Toggle]
     }
 
@@ -441,8 +520,16 @@ impl Player {
         if self.duration_seconds <= 0.0 || fraction.is_nan() {
             return Vec::new();
         }
+        self.replay_on_resume = false;
         self.position_seconds = fraction.clamp(0.0, 1.0) * self.duration_seconds;
         self.position_at = now;
+        if self.take_expired_source() {
+            return vec![Effect::RefreshTrack {
+                track_id,
+                position_seconds: self.position_seconds,
+                playing: self.playing,
+            }];
+        }
         vec![Effect::Seek {
             track_id,
             position_seconds: self.position_seconds,
@@ -468,6 +555,17 @@ impl Player {
     pub fn toggle_repeat(&mut self) -> Vec<Effect> {
         self.repeat = !self.repeat;
         vec![Effect::SetRepeat(self.repeat)]
+    }
+
+    fn take_expired_source(&mut self) -> bool {
+        if self
+            .current_source_expiry()
+            .is_none_or(|expires_at| expires_at > SystemTime::now())
+        {
+            return false;
+        }
+        self.source_expiries.remove(&self.queue[self.index].path);
+        true
     }
 
     fn clear_stream_info(&mut self) -> Vec<Effect> {
@@ -1235,5 +1333,235 @@ mod tests {
         assert_eq!(player.next(), [Effect::Next]);
         assert_eq!(player.previous(), [Effect::Previous]);
         assert_eq!(player.jump_to(3), [Effect::JumpTo(3)]);
+    }
+
+    #[test]
+    fn source_deadlines_are_recorded_only_for_tracks_in_the_active_queue() {
+        let now = Instant::now();
+        let track = timed_track(1, 100.0);
+        let expiry = SystemTime::now() + Duration::from_secs(31_536_000);
+        let mut player = Player::new(now);
+        player.source_resolved(&track.path, expiry);
+        assert_eq!(player.current_source_expiry(), None);
+
+        player.play_queue(vec![track.clone()], 0, now);
+        player.source_resolved("absent", SystemTime::UNIX_EPOCH);
+        assert_eq!(player.current_source_expiry(), None);
+        player.source_resolved(&track.path, SystemTime::UNIX_EPOCH);
+        player.source_resolved(&track.path, expiry);
+        assert_eq!(player.current_source_expiry(), Some(expiry));
+        assert!(player.refresh_source(now).is_empty());
+    }
+
+    #[test]
+    fn a_preloaded_source_deadline_survives_advancing_to_its_track() {
+        let now = Instant::now();
+        let first = timed_track(1, 100.0);
+        let second = timed_track(2, 200.0);
+        let expiry = SystemTime::now() + Duration::from_secs(31_536_000);
+        let mut player = playing(vec![first, second.clone()], 20.0, now);
+        player.source_resolved(&second.path, expiry);
+        assert_eq!(player.current_source_expiry(), None);
+
+        player.apply(EngineEvent::TrackChanged { index: 1 }, now, &no_stations);
+        player.apply(state(Mode::Local, true, 1, None), now, &no_stations);
+
+        assert_eq!(player.current_source_expiry(), Some(expiry));
+        assert!(player.refresh_source(now).is_empty());
+    }
+
+    #[test]
+    fn replacing_the_queue_discards_current_and_preloaded_source_deadlines() {
+        let now = Instant::now();
+        let first = timed_track(1, 100.0);
+        let second = timed_track(2, 200.0);
+        let mut player = playing(vec![first.clone(), second.clone()], 20.0, now);
+        player.source_resolved(&first.path, SystemTime::UNIX_EPOCH);
+        player.source_resolved(&second.path, SystemTime::UNIX_EPOCH);
+
+        player.play_queue(vec![first, second], 0, now);
+
+        assert_eq!(player.current_source_expiry(), None);
+        player.apply(EngineEvent::TrackChanged { index: 1 }, now, &no_stations);
+        assert_eq!(player.current_source_expiry(), None);
+        assert!(player.refresh_source(now).is_empty());
+    }
+
+    #[test]
+    fn starting_a_station_discards_source_deadlines_and_ignores_late_resolutions() {
+        let now = Instant::now();
+        let track = timed_track(1, 100.0);
+        let mut player = playing(vec![track.clone()], 20.0, now);
+        player.source_resolved(&track.path, SystemTime::UNIX_EPOCH);
+
+        player.play_station(station("fip"));
+        player.source_resolved(&track.path, SystemTime::UNIX_EPOCH);
+        player.apply(state(Mode::Local, true, 0, None), now, &no_stations);
+
+        assert_eq!(player.current_source_expiry(), None);
+        assert!(player.refresh_source(now).is_empty());
+    }
+
+    #[test]
+    fn idle_and_radio_engine_states_discard_source_deadlines() {
+        for mode in [Mode::Idle, Mode::Radio] {
+            let now = Instant::now();
+            let track = timed_track(1, 100.0);
+            let mut player = playing(vec![track.clone()], 20.0, now);
+            player.source_resolved(&track.path, SystemTime::UNIX_EPOCH);
+            player.apply(state(mode, false, 0, None), now, &no_stations);
+            player.source_resolved(&track.path, SystemTime::UNIX_EPOCH);
+            assert_eq!(player.current_source_expiry(), None);
+            assert!(player.refresh_source(now).is_empty());
+
+            player.apply(state(Mode::Local, true, 0, None), now, &no_stations);
+            assert_eq!(player.current_source_expiry(), None);
+        }
+    }
+
+    #[test]
+    fn an_expired_playing_source_reopens_once_at_the_interpolated_position() {
+        let now = Instant::now();
+        let track = timed_track(1, 100.0);
+        let mut player = playing(vec![track.clone()], 20.0, now);
+        player.source_resolved(&track.path, SystemTime::UNIX_EPOCH);
+        let later = now + Duration::from_secs(5);
+
+        assert_eq!(
+            player.refresh_source(later),
+            [Effect::RefreshTrack {
+                track_id: 1,
+                position_seconds: 25.0,
+                playing: true,
+            }]
+        );
+        assert_eq!(player.position_seconds(), 25.0);
+        assert_eq!(player.live_progress(later), 0.25);
+        assert!(player.playing());
+        assert_eq!(player.current_source_expiry(), None);
+        assert!(player
+            .refresh_source(later + Duration::from_secs(1))
+            .is_empty());
+
+        let expiry = SystemTime::now() + Duration::from_secs(31_536_000);
+        player.source_resolved(&track.path, expiry);
+        assert_eq!(player.current_source_expiry(), Some(expiry));
+        assert!(player.refresh_source(later).is_empty());
+    }
+
+    #[test]
+    fn refreshing_clamps_to_a_known_track_end_but_preserves_an_unknown_length_position() {
+        for (duration_seconds, expected_position) in [(22.0, 22.0), (0.0, 25.0)] {
+            let now = Instant::now();
+            let track = timed_track(1, duration_seconds);
+            let mut player = playing(vec![track.clone()], 20.0, now);
+            player.source_resolved(&track.path, SystemTime::UNIX_EPOCH);
+
+            assert_eq!(
+                player.refresh_source(now + Duration::from_secs(5)),
+                [Effect::RefreshTrack {
+                    track_id: 1,
+                    position_seconds: expected_position,
+                    playing: true,
+                }]
+            );
+        }
+    }
+
+    #[test]
+    fn an_expired_paused_source_waits_for_resume_and_keeps_its_position() {
+        let now = Instant::now();
+        let track = timed_track(1, 100.0);
+        let mut player = playing(vec![track.clone()], 20.0, now);
+        player.toggle(now + Duration::from_secs(5));
+        player.source_resolved(&track.path, SystemTime::UNIX_EPOCH);
+        let later = now + Duration::from_secs(50);
+
+        assert!(player.refresh_source(later).is_empty());
+        assert_eq!(player.current_source_expiry(), Some(SystemTime::UNIX_EPOCH));
+        assert_eq!(
+            player.toggle(later),
+            [Effect::RefreshTrack {
+                track_id: 1,
+                position_seconds: 25.0,
+                playing: true,
+            }]
+        );
+        assert!(player.playing());
+        assert_eq!(player.position_seconds(), 25.0);
+        assert_eq!(player.current_source_expiry(), None);
+        assert!(player.refresh_source(later).is_empty());
+    }
+
+    #[test]
+    fn an_engine_finished_queue_replays_instead_of_refreshing_its_expired_end_position() {
+        let now = Instant::now();
+        let track = timed_track(1, 100.0);
+        let mut player = playing(vec![track.clone()], 99.9, now);
+        player.apply(state(Mode::Local, false, 0, None), now, &no_stations);
+        player.source_resolved(&track.path, SystemTime::UNIX_EPOCH);
+        assert_eq!(
+            player.toggle(now + Duration::from_secs(60)),
+            [Effect::Toggle]
+        );
+        assert_eq!(player.position_seconds(), 0.0);
+    }
+
+    #[test]
+    fn pausing_an_expired_source_still_uses_the_ordinary_toggle() {
+        let now = Instant::now();
+        let track = timed_track(1, 100.0);
+        let mut player = playing(vec![track.clone()], 20.0, now);
+        player.source_resolved(&track.path, SystemTime::UNIX_EPOCH);
+
+        assert_eq!(player.toggle(now), [Effect::Toggle]);
+        assert!(!player.playing());
+        assert_eq!(player.current_source_expiry(), Some(SystemTime::UNIX_EPOCH));
+    }
+
+    #[test]
+    fn seeking_an_expired_source_reopens_at_the_target_with_the_same_transport_state() {
+        for playing_after_seek in [false, true] {
+            let now = Instant::now();
+            let track = timed_track(1, 100.0);
+            let mut player = playing(vec![track.clone()], 20.0, now);
+            if !playing_after_seek {
+                player.toggle(now);
+            }
+            player.source_resolved(&track.path, SystemTime::UNIX_EPOCH);
+
+            assert_eq!(
+                player.seek_to(0.75, now),
+                [Effect::RefreshTrack {
+                    track_id: 1,
+                    position_seconds: 75.0,
+                    playing: playing_after_seek,
+                }]
+            );
+            assert_eq!(player.position_seconds(), 75.0);
+            assert_eq!(player.playing(), playing_after_seek);
+            assert_eq!(player.current_source_expiry(), None);
+            assert!(player.refresh_source(now).is_empty());
+        }
+    }
+
+    #[test]
+    fn an_unexpired_source_uses_the_ordinary_seek_pause_and_resume_commands() {
+        let now = Instant::now();
+        let track = timed_track(1, 100.0);
+        let expiry = SystemTime::now() + Duration::from_secs(31_536_000);
+        let mut player = playing(vec![track.clone()], 20.0, now);
+        player.source_resolved(&track.path, expiry);
+
+        assert_eq!(
+            player.seek_to(0.5, now),
+            [Effect::Seek {
+                track_id: 1,
+                position_seconds: 50.0
+            }]
+        );
+        assert_eq!(player.toggle(now), [Effect::Toggle]);
+        assert_eq!(player.toggle(now), [Effect::Toggle]);
+        assert_eq!(player.current_source_expiry(), Some(expiry));
     }
 }

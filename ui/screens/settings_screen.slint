@@ -9,6 +9,7 @@ import { Equalizer } from "../features/equalizer/equalizer.slint";
 import { OpenEqualizerButton } from "../features/equalizer/open_equalizer_button.slint";
 import { Settings } from "../features/settings/settings.slint";
 import { JellyfinCard } from "../features/jellyfin/jellyfin_card.slint";
+import { YouTubeMusicCard } from "../features/youtube_music/youtube_music_card.slint";
 
 // A read-only fact about the audio output.
 component OutputCard inherits Rectangle {
@@ -166,6 +167,20 @@ export component SettingsScreen inherits Rectangle {
             Rectangle {
                 height: 32px;
             }
+            SectionLabel {
+                label: Strings.youtube-music-title;
+            }
+
+            Rectangle {
+                height: 12px;
+            }
+
+            YouTubeMusicCard { }
+
+            Rectangle {
+                height: 32px;
+            }
+
 
             SectionLabel {
                 label: Strings.settings-language;

@@ -43,6 +43,8 @@ export struct ManagedPlaylist {
     group: string,
     // The listener chose a picture for it.
     picture: bool,
+    // Content changes are available; grouping and chosen pictures stay local.
+    editable: bool,
     track-id: int,
     gradient-index: int,
 }
@@ -139,7 +141,7 @@ export global Library {
     in property <[MenuChoice]> menu-playlists;
     // The song is a favourite.
     in property <bool> menu-favourite;
-    // The song was clicked in a playlist's panel.
+    // The song was clicked in a playlist whose content can be changed.
     in property <bool> menu-in-playlist;
     // Opens with the playlists unfolded.
     in property <bool> menu-submenu-open;

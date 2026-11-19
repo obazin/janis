@@ -87,7 +87,7 @@ component ManagedPlaylistRow inherits Rectangle {
                     clicked => { Library.playlist-picture-removed(root.playlist.playlist-id); }
                 }
             }
-            VerticalLayout {
+            if root.playlist.editable: VerticalLayout {
                 alignment: center;
                 IconButton {
                     identifier: IconButtonIdentifier.playlist-rename;
@@ -96,7 +96,7 @@ component ManagedPlaylistRow inherits Rectangle {
                     clicked => { Library.playlist-renamed(root.playlist.playlist-id); }
                 }
             }
-            VerticalLayout {
+            if root.playlist.editable: VerticalLayout {
                 alignment: center;
                 IconButton {
                     identifier: IconButtonIdentifier.playlist-delete;
