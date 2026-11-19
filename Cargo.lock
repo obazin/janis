@@ -5244,7 +5244,7 @@ dependencies = [
 [[package]]
 name = "rustypipe"
 version = "0.11.4"
-source = "git+https://codeberg.org/ThetaDev/rustypipe?rev=c93bafd8416843fc68251f9ce8830a89504c185e#c93bafd8416843fc68251f9ce8830a89504c185e"
+source = "git+https://github.com/calops/rustypipe?rev=8a239ea336c3da826703c0a8b71cafd9377e6520#8a239ea336c3da826703c0a8b71cafd9377e6520"
 dependencies = [
  "data-encoding",
  "fancy-regex",

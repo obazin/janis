@@ -15,7 +15,7 @@ use rustypipe::client::{RustyPipe, RustyPipeQuery};
 use rustypipe::error::{Error, ExtractionError};
 use rustypipe::model::paginator::{ContinuationEndpoint, Paginator};
 use rustypipe::model::traits::FromYtItem;
-use rustypipe::model::{Thumbnail, TrackItem, TrackType};
+use rustypipe::model::{MusicPlaylistItem, Thumbnail, TrackItem, TrackType};
 
 use crate::audio::{Location, Metadata};
 use crate::library::{YouTubeMusicLibrary, YouTubeMusicPlaylist, YouTubeMusicTrack};
@@ -217,7 +217,7 @@ impl Session {
             .client
             .user_auth_set_cookie_txt(&cookies)
             .await
-            .map_err(upstream_failure)?;
+            .map_err(|error| api_failure("account initialization", error))?;
         drop(cookies);
         session.authenticated = true;
         Ok(session)
@@ -235,7 +235,7 @@ impl Session {
             .query(false)
             .music_search_tracks(query)
             .await
-            .map_err(upstream_failure)?;
+            .map_err(|error| api_failure("anonymous search", error))?;
         Ok(self.song_page(result.items))
     }
 
@@ -262,14 +262,14 @@ impl Session {
             .query(true)
             .music_saved_playlists()
             .await
-            .map_err(upstream_failure)?;
+            .map_err(|error| api_failure("saved playlists", error))?;
         let saved_playlists = self
             .collect_pages(saved_playlists, |continuation| {
                 self.continued_items(continuation)
             })
             .await?;
         let mut playlist_identifiers = HashSet::new();
-        for saved_playlist in saved_playlists {
+        for saved_playlist in saved_playlists.into_iter().filter(is_music_playlist) {
             if !playlist_identifiers.insert(saved_playlist.id.clone()) {
                 continue;
             }
@@ -277,7 +277,7 @@ impl Session {
                 .query(true)
                 .music_playlist(saved_playlist.id)
                 .await
-                .map_err(upstream_failure)?;
+                .map_err(|error| api_failure("playlist details", error))?;
             let entries = self
                 .collect_pages(details.tracks, |continuation| {
                     self.continued_items(continuation)
@@ -304,7 +304,7 @@ impl Session {
         self.query(true)
             .music_saved_tracks()
             .await
-            .map_err(upstream_failure)
+            .map_err(|error| api_failure("saved songs", error))
     }
 
     pub async fn more_songs(&self, continuation: SongContinuation) -> Result<SongPage, Failure> {
@@ -330,7 +330,7 @@ impl Session {
                 continuation.visitor_data.as_deref(),
             )
             .await
-            .map_err(upstream_failure)
+            .map_err(|error| api_failure("continuation", error))
     }
 
     /// Only the token determines exhaustion; empty pages and advertised counts do not.
@@ -457,6 +457,21 @@ fn read_cookie_file(path: &Path) -> Result<String, Failure> {
     String::from_utf8(bytes).map_err(|_| Failure::InvalidCookieFile)
 }
 
+fn api_failure(operation: &'static str, error: Error) -> Failure {
+    let category = match &error {
+        Error::Auth(_) => "authentication",
+        Error::Http(_) => "HTTP transport",
+        Error::HttpStatus(_, _) => "HTTP status",
+        Error::Other(_) => "other upstream error",
+        Error::Extraction(ExtractionError::InvalidData(_)) => "response parsing",
+        Error::Extraction(ExtractionError::WrongResult(_)) => "unexpected content identity",
+        Error::Extraction(_) => "content extraction",
+    };
+    // Upstream messages can embed account data, tokens and request fields.
+    log::warn!("YouTube Music {operation} failed ({category})");
+    upstream_failure(error)
+}
+
 fn upstream_failure(error: Error) -> Failure {
     match error {
         Error::Auth(_) | Error::HttpStatus(401 | 403, _) => Failure::CredentialsRejected,
@@ -476,6 +491,11 @@ fn is_identifier(identifier: &str) -> bool {
     identifier
         .bytes()
         .all(|character| character.is_ascii_alphanumeric() || matches!(character, b'-' | b'_'))
+}
+
+fn is_music_playlist(playlist: &MusicPlaylistItem) -> bool {
+    // YouTube marks its built-in "Episodes for Later" collection as non-podcast.
+    !playlist.is_podcast && playlist.id != "SE"
 }
 
 fn available_music_track(track: &TrackItem) -> bool {
@@ -635,6 +655,44 @@ fn is_domain(host: &str, domain: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn music_playlist_import_excludes_episodes_and_podcasts_but_keeps_liked_music() {
+        let playlists: Vec<MusicPlaylistItem> = [
+            ("LM", false),
+            ("SE", false),
+            ("PL2MI040U_GXobmpXtTwBF7oHBGT5BETSD", false),
+            ("RDCLAK5uy_kb7EBi6y3GrtJri4_ZH56Ms786DFEimbM", false),
+            ("PL5dDx681T4bR7ZF1IuWzOv1omlRbE7PiJ", true),
+        ]
+        .into_iter()
+        .map(|(identifier, is_podcast)| {
+            serde_json::from_value(serde_json::json!({
+                "id": identifier,
+                "name": "Playlist",
+                "thumbnail": [],
+                "channel": null,
+                "track_count": null,
+                "from_ytm": false,
+                "is_podcast": is_podcast
+            }))
+            .expect("a complete saved playlist row")
+        })
+        .collect();
+        let imported: Vec<_> = playlists
+            .into_iter()
+            .filter(is_music_playlist)
+            .map(|playlist| playlist.id)
+            .collect();
+        assert_eq!(
+            imported,
+            [
+                "LM",
+                "PL2MI040U_GXobmpXtTwBF7oHBGT5BETSD",
+                "RDCLAK5uy_kb7EBi6y3GrtJri4_ZH56Ms786DFEimbM"
+            ]
+        );
+    }
 
     fn track() -> TrackItem {
         serde_json::from_value(serde_json::json!({
