@@ -22,6 +22,7 @@ mod jellyfin;
 mod library;
 mod library_view;
 mod logging;
+mod media_controls;
 mod media_server;
 mod notifications;
 mod now_playing;

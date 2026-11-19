@@ -51,11 +51,11 @@ impl Application {
             application.run(effects);
         }));
         player.on_next(self.action(|application| {
-            let effects = application.player.borrow().next();
+            let effects = application.player.borrow_mut().next();
             application.run(effects);
         }));
         player.on_previous(self.action(|application| {
-            let effects = application.player.borrow().previous();
+            let effects = application.player.borrow_mut().previous();
             application.run(effects);
         }));
         player.on_shuffle_toggled(self.action(|application| {
@@ -136,7 +136,7 @@ impl Application {
         match click {
             Some(QueueClick::Replace(tracks, place)) => self.play_queue(tracks, place),
             Some(QueueClick::Jump(place)) => {
-                let effects = self.player.borrow().jump_to(place);
+                let effects = self.player.borrow_mut().jump_to(place);
                 self.run(effects);
             }
             None => {}
@@ -192,6 +192,7 @@ impl Application {
             self.last_frame.set(Instant::now());
             self.frame_timer.restart();
         }
+        self.publish_media_controls(&player);
     }
 
     /// What plays, as the mini player, the art tile and Now Playing show it.

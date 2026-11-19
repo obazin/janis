@@ -7,6 +7,7 @@
 //! runs on another thread and comes back through [`post`].
 
 mod artwork;
+mod desktop_media;
 mod equalizer_sheet;
 mod jellyfin_settings;
 mod library_screens;
@@ -86,6 +87,7 @@ pub struct Application {
     catalog: Catalog,
     translations: RefCell<Translations>,
     player: RefCell<Player>,
+    media_controls: RefCell<Option<crate::media_controls::Controls>>,
     equalizer: RefCell<Equalizer>,
     playback_options: RefCell<PlaybackOptions>,
     notifications: RefCell<Notifications>,
@@ -240,6 +242,7 @@ impl Application {
                 &preferences.language,
             ))),
             player: RefCell::new(Player::new(now)),
+            media_controls: RefCell::new(None),
             equalizer: RefCell::new(Equalizer::default()),
             playback_options: RefCell::new(PlaybackOptions::default()),
             notifications: RefCell::new(Notifications::default()),
@@ -323,6 +326,7 @@ impl Application {
             unsaved_equalizer: RefCell::new(None),
         });
         APPLICATION.with(|cell| *cell.borrow_mut() = Some(Rc::clone(&application)));
+        application.connect_media_controls();
 
         application.apply_strings();
         application.connect_window();
@@ -351,6 +355,7 @@ impl Application {
     /// Stops the engine and lets go of the controller. Called once the event
     /// loop has ended, while the process is still alive.
     pub fn shut_down(&self) {
+        self.media_controls.borrow_mut().take();
         self.frame_timer.stop();
         self.loudness.stop();
         self.track_overview.borrow().stop();
@@ -556,6 +561,9 @@ impl Application {
                 ),
                 Effect::ConnectStation { station, epoch } => self.connect_station(station, epoch),
                 Effect::Toggle => self.engine.toggle(),
+                Effect::Play => self.engine.play(),
+                Effect::Pause => self.engine.pause(),
+                Effect::Stop => self.engine.stop(),
                 Effect::Next => self.engine.next(),
                 Effect::Previous => self.engine.previous(),
                 Effect::JumpTo(index) => self.engine.jump_to(index),

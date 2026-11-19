@@ -26,11 +26,13 @@ pub enum Effect {
         epoch: u64,
     },
     Toggle,
+    Play,
+    Pause,
+    Stop,
     Next,
     Previous,
     JumpTo(usize),
-    /// Seek the track with this id to a position in seconds; ignored by the
-    /// engine when another track plays by the time it gets there.
+    /// Seek only if this track is still current when the command executes.
     Seek {
         track_id: i64,
         position_seconds: f64,
