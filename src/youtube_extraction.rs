@@ -545,8 +545,9 @@ mod tests {
     }
 
     #[test]
-    fn supported_audio_retains_exact_size_duration_and_expiry_without_debug_secrets() {
-        let resolved = parse(&extracted_audio()).expect("the AAC fixture is supported");
+    fn supported_audio_preserves_metadata_and_only_supplies_known_range_lengths() {
+        let mut value = extracted_audio();
+        let resolved = parse(&value).expect("the AAC fixture is supported");
         assert_eq!(resolved.duration_seconds, 212.25);
         assert_eq!(resolved.gain_db, 0.0);
         assert_eq!(
@@ -564,13 +565,9 @@ mod tests {
                 .and_then(|range| range.content_length),
             Some(1234567)
         );
-        assert!(!format!("{resolved:?}").contains("secret"));
-        assert!(!format!("{resolved:?}").contains("googlevideo"));
-    }
-
-    #[test]
-    fn unknown_file_size_leaves_range_length_discovery_to_the_engine() {
-        let mut value = extracted_audio();
+        let diagnostic = format!("{resolved:?}");
+        assert!(!diagnostic.contains("secret"));
+        assert!(!diagnostic.contains("googlevideo"));
         value.as_object_mut().unwrap().remove("filesize");
         let resolved = parse(&value).expect("a direct URL does not require a preannounced size");
         let Location::Remote(remote) = resolved.location else {
@@ -689,8 +686,12 @@ mod tests {
     }
 
     #[test]
-    fn cookies_are_copied_into_a_separate_ephemeral_jar() {
+    fn cookie_copies_are_bounded_isolated_from_the_original_and_ephemeral() {
         let mut original = NamedTempFile::new().expect("the fixture file can be created");
+        assert_eq!(
+            copy_cookie_file(original.path()).err(),
+            Some(Failure::InvalidCookieFile)
+        );
         let contents =
             b"# Netscape HTTP Cookie File\n.youtube.com\tTRUE\t/\tTRUE\t0\tSID\tsecret\n";
         original
@@ -712,15 +713,6 @@ mod tests {
         );
         drop(copied);
         assert!(!copied_path.exists());
-    }
-
-    #[test]
-    fn empty_or_oversized_cookie_jars_are_rejected() {
-        let original = NamedTempFile::new().expect("the fixture file can be created");
-        assert_eq!(
-            copy_cookie_file(original.path()).err(),
-            Some(Failure::InvalidCookieFile)
-        );
         original
             .as_file()
             .set_len(LARGEST_COOKIE_FILE_BYTES + 1)

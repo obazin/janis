@@ -233,26 +233,6 @@ impl YouTubeMusicIntegration {
 mod tests {
     use super::*;
 
-    #[test]
-    fn a_refused_like_keeps_cached_account_data_and_requires_reconnection() {
-        let mut state = YouTubeMusicIntegration::default();
-        let request = epoch(
-            &state.restore(Some(PathBuf::from("cookies.txt")), 12, Some(100)),
-            "cookies.txt",
-        );
-        state.sync_finished(request, Ok((12, 100)));
-        assert_eq!(
-            state.credentials_rejected(),
-            notification(Failure::CredentialsRejected)
-        );
-        assert!(!state.connected);
-        assert!(state.failed);
-        assert_eq!(state.cookie_file, Some(PathBuf::from("cookies.txt")));
-        assert_eq!(state.song_count, 12);
-        assert_eq!(state.last_sync, Some(100));
-        assert!(state.sync().is_empty());
-    }
-
     fn epoch(effects: &[Effect], expected_path: &str) -> u64 {
         match effects {
             [Effect::SyncYouTubeMusicLibrary { cookie_file, epoch }] => {
@@ -301,20 +281,6 @@ mod tests {
         assert_eq!(state.cookie_file, Some(PathBuf::from("managed.txt")));
         assert_eq!(state.song_count, 24);
         assert!(!state.busy);
-    }
-
-    #[test]
-    fn a_failed_browser_export_keeps_the_saved_account_and_library() {
-        let mut state = connected();
-        let current = match state.import_browser().as_slice() {
-            [Effect::ImportYouTubeMusicBrowser { epoch, .. }] => *epoch,
-            _ => panic!("browser import"),
-        };
-        state.sync_finished(current, Err(Failure::BrowserImport));
-        assert!(state.connected && state.failed && !state.busy);
-        assert_eq!(state.cookie_file, Some(PathBuf::from("kept.txt")));
-        assert_eq!(state.song_count, 12);
-        assert_eq!(state.last_sync, Some(100));
     }
 
     #[test]
@@ -444,30 +410,36 @@ mod tests {
     }
 
     #[test]
-    fn failed_replacement_preserves_the_kept_library_and_connection() {
-        for failure in [
-            Failure::CredentialsRejected,
-            Failure::InvalidCookieFile,
-            Failure::CookieFileUnreadable,
-            Failure::Network,
-            Failure::Library,
+    fn failed_file_and_browser_replacements_preserve_the_kept_account() {
+        for (browser, failure) in [
+            (false, Failure::CredentialsRejected),
+            (false, Failure::InvalidCookieFile),
+            (false, Failure::CookieFileUnreadable),
+            (false, Failure::Network),
+            (false, Failure::Library),
+            (true, Failure::BrowserImport),
         ] {
             let mut state = connected();
-            let current = epoch(
-                &state.connect(PathBuf::from("replacement.txt")),
-                "replacement.txt",
-            );
+            let current = if browser {
+                match state.import_browser().as_slice() {
+                    [Effect::ImportYouTubeMusicBrowser { epoch, .. }] => *epoch,
+                    _ => panic!("browser import"),
+                }
+            } else {
+                epoch(
+                    &state.connect(PathBuf::from("replacement.txt")),
+                    "replacement.txt",
+                )
+            };
             assert!(state.connected);
             assert_eq!(state.cookie_file, Some(PathBuf::from("kept.txt")));
             assert_eq!(
                 state.sync_finished(current, Err(failure)),
                 notification(failure)
             );
-            assert!(state.connected);
-            assert!(state.failed);
+            assert!(state.connected && state.failed && !state.busy);
             assert_eq!(state.cookie_file, Some(PathBuf::from("kept.txt")));
-            assert_eq!(state.song_count, 12);
-            assert_eq!(state.last_sync, Some(100));
+            assert_eq!((state.song_count, state.last_sync), (12, Some(100)));
             epoch(&state.sync(), "kept.txt");
         }
     }
@@ -489,24 +461,25 @@ mod tests {
     }
 
     #[test]
-    fn rejected_kept_credentials_request_reconnection_without_deleting_cache() {
-        let mut state = connected();
-        let current = epoch(&state.sync(), "kept.txt");
-        assert_eq!(
-            state.sync_finished(current, Err(Failure::CredentialsRejected)),
-            notification(Failure::CredentialsRejected)
-        );
-        assert!(!state.connected);
-        assert!(!state.busy);
-        assert!(state.failed);
-        assert_eq!(state.status_key, "youtubeMusic.status.credentialsRejected");
-        assert_eq!(state.cookie_file, Some(PathBuf::from("kept.txt")));
-        assert_eq!(state.song_count, 12);
-        assert_eq!(state.last_sync, Some(100));
-        assert!(state.sync().is_empty());
-        assert_eq!(state.disconnect(), vec![Effect::RemoveYouTubeMusicLibrary]);
-        assert_eq!(state.song_count, 0);
-        assert_eq!(state.cookie_file, None);
+    fn rejected_syncs_and_likes_require_reconnection_without_deleting_cache() {
+        for from_like in [false, true] {
+            let mut state = connected();
+            let effects = if from_like {
+                state.credentials_rejected()
+            } else {
+                let current = epoch(&state.sync(), "kept.txt");
+                state.sync_finished(current, Err(Failure::CredentialsRejected))
+            };
+            assert_eq!(effects, notification(Failure::CredentialsRejected));
+            assert!(!state.connected && !state.busy && state.failed);
+            assert_eq!(state.status_key, "youtubeMusic.status.credentialsRejected");
+            assert_eq!(state.cookie_file, Some(PathBuf::from("kept.txt")));
+            assert_eq!((state.song_count, state.last_sync), (12, Some(100)));
+            assert!(state.sync().is_empty());
+            assert_eq!(state.disconnect(), vec![Effect::RemoveYouTubeMusicLibrary]);
+            assert_eq!(state.song_count, 0);
+            assert_eq!(state.cookie_file, None);
+        }
     }
 
     #[test]

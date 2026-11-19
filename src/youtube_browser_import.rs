@@ -337,7 +337,7 @@ mod tests {
     }
 
     #[test]
-    fn filtered_jars_are_bounded_and_removed_with_their_guards() {
+    fn filtered_jars_are_bounded_removed_by_their_guards_and_never_retain_invalid_input() {
         let directory = tempfile::tempdir().expect("private directory");
         let source = directory.path().join("source");
         std::fs::write(&source, cookie(".youtube.com")).expect("synthetic source");
@@ -356,13 +356,6 @@ mod tests {
             filter_cookie_file(&source, directory.path()),
             Err(Failure::InvalidCookieFile)
         ));
-        assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 1);
-    }
-
-    #[test]
-    fn raw_oversize_and_invalid_text_are_rejected_without_retaining_a_jar() {
-        let directory = tempfile::tempdir().expect("private directory");
-        let source = directory.path().join("source");
         File::create(&source)
             .unwrap()
             .set_len(LARGEST_RAW_FILE_BYTES + 1)

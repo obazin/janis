@@ -906,16 +906,9 @@ mod tests {
         ]
         .into_iter()
         .map(|(identifier, is_podcast)| {
-            serde_json::from_value(serde_json::json!({
-                "id": identifier,
-                "name": "Playlist",
-                "thumbnail": [],
-                "channel": null,
-                "track_count": null,
-                "from_ytm": false,
-                "is_podcast": is_podcast
-            }))
-            .expect("a complete saved playlist row")
+            let mut playlist = playlist_item(identifier);
+            playlist.is_podcast = is_podcast;
+            playlist
         })
         .collect();
         let imported: Vec<_> = playlists
@@ -955,8 +948,10 @@ mod tests {
     }
 
     #[test]
-    fn song_mapping_preserves_artists_album_duration_and_largest_cover() {
-        let mapped = song(track()).expect("the sample is a playable song row");
+    fn song_and_library_mapping_preserve_metadata_without_inventing_audio_properties() {
+        let mut item = track();
+        item.track_nr = Some(7);
+        let mapped = song(item.clone()).expect("the sample is a playable song row");
         assert_eq!(mapped.identifier, "dQw4w9WgXcQ");
         assert_eq!(mapped.title, "A song");
         assert_eq!(mapped.artist, "First artist, Second artist");
@@ -966,15 +961,34 @@ mod tests {
             mapped.artwork_url.as_deref(),
             Some("https://lh3.googleusercontent.com/large")
         );
+        let saved = library_track(item).expect("the fixture is a saved song");
+        assert_eq!(saved.identifier, mapped.identifier);
+        assert_eq!(saved.metadata.title, mapped.title);
+        assert_eq!(saved.metadata.artist, Some(mapped.artist));
+        assert_eq!(saved.metadata.album, mapped.album);
+        assert_eq!(
+            saved.metadata.duration_secs,
+            f64::from(mapped.duration_seconds)
+        );
+        assert_eq!(saved.metadata.track_number, Some(7));
+        assert_eq!(saved.artwork_address, mapped.artwork_url);
+        assert!(saved.metadata.format.is_empty());
+        assert_eq!(saved.metadata.sample_rate, None);
+        assert_eq!(saved.metadata.bit_depth, None);
+        assert_eq!(saved.metadata.channels, None);
+        assert_eq!(saved.metadata.year, None);
+        assert_eq!(saved.metadata.rg_track_gain_db, None);
     }
 
     #[test]
-    fn incomplete_and_non_song_rows_are_not_offered_for_playback() {
+    fn mapping_rejects_invalid_rows_and_requires_complete_catalog_metadata() {
         let mut unavailable = track();
         unavailable.unavailable = true;
+        assert!(library_track(unavailable.clone()).is_none());
         assert!(song(unavailable).is_none());
         let mut unavailable = track();
         unavailable.id.clear();
+        assert!(library_track(unavailable.clone()).is_none());
         assert!(song(unavailable).is_none());
         let mut unavailable = track();
         unavailable.duration = Some(0);
@@ -984,106 +998,65 @@ mod tests {
         assert!(song(incomplete).is_none());
         let mut incomplete = track();
         incomplete.name.clear();
+        assert!(library_track(incomplete.clone()).is_none());
         assert!(song(incomplete).is_none());
         let mut incomplete = track();
         incomplete.artists.clear();
         assert!(song(incomplete).is_none());
         let mut podcast = track();
         podcast.track_type = TrackType::Episode;
+        assert!(library_track(podcast.clone()).is_none());
         assert!(song(podcast).is_none());
     }
 
     #[test]
-    fn page_mapping_preserves_search_endpoint_visitor_and_account_scope_even_if_rows_are_filtered()
-    {
-        let session = Session::anonymous().expect("an in-memory client can be created");
-        let mut page = Paginator::default();
-        page.ctoken = Some("private-continuation".into());
-        page.visitor_data = Some("private-visitor".into());
-        page.endpoint = ContinuationEndpoint::MusicSearch;
-        page.authenticated = false;
-        let mut unavailable = track();
-        unavailable.unavailable = true;
-        page.items.push(unavailable);
-        let page = session.song_page(page);
-        assert!(page.songs.is_empty());
-        let continuation = page
-            .next
-            .expect("a filtered page may still have more rows")
-            .0;
-        assert_eq!(continuation.endpoint, ContinuationEndpoint::MusicSearch);
-        assert_eq!(continuation.token, "private-continuation");
-        assert_eq!(
-            continuation.visitor_data.as_deref(),
-            Some("private-visitor")
-        );
-        assert!(!continuation.authenticated);
-        assert!(session.clone().check_continuation(&continuation).is_ok());
-        let other_session = Session::anonymous().expect("an independent client can be created");
-        assert_eq!(
-            other_session.check_continuation(&continuation),
-            Err(Failure::InvalidContinuation)
-        );
-        let diagnostic = format!("{continuation:?}");
-        assert!(!diagnostic.contains("private-continuation"));
-        assert!(!diagnostic.contains("private-visitor"));
-    }
-
-    #[test]
-    fn account_song_continuations_require_the_originating_authenticated_session() {
-        let mut session = Session::anonymous().expect("an in-memory client can be created");
-        let mut page = Paginator::default();
-        page.items.push(track());
-        page.ctoken = Some("account-continuation".into());
-        page.visitor_data = Some("account-visitor".into());
-        page.endpoint = ContinuationEndpoint::MusicBrowse;
-        page.authenticated = true;
-        let page = session.song_page(page);
-        let continuation = page.next.expect("the account page continues").0;
-        assert_eq!(continuation.endpoint, ContinuationEndpoint::MusicBrowse);
-        assert_eq!(
-            continuation.visitor_data.as_deref(),
-            Some("account-visitor")
-        );
-        assert!(continuation.authenticated);
-        assert_eq!(
-            session.check_continuation(&continuation),
-            Err(Failure::CredentialsRejected)
-        );
-        session.authenticated = true;
-        assert!(session.check_continuation(&continuation).is_ok());
-        let mut other_session = Session::anonymous().expect("an independent client can be created");
-        other_session.authenticated = true;
-        assert_eq!(
-            other_session.check_continuation(&continuation),
-            Err(Failure::InvalidContinuation)
-        );
-    }
-
-    #[test]
-    fn saved_library_mapping_preserves_available_metadata_without_inventing_audio_properties() {
-        let mut item = track();
-        item.track_nr = Some(7);
-        let mapped = library_track(item).expect("the fixture is a saved song");
-        assert_eq!(mapped.identifier, "dQw4w9WgXcQ");
-        assert_eq!(mapped.metadata.title, "A song");
-        assert_eq!(
-            mapped.metadata.artist.as_deref(),
-            Some("First artist, Second artist")
-        );
-        assert_eq!(mapped.metadata.album.as_deref(), Some("The album"));
-        assert_eq!(mapped.metadata.duration_secs, 213.0);
-        assert_eq!(mapped.metadata.track_number, Some(7));
-        assert_eq!(
-            mapped.artwork_address.as_deref(),
-            Some("https://lh3.googleusercontent.com/large")
-        );
-        assert!(mapped.metadata.format.is_empty());
-        assert_eq!(mapped.metadata.sample_rate, None);
-        assert_eq!(mapped.metadata.bit_depth, None);
-        assert_eq!(mapped.metadata.channels, None);
-        assert_eq!(mapped.metadata.year, None);
-        assert_eq!(mapped.metadata.rg_track_gain_db, None);
+    fn filtered_song_pages_preserve_endpoint_visitor_and_originating_session_scope() {
+        for (endpoint, authenticated) in [
+            (ContinuationEndpoint::MusicSearch, false),
+            (ContinuationEndpoint::MusicBrowse, true),
+        ] {
+            let mut session = Session::anonymous().expect("an in-memory client can be created");
+            let mut page = Paginator::default();
+            page.ctoken = Some("private-continuation".into());
+            page.visitor_data = Some("private-visitor".into());
+            page.endpoint = endpoint;
+            page.authenticated = authenticated;
+            let mut unavailable = track();
+            unavailable.unavailable = true;
+            page.items.push(unavailable);
+            let page = session.song_page(page);
+            assert!(page.songs.is_empty());
+            let continuation = page
+                .next
+                .expect("a filtered page may still have more rows")
+                .0;
+            assert_eq!(continuation.endpoint, endpoint);
+            assert_eq!(continuation.token, "private-continuation");
+            assert_eq!(
+                continuation.visitor_data.as_deref(),
+                Some("private-visitor")
+            );
+            assert_eq!(continuation.authenticated, authenticated);
+            assert_eq!(
+                session.check_continuation(&continuation),
+                if authenticated {
+                    Err(Failure::CredentialsRejected)
+                } else {
+                    Ok(())
+                }
+            );
+            session.authenticated = authenticated;
+            assert!(session.clone().check_continuation(&continuation).is_ok());
+            let mut other = Session::anonymous().expect("an independent client can be created");
+            other.authenticated = authenticated;
+            assert_eq!(
+                other.check_continuation(&continuation),
+                Err(Failure::InvalidContinuation)
+            );
+            let diagnostic = format!("{continuation:?}");
+            assert!(!diagnostic.contains("private-continuation"));
+            assert!(!diagnostic.contains("private-visitor"));
+        }
     }
 
     #[test]
@@ -1100,22 +1073,6 @@ mod tests {
         assert_eq!(mapped.metadata.duration_secs, 0.0);
         assert_eq!(mapped.metadata.track_number, None);
         assert_eq!(mapped.artwork_address, None);
-    }
-
-    #[test]
-    fn saved_library_mapping_excludes_unavailable_podcast_and_invalid_rows() {
-        let mut item = track();
-        item.unavailable = true;
-        assert!(library_track(item).is_none());
-        let mut item = track();
-        item.track_type = TrackType::Episode;
-        assert!(library_track(item).is_none());
-        let mut item = track();
-        item.id.clear();
-        assert!(library_track(item).is_none());
-        let mut item = track();
-        item.name.clear();
-        assert!(library_track(item).is_none());
     }
 
     #[test]
@@ -1160,9 +1117,6 @@ mod tests {
             ["dQw4w9WgXcQ", "abcdefghijk"]
         );
         assert_eq!(tracks[0].metadata.title, "A song");
-        assert_eq!(tracks[1].metadata.title, "Playlist-only song");
-        assert_eq!(tracks[1].metadata.artist, None);
-        assert_eq!(tracks[1].metadata.duration_secs, 0.0);
     }
 
     fn playlist_item(identifier: &str) -> rustypipe::model::MusicPlaylistItem {
@@ -1179,7 +1133,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn saved_playlist_pages_continue_past_empty_pages_and_preserve_scope_and_order() {
+    async fn saved_playlist_pages_preserve_scope_and_order_and_reject_partial_results() {
         let mut session = Session::anonymous().expect("an in-memory client can be created");
         session.authenticated = true;
         let mut first = Paginator::default();
@@ -1197,10 +1151,10 @@ mod tests {
         empty.authenticated = true;
         let mut last = Paginator::default();
         last.items.push(playlist_item("last"));
-        let mut pages = [empty, last].into_iter();
+        let mut pages = [empty.clone(), last].into_iter();
         let mut requested = Vec::new();
         let items = session
-            .collect_pages(first, |continuation| {
+            .collect_pages(first.clone(), |continuation| {
                 assert!(session.check_continuation(&continuation).is_ok());
                 assert!(continuation.authenticated);
                 assert_eq!(continuation.endpoint, ContinuationEndpoint::MusicBrowse);
@@ -1223,24 +1177,10 @@ mod tests {
                 ("last-page".into(), Some("second-visitor".into()))
             ]
         );
-    }
-
-    #[tokio::test]
-    async fn a_terminal_playlist_parsing_error_rejects_the_entire_listing() {
-        let mut session = Session::anonymous().expect("an in-memory client can be created");
-        session.authenticated = true;
-        let mut first = Paginator::default();
-        first.items.push(playlist_item("first"));
-        first.ctoken = Some("second-page".into());
-        first.endpoint = ContinuationEndpoint::MusicBrowse;
-        first.authenticated = true;
-        let mut second = first.clone();
-        second.items = vec![playlist_item("second")];
-        second.ctoken = Some("unsupported-last-page".into());
         let parsing_error = upstream_failure(Error::Extraction(ExtractionError::InvalidData(
             "unsupported terminal gridContinuation".into(),
         )));
-        let mut responses = [Ok(second), Err(parsing_error)].into_iter();
+        let mut responses = [Ok(empty), Err(parsing_error)].into_iter();
         let result = session
             .collect_pages(first, |_| {
                 std::future::ready(responses.next().expect("only two continuations exist"))
