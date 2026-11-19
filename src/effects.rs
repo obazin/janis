@@ -10,6 +10,13 @@ use crate::library::Track;
 use crate::persistence::{MediaServer, PlaybackOption};
 use crate::playlists::{PlaylistChange, PlaylistKey};
 use crate::radio::Station;
+#[cfg(feature = "youtube-music")]
+/// A YouTube Music read, carried out on its worker rather than in the view.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum YouTubeMusicRequest {
+    Search(String),
+    MoreSongs,
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Effect {
@@ -18,6 +25,15 @@ pub enum Effect {
     LoadQueue {
         tracks: Vec<Track>,
         index: usize,
+    },
+    #[cfg(feature = "youtube-music")]
+    /// Replace cached queue sources and transitions, then restore the kept
+    /// track's playhead and transport state.
+    ReplaceQueue {
+        tracks: Vec<Track>,
+        index: usize,
+        position_seconds: f64,
+        playing: bool,
     },
     /// Connect to a station off the user-interface thread, then report back
     /// through `Player::station_connection_finished` with the same `epoch`.
@@ -34,6 +50,13 @@ pub enum Effect {
     Seek {
         track_id: i64,
         position_seconds: f64,
+    },
+    #[cfg(feature = "youtube-music")]
+    /// Reopen the current source at this position and desired transport state.
+    RefreshTrack {
+        track_id: i64,
+        position_seconds: f64,
+        playing: bool,
     },
     SetShuffle(bool),
     SetRepeat(bool),
@@ -158,6 +181,19 @@ pub enum Effect {
         favourite: bool,
         sequence: u64,
     },
+    #[cfg(feature = "youtube-music")]
+    PushYouTubeMusicFavourite {
+        track_id: i64,
+        address: String,
+        favourite: bool,
+        sequence: u64,
+    },
+    #[cfg(feature = "youtube-music")]
+    PersistYouTubeMusicFavourite {
+        track_id: i64,
+        address: String,
+        favourite: bool,
+    },
     /// Make, change or delete a playlist on its server off the
     /// user-interface thread, then report back through
     /// `Playlists::push_finished` with the same `sequence`. `item` is the
@@ -168,6 +204,28 @@ pub enum Effect {
         item: Option<String>,
         change: PlaylistChange,
         sequence: u64,
+    },
+
+    // ── YouTube Music ────────────────────────────────────────────────────────
+    #[cfg(feature = "youtube-music")]
+    ImportYouTubeMusicBrowser {
+        browser: crate::youtube_browser_import::Browser,
+        epoch: u64,
+    },
+    #[cfg(feature = "youtube-music")]
+    /// Read the complete saved library before importing it, then report back
+    /// through `YouTubeMusicIntegration::sync_finished` with this `epoch`.
+    SyncYouTubeMusicLibrary {
+        cookie_file: std::path::PathBuf,
+        epoch: u64,
+    },
+    #[cfg(feature = "youtube-music")]
+    /// Forget this integration's tracks and persisted cookie-file path.
+    RemoveYouTubeMusicLibrary,
+    #[cfg(feature = "youtube-music")]
+    ReadYouTubeMusic {
+        request: YouTubeMusicRequest,
+        epoch: u64,
     },
 
     // ── Presentation ─────────────────────────────────────────────────────────

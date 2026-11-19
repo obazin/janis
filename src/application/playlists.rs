@@ -14,7 +14,7 @@ use crate::covers::{self, CoverKey};
 use crate::jellyfin::{self, Failure, Session};
 use crate::library::Track;
 use crate::library_view::{self, LibraryTab, SelectionKind};
-use crate::persistence::{self, MediaServer};
+use crate::persistence::{self, MediaServer, PlaylistSource};
 use crate::playlists::{Playlist, PlaylistChange, PlaylistKey};
 use crate::text;
 use crate::translations::Translations;
@@ -213,6 +213,9 @@ impl Application {
 
     /// Opens a song's menu where it was right-clicked.
     pub(super) fn open_track_menu(&self, track_id: i64, x: f32, y: f32, in_playlist: bool) {
+        if track_id <= 0 {
+            return;
+        }
         let Some(track) = self.track_of(track_id) else {
             return;
         };
@@ -240,7 +243,7 @@ impl Application {
                     self.playlists
                         .borrow()
                         .find(key)
-                        .map(|playlist| playlist.holds(track_id))
+                        .map(|playlist| playlist.can_edit_content() && playlist.holds(track_id))
                 })
                 .unwrap_or(false);
         self.menu_playlists.set_vec(choices);
@@ -323,14 +326,19 @@ impl Application {
                         .map(|track| track.title)
                         .unwrap_or_default(),
                 ),
-                Naming::RenamePlaylist(key) => (
-                    "playlists.name.renameTitle",
-                    "playlists.name.save",
-                    playlists
+                Naming::RenamePlaylist(key) => {
+                    let Some(playlist) = playlists
                         .find(key)
-                        .map(|playlist| playlist.name.clone())
-                        .unwrap_or_default(),
-                ),
+                        .filter(|playlist| playlist.can_edit_content())
+                    else {
+                        return;
+                    };
+                    (
+                        "playlists.name.renameTitle",
+                        "playlists.name.save",
+                        playlist.name.clone(),
+                    )
+                }
                 Naming::NewGroup { .. } => (
                     "playlists.group.newTitle",
                     "playlists.name.create",
@@ -390,11 +398,14 @@ impl Application {
             let playlists = self.playlists.borrow();
             match deletion {
                 Deletion::Playlist(key) => {
-                    let Some(playlist) = playlists.find(key) else {
+                    let Some(playlist) = playlists
+                        .find(key)
+                        .filter(|playlist| playlist.can_edit_content())
+                    else {
                         return;
                     };
-                    let message = match &playlist.server {
-                        Some(_) => translations.translate(
+                    let message = match playlist.source {
+                        PlaylistSource::Jellyfin => translations.translate(
                             "playlists.delete.server",
                             &[(
                                 "server",
@@ -405,7 +416,9 @@ impl Application {
                                     .unwrap_or_default(),
                             )],
                         ),
-                        None => translations.text("playlists.delete.local"),
+                        PlaylistSource::Local => translations.text("playlists.delete.local"),
+                        #[cfg(feature = "youtube-music")]
+                        PlaylistSource::YouTubeMusic => return,
                     };
                     (
                         translations.translate(
@@ -890,13 +903,26 @@ fn playlist_card(
         key: library_view::playlist_selection_key(playlist.key).into(),
         title: playlist.name.as_str().into(),
         subtitle: library_view::playlist_detail(&songs, translations).into(),
-        detail: SharedString::default(),
+        detail: playlist_provider_label(playlist, translations).into(),
         track_id: songs
             .first()
             .map(|track| interface_id(track.id))
             .unwrap_or_default(),
         gradient_index: playlist_gradient_index(playlist, &songs),
         playlist_id: playlist.key.saved().map(interface_id).unwrap_or_default(),
+    }
+}
+
+/// The provider shown on a playlist's card and in the shared manager.
+fn playlist_provider_label(playlist: &Playlist, translations: &Translations) -> String {
+    match playlist.source {
+        PlaylistSource::Local => translations.text("playlists.source.local"),
+        PlaylistSource::Jellyfin => translations.text("jellyfin.title"),
+        #[cfg(feature = "youtube-music")]
+        PlaylistSource::YouTubeMusic => translations.translate(
+            "playlists.source.readOnly",
+            &[("provider", translations.text("youtubeMusic.title"))],
+        ),
     }
 }
 
@@ -945,9 +971,15 @@ fn managed_rows(
                 playlist: ManagedPlaylist {
                     playlist_id: playlist.key.saved().map(interface_id).unwrap_or_default(),
                     name: playlist.name.as_str().into(),
-                    detail: library_view::playlist_detail(&songs, translations).into(),
+                    detail: format!(
+                        "{} · {}",
+                        playlist_provider_label(playlist, translations),
+                        library_view::playlist_detail(&songs, translations),
+                    )
+                    .into(),
                     group: group_name.into(),
                     picture: playlist.picture,
+                    editable: playlist.can_edit_content(),
                     track_id: songs
                         .first()
                         .map(|track| interface_id(track.id))

@@ -1,0 +1,24 @@
+// Anonymous YouTube Music catalog data, filled by the controller.
+
+export struct YouTubeMusicSong {
+    track-id: int,
+    number: string,
+    title: string,
+    artist: string,
+    album: string,
+    duration: string,
+    gradient-index: int,
+}
+
+export global YouTubeMusic {
+    in-out property <string> query;
+    in property <bool> loading;
+    in property <bool> status-failed;
+    in property <bool> has-more;
+    in property <string> status;
+    in property <[YouTubeMusicSong]> songs;
+
+    callback search-submitted();
+    callback song-clicked(index: int);
+    callback more-clicked();
+}

@@ -326,13 +326,13 @@ pub fn any_favourite_shown(tracks: &[Track], favourites: &[i64]) -> bool {
 }
 
 /// The tracks the Local Files screen's search keeps: files on disk whose
-/// title or artist matches. A media server's songs are in the library, not
-/// among the local files.
+/// title or artist matches. Integrated providers contribute to the Library,
+/// not to Local Files.
 pub fn search_local_files(tracks: &[Track], search: &str) -> Vec<Track> {
     let query = normalized_query(search);
     tracks
         .iter()
-        .filter(|track| track.server_id.is_none())
+        .filter(|track| track.source == crate::library::TrackSource::File)
         .filter(|track| {
             query.is_empty()
                 || fold(&track.title).contains(&query)
@@ -965,6 +965,15 @@ mod tests {
         let file = track(1, "Alive");
         let song = track(2, "Alive again").server(7, "item");
         let tracks = vec![file.clone(), song];
+        #[cfg(feature = "youtube-music")]
+        let tracks = {
+            let mut youtube_song = track(3, "Alive online");
+            youtube_song.source = crate::library::TrackSource::YouTubeMusic;
+            youtube_song.path = "youtube-music://abcdefghijk".to_owned();
+            let mut tracks = tracks;
+            tracks.push(youtube_song);
+            tracks
+        };
 
         assert_eq!(search_local_files(&tracks, ""), vec![file.clone()]);
         assert_eq!(search_local_files(&tracks, "alive"), vec![file]);
@@ -2035,6 +2044,7 @@ mod tests {
         Playlist {
             key: PlaylistKey::Saved(id),
             name: name.to_owned(),
+            source: crate::persistence::PlaylistSource::Local,
             server: None,
             server_picture: false,
             group_id,

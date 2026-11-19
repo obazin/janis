@@ -10,7 +10,11 @@
 //! Every user action updates the mirror at once — the click is visible before
 //! the engine confirms it — and returns the [`Effect`]s that make it real.
 
+#[cfg(feature = "youtube-music")]
+use std::collections::HashMap;
 use std::time::Instant;
+#[cfg(feature = "youtube-music")]
+use std::time::SystemTime;
 
 use crate::audio::{EngineEvent, Mode};
 use crate::effects::Effect;
@@ -35,8 +39,12 @@ pub struct ListsBasis {
 
 pub struct Player {
     queue: Vec<Track>,
+    #[cfg(feature = "youtube-music")]
+    source_expiries: HashMap<String, SystemTime>,
     index: usize,
     playing: bool,
+    /// A local stop not requested by the listener means Play replays the track.
+    replay_on_resume: bool,
     mode: Mode,
     stream: StreamInfo,
     connecting: bool,
@@ -64,8 +72,11 @@ impl Player {
     pub fn new(now: Instant) -> Self {
         Self {
             queue: Vec::new(),
+            #[cfg(feature = "youtube-music")]
+            source_expiries: HashMap::new(),
             index: 0,
             playing: false,
+            replay_on_resume: false,
             mode: Mode::Idle,
             stream: StreamInfo::default(),
             connecting: false,
@@ -147,6 +158,54 @@ impl Player {
         }
     }
 
+    #[cfg(feature = "youtube-music")]
+    /// Records a source deadline only while its track still belongs to this queue.
+    /// Resolutions for upcoming tracks remain available when playback advances.
+    pub fn source_resolved(&mut self, path: &str, expires_at: SystemTime) {
+        if self.mode != Mode::Local
+            || self.station.is_some()
+            || !self.queue.iter().any(|track| track.path == path)
+        {
+            return;
+        }
+        if let Some(expiry) = self.source_expiries.get_mut(path) {
+            *expiry = expires_at;
+        } else {
+            self.source_expiries.insert(path.to_owned(), expires_at);
+        }
+    }
+
+    #[cfg(feature = "youtube-music")]
+    pub fn current_source_expiry(&self) -> Option<SystemTime> {
+        self.current()
+            .and_then(|track| self.source_expiries.get(&track.path).copied())
+    }
+
+    #[cfg(feature = "youtube-music")]
+    /// Reopens an expired playing source without moving the playhead.
+    /// Taking its deadline prevents another request before resolution finishes.
+    pub fn refresh_source(&mut self, now: Instant) -> Vec<Effect> {
+        if !self.playing || !self.take_expired_source() {
+            return Vec::new();
+        }
+        let elapsed = now
+            .saturating_duration_since(self.position_at)
+            .as_secs_f64();
+        self.position_seconds += elapsed;
+        if self.duration_seconds > 0.0 {
+            self.position_seconds = self.position_seconds.min(self.duration_seconds);
+        }
+        self.position_at = now;
+        vec![Effect::RefreshTrack {
+            track_id: self
+                .current()
+                .expect("an expired source belongs to the current track")
+                .id,
+            position_seconds: self.position_seconds,
+            playing: true,
+        }]
+    }
+
     /// What the Now Playing lists are built from: they change with the
     /// current track and the shuffle switch, and nothing else the engine
     /// reports — position reports ten times a second among it.
@@ -209,11 +268,20 @@ impl Player {
                 queue_len: _,
                 has_next: _,
             } => {
+                if playing || mode != Mode::Local {
+                    self.replay_on_resume = false;
+                } else if self.mode == Mode::Local && self.playing {
+                    self.replay_on_resume = true;
+                }
                 self.mode = mode;
                 self.index = index;
                 self.shuffle = shuffle;
                 self.repeat = repeat;
                 self.playing = playing;
+                #[cfg(feature = "youtube-music")]
+                if mode != Mode::Local {
+                    self.source_expiries.clear();
+                }
                 if mode == Mode::Radio {
                     let current_id = self.station.as_ref().map(|station| station.id.as_str());
                     if current_id != station_id.as_deref() {
@@ -263,6 +331,7 @@ impl Player {
                 vec![Effect::ShowStreamCover(cover)]
             }
             EngineEvent::TrackChanged { index } => {
+                self.replay_on_resume = false;
                 self.index = index;
                 // The new track starts from its beginning; the engine's next
                 // position report confirms its exact length.
@@ -322,6 +391,9 @@ impl Player {
         self.connection_epoch += 1;
         self.index = index.min(tracks.len() - 1);
         self.queue = tracks;
+        #[cfg(feature = "youtube-music")]
+        self.source_expiries.clear();
+        self.replay_on_resume = false;
         self.mode = Mode::Local;
         self.playing = true;
         self.position_seconds = 0.0;
@@ -333,6 +405,74 @@ impl Player {
         effects.push(Effect::LoadQueue {
             tracks: self.queue.clone(),
             index: self.index,
+        });
+        effects
+    }
+
+    #[cfg(feature = "youtube-music")]
+    /// Removes every account-owned YouTube source, including upcoming entries.
+    /// Reloading the kept queue invalidates the engine's cached opens and fades.
+    /// Anonymous catalog sources and unrelated playback keep their identity.
+    pub fn remove_youtube_account(&mut self, now: Instant) -> Vec<Effect> {
+        let removed = |track: &Track| {
+            track.id > 0 && track.source == crate::library::TrackSource::YouTubeMusic
+        };
+        if !self.queue.iter().any(removed) {
+            return Vec::new();
+        }
+        let mut effects = Vec::new();
+        if self.mode == Mode::Local && self.connecting {
+            // Replacing the engine queue also retires its pending station
+            // claim. Restore the local presentation and retire our claim too.
+            self.connecting = false;
+            self.connection_epoch += 1;
+            let before = self.before_connecting.take();
+            effects = self.show_again(before);
+        }
+        let current_removed = self.current().is_some_and(removed);
+        let kept_before = self
+            .queue
+            .iter()
+            .take(self.index)
+            .filter(|track| !removed(track))
+            .count();
+        self.queue.retain(|track| !removed(track));
+        self.source_expiries
+            .retain(|path, _| self.queue.iter().any(|track| &track.path == path));
+        self.index = kept_before.min(self.queue.len().saturating_sub(1));
+        // A radio stream has already released the engine's local opens. Its
+        // retained presentation queue can be pruned without replacing the stream.
+        if self.mode != Mode::Local {
+            return Vec::new();
+        }
+        if current_removed || self.queue.is_empty() {
+            effects.clear();
+            self.playing = false;
+            self.position_seconds = 0.0;
+            self.duration_seconds = self
+                .queue
+                .get(self.index)
+                .map_or(0.0, |track| track.duration_secs);
+            self.replay_on_resume = false;
+            let track_id = self.queue.get(self.index).map(|track| track.id);
+            effects.extend([Effect::LoadCover(track_id), Effect::LoadOverview(track_id)]);
+        } else if self.playing {
+            self.position_seconds += now
+                .saturating_duration_since(self.position_at)
+                .as_secs_f64();
+            if self.duration_seconds > 0.0 {
+                self.position_seconds = self.position_seconds.min(self.duration_seconds);
+            }
+        }
+        self.position_at = now;
+        if self.queue.is_empty() {
+            self.mode = Mode::Idle;
+        }
+        effects.push(Effect::ReplaceQueue {
+            tracks: self.queue.clone(),
+            index: self.index,
+            position_seconds: self.position_seconds,
+            playing: self.playing,
         });
         effects
     }
@@ -354,6 +494,9 @@ impl Player {
             });
         }
         let mut effects = self.clear_stream_info();
+        #[cfg(feature = "youtube-music")]
+        self.source_expiries.clear();
+        self.replay_on_resume = false;
         self.station = Some(station.clone());
         self.position_seconds = 0.0;
         self.duration_seconds = 0.0;
@@ -412,8 +555,24 @@ impl Player {
                 .as_secs_f64();
             self.position_seconds = (self.position_seconds + elapsed).min(self.duration_seconds);
         }
+        let replay = self.replay_on_resume && !self.playing;
+        self.replay_on_resume = false;
+        if replay {
+            self.position_seconds = 0.0;
+        }
         self.playing = !self.playing;
         self.position_at = now;
+        #[cfg(feature = "youtube-music")]
+        if self.playing && self.take_expired_source() && !replay {
+            return vec![Effect::RefreshTrack {
+                track_id: self
+                    .current()
+                    .expect("an expired source belongs to the current track")
+                    .id,
+                position_seconds: self.position_seconds,
+                playing: true,
+            }];
+        }
         vec![Effect::Toggle]
     }
 
@@ -441,8 +600,17 @@ impl Player {
         if self.duration_seconds <= 0.0 || fraction.is_nan() {
             return Vec::new();
         }
+        self.replay_on_resume = false;
         self.position_seconds = fraction.clamp(0.0, 1.0) * self.duration_seconds;
         self.position_at = now;
+        #[cfg(feature = "youtube-music")]
+        if self.take_expired_source() {
+            return vec![Effect::RefreshTrack {
+                track_id,
+                position_seconds: self.position_seconds,
+                playing: self.playing,
+            }];
+        }
         vec![Effect::Seek {
             track_id,
             position_seconds: self.position_seconds,
@@ -468,6 +636,18 @@ impl Player {
     pub fn toggle_repeat(&mut self) -> Vec<Effect> {
         self.repeat = !self.repeat;
         vec![Effect::SetRepeat(self.repeat)]
+    }
+
+    #[cfg(feature = "youtube-music")]
+    fn take_expired_source(&mut self) -> bool {
+        if self
+            .current_source_expiry()
+            .is_none_or(|expires_at| expires_at > SystemTime::now())
+        {
+            return false;
+        }
+        self.source_expiries.remove(&self.queue[self.index].path);
+        true
     }
 
     fn clear_stream_info(&mut self) -> Vec<Effect> {
@@ -547,6 +727,138 @@ mod tests {
 
     fn timed_track(id: i64, seconds: f64) -> Track {
         track(id, "t").duration(seconds)
+    }
+
+    #[cfg(feature = "youtube-music")]
+    fn youtube_track(identifier: i64) -> Track {
+        let mut song = timed_track(identifier, 100.0);
+        song.source = crate::library::TrackSource::YouTubeMusic;
+        song.path = format!("youtube-music://{identifier}");
+        song
+    }
+
+    #[cfg(feature = "youtube-music")]
+    #[test]
+    fn disconnecting_removes_account_successors_and_keeps_unrelated_playback_position() {
+        let now = Instant::now();
+        for playing in [false, true] {
+            let mut player = Player::new(now);
+            let kept = timed_track(2, 100.0);
+            let anonymous = youtube_track(-1);
+            player.play_queue(
+                vec![
+                    youtube_track(1),
+                    kept.clone(),
+                    youtube_track(3),
+                    anonymous.clone(),
+                ],
+                1,
+                now,
+            );
+            player.playing = playing;
+            player.position_seconds = 20.0;
+            let effects = player.remove_youtube_account(now + Duration::from_secs(2));
+            assert_eq!(player.current().map(|track| track.id), Some(2));
+            assert_eq!(player.current_index(), Some(0));
+            assert_eq!(player.playing(), playing);
+            assert_eq!(
+                effects,
+                [Effect::ReplaceQueue {
+                    tracks: vec![kept, anonymous],
+                    index: 0,
+                    position_seconds: if playing { 22.0 } else { 20.0 },
+                    playing,
+                }]
+            );
+        }
+    }
+
+    #[cfg(feature = "youtube-music")]
+    #[test]
+    fn disconnecting_a_current_account_song_leaves_unrelated_successors_paused() {
+        let now = Instant::now();
+        let mut player = Player::new(now);
+        let kept = timed_track(2, 100.0);
+        player.play_queue(vec![youtube_track(1), kept.clone()], 0, now);
+        player.position_seconds = 30.0;
+        assert_eq!(
+            player.remove_youtube_account(now),
+            [
+                Effect::LoadCover(Some(2)),
+                Effect::LoadOverview(Some(2)),
+                Effect::ReplaceQueue {
+                    tracks: vec![kept],
+                    index: 0,
+                    position_seconds: 0.0,
+                    playing: false
+                },
+            ]
+        );
+        assert_eq!(player.current().map(|track| track.id), Some(2));
+        assert!(!player.playing());
+    }
+
+    #[cfg(feature = "youtube-music")]
+    #[test]
+    fn disconnecting_an_account_only_queue_clears_every_engine_entry() {
+        let now = Instant::now();
+        let mut player = Player::new(now);
+        player.play_queue(vec![youtube_track(1), youtube_track(2)], 1, now);
+        let effects = player.remove_youtube_account(now);
+        assert_eq!(player.mode(), Mode::Idle);
+        assert!(player.current().is_none());
+        assert!(player.queue().is_empty());
+        assert_eq!(
+            effects.last(),
+            Some(&Effect::ReplaceQueue {
+                tracks: Vec::new(),
+                index: 0,
+                position_seconds: 0.0,
+                playing: false,
+            })
+        );
+    }
+
+    #[cfg(feature = "youtube-music")]
+    #[test]
+    fn disconnecting_keeps_anonymous_playback_and_a_radio_stream_untouched() {
+        let now = Instant::now();
+        let mut player = Player::new(now);
+        player.play_queue(vec![youtube_track(-1)], 0, now);
+        assert!(player.remove_youtube_account(now).is_empty());
+        assert!(player.playing());
+        player.play_queue(vec![youtube_track(1), timed_track(2, 100.0)], 0, now);
+        player.mode = Mode::Radio;
+        player.station = Some(station("kept"));
+        assert!(player.remove_youtube_account(now).is_empty());
+        assert_eq!(player.mode(), Mode::Radio);
+        assert_eq!(
+            player.station().map(|station| station.id.as_str()),
+            Some("kept")
+        );
+        assert!(player.playing());
+        assert_eq!(player.queue().len(), 1);
+    }
+
+    #[cfg(feature = "youtube-music")]
+    #[test]
+    fn pruning_account_sources_retires_a_station_claim_replaced_with_the_local_queue() {
+        let now = Instant::now();
+        let mut player = Player::new(now);
+        player.play_queue(vec![timed_track(1, 100.0), youtube_track(2)], 0, now);
+        player.position_seconds = 25.0;
+        let station = station("pending");
+        player.play_station(station.clone());
+        let epoch = player.connection_epoch;
+        player.remove_youtube_account(now);
+        assert!(!player.connecting());
+        assert!(player.station().is_none());
+        assert_eq!(player.current().map(|track| track.id), Some(1));
+        assert_eq!(player.position_seconds(), 25.0);
+        assert!(player
+            .station_connection_finished(&station, epoch, Ok(()))
+            .is_empty());
+        assert!(player.station().is_none());
     }
 
     #[test]
@@ -1235,5 +1547,247 @@ mod tests {
         assert_eq!(player.next(), [Effect::Next]);
         assert_eq!(player.previous(), [Effect::Previous]);
         assert_eq!(player.jump_to(3), [Effect::JumpTo(3)]);
+    }
+
+    #[cfg(feature = "youtube-music")]
+    #[test]
+    fn source_deadlines_are_recorded_only_for_tracks_in_the_active_queue() {
+        let now = Instant::now();
+        let track = timed_track(1, 100.0);
+        let expiry = SystemTime::now() + Duration::from_secs(31_536_000);
+        let mut player = Player::new(now);
+        player.source_resolved(&track.path, expiry);
+        assert_eq!(player.current_source_expiry(), None);
+
+        player.play_queue(vec![track.clone()], 0, now);
+        player.source_resolved("absent", SystemTime::UNIX_EPOCH);
+        assert_eq!(player.current_source_expiry(), None);
+        player.source_resolved(&track.path, SystemTime::UNIX_EPOCH);
+        player.source_resolved(&track.path, expiry);
+        assert_eq!(player.current_source_expiry(), Some(expiry));
+        assert!(player.refresh_source(now).is_empty());
+    }
+
+    #[cfg(feature = "youtube-music")]
+    #[test]
+    fn a_preloaded_source_deadline_survives_advancing_to_its_track() {
+        let now = Instant::now();
+        let first = timed_track(1, 100.0);
+        let second = timed_track(2, 200.0);
+        let expiry = SystemTime::now() + Duration::from_secs(31_536_000);
+        let mut player = playing(vec![first, second.clone()], 20.0, now);
+        player.source_resolved(&second.path, expiry);
+        assert_eq!(player.current_source_expiry(), None);
+
+        player.apply(EngineEvent::TrackChanged { index: 1 }, now, &no_stations);
+        player.apply(state(Mode::Local, true, 1, None), now, &no_stations);
+
+        assert_eq!(player.current_source_expiry(), Some(expiry));
+        assert!(player.refresh_source(now).is_empty());
+    }
+
+    #[cfg(feature = "youtube-music")]
+    #[test]
+    fn replacing_the_queue_discards_current_and_preloaded_source_deadlines() {
+        let now = Instant::now();
+        let first = timed_track(1, 100.0);
+        let second = timed_track(2, 200.0);
+        let mut player = playing(vec![first.clone(), second.clone()], 20.0, now);
+        player.source_resolved(&first.path, SystemTime::UNIX_EPOCH);
+        player.source_resolved(&second.path, SystemTime::UNIX_EPOCH);
+
+        player.play_queue(vec![first, second], 0, now);
+
+        assert_eq!(player.current_source_expiry(), None);
+        player.apply(EngineEvent::TrackChanged { index: 1 }, now, &no_stations);
+        assert_eq!(player.current_source_expiry(), None);
+        assert!(player.refresh_source(now).is_empty());
+    }
+
+    #[cfg(feature = "youtube-music")]
+    #[test]
+    fn starting_a_station_discards_source_deadlines_and_ignores_late_resolutions() {
+        let now = Instant::now();
+        let track = timed_track(1, 100.0);
+        let mut player = playing(vec![track.clone()], 20.0, now);
+        player.source_resolved(&track.path, SystemTime::UNIX_EPOCH);
+
+        player.play_station(station("fip"));
+        player.source_resolved(&track.path, SystemTime::UNIX_EPOCH);
+        player.apply(state(Mode::Local, true, 0, None), now, &no_stations);
+
+        assert_eq!(player.current_source_expiry(), None);
+        assert!(player.refresh_source(now).is_empty());
+    }
+
+    #[cfg(feature = "youtube-music")]
+    #[test]
+    fn idle_and_radio_engine_states_discard_source_deadlines() {
+        for mode in [Mode::Idle, Mode::Radio] {
+            let now = Instant::now();
+            let track = timed_track(1, 100.0);
+            let mut player = playing(vec![track.clone()], 20.0, now);
+            player.source_resolved(&track.path, SystemTime::UNIX_EPOCH);
+            player.apply(state(mode, false, 0, None), now, &no_stations);
+            player.source_resolved(&track.path, SystemTime::UNIX_EPOCH);
+            assert_eq!(player.current_source_expiry(), None);
+            assert!(player.refresh_source(now).is_empty());
+
+            player.apply(state(Mode::Local, true, 0, None), now, &no_stations);
+            assert_eq!(player.current_source_expiry(), None);
+        }
+    }
+
+    #[cfg(feature = "youtube-music")]
+    #[test]
+    fn an_expired_playing_source_reopens_once_at_the_interpolated_position() {
+        let now = Instant::now();
+        let track = timed_track(1, 100.0);
+        let mut player = playing(vec![track.clone()], 20.0, now);
+        player.source_resolved(&track.path, SystemTime::UNIX_EPOCH);
+        let later = now + Duration::from_secs(5);
+
+        assert_eq!(
+            player.refresh_source(later),
+            [Effect::RefreshTrack {
+                track_id: 1,
+                position_seconds: 25.0,
+                playing: true,
+            }]
+        );
+        assert_eq!(player.position_seconds(), 25.0);
+        assert_eq!(player.live_progress(later), 0.25);
+        assert!(player.playing());
+        assert_eq!(player.current_source_expiry(), None);
+        assert!(player
+            .refresh_source(later + Duration::from_secs(1))
+            .is_empty());
+
+        let expiry = SystemTime::now() + Duration::from_secs(31_536_000);
+        player.source_resolved(&track.path, expiry);
+        assert_eq!(player.current_source_expiry(), Some(expiry));
+        assert!(player.refresh_source(later).is_empty());
+    }
+
+    #[cfg(feature = "youtube-music")]
+    #[test]
+    fn refreshing_clamps_to_a_known_track_end_but_preserves_an_unknown_length_position() {
+        for (duration_seconds, expected_position) in [(22.0, 22.0), (0.0, 25.0)] {
+            let now = Instant::now();
+            let track = timed_track(1, duration_seconds);
+            let mut player = playing(vec![track.clone()], 20.0, now);
+            player.source_resolved(&track.path, SystemTime::UNIX_EPOCH);
+
+            assert_eq!(
+                player.refresh_source(now + Duration::from_secs(5)),
+                [Effect::RefreshTrack {
+                    track_id: 1,
+                    position_seconds: expected_position,
+                    playing: true,
+                }]
+            );
+        }
+    }
+
+    #[cfg(feature = "youtube-music")]
+    #[test]
+    fn an_expired_paused_source_waits_for_resume_and_keeps_its_position() {
+        let now = Instant::now();
+        let track = timed_track(1, 100.0);
+        let mut player = playing(vec![track.clone()], 20.0, now);
+        player.toggle(now + Duration::from_secs(5));
+        player.source_resolved(&track.path, SystemTime::UNIX_EPOCH);
+        let later = now + Duration::from_secs(50);
+
+        assert!(player.refresh_source(later).is_empty());
+        assert_eq!(player.current_source_expiry(), Some(SystemTime::UNIX_EPOCH));
+        assert_eq!(
+            player.toggle(later),
+            [Effect::RefreshTrack {
+                track_id: 1,
+                position_seconds: 25.0,
+                playing: true,
+            }]
+        );
+        assert!(player.playing());
+        assert_eq!(player.position_seconds(), 25.0);
+        assert_eq!(player.current_source_expiry(), None);
+        assert!(player.refresh_source(later).is_empty());
+    }
+
+    #[cfg(feature = "youtube-music")]
+    #[test]
+    fn an_engine_finished_queue_replays_instead_of_refreshing_its_expired_end_position() {
+        let now = Instant::now();
+        let track = timed_track(1, 100.0);
+        let mut player = playing(vec![track.clone()], 99.9, now);
+        player.apply(state(Mode::Local, false, 0, None), now, &no_stations);
+        player.source_resolved(&track.path, SystemTime::UNIX_EPOCH);
+        assert_eq!(
+            player.toggle(now + Duration::from_secs(60)),
+            [Effect::Toggle]
+        );
+        assert_eq!(player.position_seconds(), 0.0);
+    }
+
+    #[cfg(feature = "youtube-music")]
+    #[test]
+    fn pausing_an_expired_source_still_uses_the_ordinary_toggle() {
+        let now = Instant::now();
+        let track = timed_track(1, 100.0);
+        let mut player = playing(vec![track.clone()], 20.0, now);
+        player.source_resolved(&track.path, SystemTime::UNIX_EPOCH);
+
+        assert_eq!(player.toggle(now), [Effect::Toggle]);
+        assert!(!player.playing());
+        assert_eq!(player.current_source_expiry(), Some(SystemTime::UNIX_EPOCH));
+    }
+
+    #[cfg(feature = "youtube-music")]
+    #[test]
+    fn seeking_an_expired_source_reopens_at_the_target_with_the_same_transport_state() {
+        for playing_after_seek in [false, true] {
+            let now = Instant::now();
+            let track = timed_track(1, 100.0);
+            let mut player = playing(vec![track.clone()], 20.0, now);
+            if !playing_after_seek {
+                player.toggle(now);
+            }
+            player.source_resolved(&track.path, SystemTime::UNIX_EPOCH);
+
+            assert_eq!(
+                player.seek_to(0.75, now),
+                [Effect::RefreshTrack {
+                    track_id: 1,
+                    position_seconds: 75.0,
+                    playing: playing_after_seek,
+                }]
+            );
+            assert_eq!(player.position_seconds(), 75.0);
+            assert_eq!(player.playing(), playing_after_seek);
+            assert_eq!(player.current_source_expiry(), None);
+            assert!(player.refresh_source(now).is_empty());
+        }
+    }
+
+    #[cfg(feature = "youtube-music")]
+    #[test]
+    fn an_unexpired_source_uses_the_ordinary_seek_pause_and_resume_commands() {
+        let now = Instant::now();
+        let track = timed_track(1, 100.0);
+        let expiry = SystemTime::now() + Duration::from_secs(31_536_000);
+        let mut player = playing(vec![track.clone()], 20.0, now);
+        player.source_resolved(&track.path, expiry);
+
+        assert_eq!(
+            player.seek_to(0.5, now),
+            [Effect::Seek {
+                track_id: 1,
+                position_seconds: 50.0
+            }]
+        );
+        assert_eq!(player.toggle(now), [Effect::Toggle]);
+        assert_eq!(player.toggle(now), [Effect::Toggle]);
+        assert_eq!(player.current_source_expiry(), Some(expiry));
     }
 }

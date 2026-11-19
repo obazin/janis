@@ -8,6 +8,8 @@
 
 use std::collections::{HashMap, VecDeque};
 use std::hash::Hash;
+#[cfg(feature = "youtube-music")]
+use std::sync::Arc;
 
 use base64::Engine as _;
 use slint::{Rgba8Pixel, SharedPixelBuffer};
@@ -159,10 +161,8 @@ pub fn picture_cover(bytes: Vec<u8>, longest_side: u32) -> Result<Pixels, String
     ))
 }
 
-/// What a cover is cached under. Tracks that show the same server picture —
-/// every song of an album whose art is the album's — share one key, so the
-/// picture is asked for, decoded and kept once.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+/// Tracks sharing a provider picture share one cached image.
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub enum CoverKey {
     /// A track's own cover, read from its file or its album's files.
     Track(i64),
@@ -170,22 +170,53 @@ pub enum CoverKey {
     ServerPicture(String),
     /// The picture the listener chose for this playlist.
     PlaylistPicture(i64),
+    #[cfg(feature = "youtube-music")]
+    /// A provider image address, never a signed media address.
+    Address(Arc<str>),
+}
+
+impl std::fmt::Debug for CoverKey {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Track(identifier) => formatter.debug_tuple("Track").field(identifier).finish(),
+            Self::ServerPicture(item) => {
+                formatter.debug_tuple("ServerPicture").field(item).finish()
+            }
+            Self::PlaylistPicture(identifier) => formatter
+                .debug_tuple("PlaylistPicture")
+                .field(identifier)
+                .finish(),
+            #[cfg(feature = "youtube-music")]
+            Self::Address(_) => formatter.write_str("Address { .. }"),
+        }
+    }
 }
 
 /// The cover key of every track in the library, so a tile that names a
 /// track finds the cover another track of its album already loaded.
 #[derive(Default)]
 pub struct CoverKeys {
-    server_pictures: HashMap<i64, String>,
+    shared_pictures: HashMap<i64, CoverKey>,
 }
 
 impl CoverKeys {
     pub fn new(tracks: &[Track]) -> Self {
         Self {
-            server_pictures: tracks
+            shared_pictures: tracks
                 .iter()
-                .filter(|track| track.server_id.is_some())
-                .filter_map(|track| Some((track.id, track.artwork_item.clone()?)))
+                .filter_map(|track| {
+                    let key = match track.source {
+                        #[cfg(feature = "youtube-music")]
+                        crate::library::TrackSource::YouTubeMusic => {
+                            CoverKey::Address(Arc::from(track.artwork_address.as_deref()?))
+                        }
+                        _ if track.server_id.is_some() => {
+                            CoverKey::ServerPicture(track.artwork_item.clone()?)
+                        }
+                        _ => return None,
+                    };
+                    Some((track.id, key))
+                })
                 .collect(),
         }
     }
@@ -193,11 +224,10 @@ impl CoverKeys {
     /// A track this does not know — or a server song without a picture —
     /// keys by its own id; its lookup then finds what there is.
     pub fn key(&self, track_id: i64) -> CoverKey {
-        self.server_pictures
+        self.shared_pictures
             .get(&track_id)
-            .map_or(CoverKey::Track(track_id), |item| {
-                CoverKey::ServerPicture(item.clone())
-            })
+            .cloned()
+            .unwrap_or(CoverKey::Track(track_id))
     }
 }
 
@@ -330,6 +360,24 @@ mod tests {
         assert_eq!(keys.key(1), CoverKey::Track(1));
         assert_eq!(keys.key(2), CoverKey::Track(2));
         assert_eq!(keys.key(99), CoverKey::Track(99), "an unknown track too");
+    }
+
+    #[cfg(feature = "youtube-music")]
+    #[test]
+    fn provider_artwork_is_shared_without_using_a_server_picture() {
+        let address = "https://i.ytimg.com/album.jpg";
+        let mut first = crate::library::test_support::track(1, "One");
+        first.source = crate::library::TrackSource::YouTubeMusic;
+        first.artwork_address = Some(address.to_owned());
+        let mut second = crate::library::test_support::track(2, "Two");
+        second.source = crate::library::TrackSource::YouTubeMusic;
+        second.artwork_address = Some(address.to_owned());
+        let server = crate::library::test_support::track(3, "Server").server(7, address);
+        let keys = CoverKeys::new(&[first, second, server]);
+        let mut cache = BoundedCache::new(2);
+        cache.insert(keys.key(1), "decoded artwork");
+        assert_eq!(cache.get(&keys.key(2)), Some(&"decoded artwork"));
+        assert_eq!(cache.get(&keys.key(3)), None);
     }
 
     #[test]

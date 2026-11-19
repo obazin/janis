@@ -1,0 +1,259 @@
+import { Tokens, Fonts, Typography, Metrics, Motion, Accent } from "../tokens.slint";
+import { Icons } from "../icons.slint";
+import { Strings } from "strings.slint";
+import { GhostButton } from "../atoms/ghost_button.slint";
+import { PrimaryButton } from "../atoms/primary_button.slint";
+import { TextField } from "../atoms/text_field.slint";
+import { ScreenHeader } from "../molecules/screen_header.slint";
+import { ScrollArea } from "../molecules/scroll_area.slint";
+import { CoverArt } from "../features/library/cover_art.slint";
+import { Covers, CoverList } from "../features/library/covers.slint";
+import { YouTubeMusic } from "../features/youtube_music/youtube_music.slint";
+import { Shell } from "../shell.slint";
+
+// An anonymous catalog song row, sharing the library's artwork cache
+// without local-library actions or favourite controls.
+component YouTubeMusicRow inherits Rectangle {
+    in property <int> track-id;
+    in property <int> gradient-index;
+    in property <string> number;
+    in property <string> title;
+    in property <string> detail;
+    in property <string> album;
+    in property <string> duration;
+    in property <bool> ruled;
+    callback clicked();
+
+    background: touch.has-hover ? Tokens.row-hover : transparent;
+    animate background { duration: Motion.fast; }
+    accessible-role: button;
+    accessible-label: root.title + ", " + root.detail;
+    accessible-action-default => { root.clicked(); }
+
+    if root.ruled: Rectangle {
+        y: 0;
+        height: 1px;
+        background: Tokens.divider;
+    }
+
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+
+        HorizontalLayout {
+            padding-left: 14px;
+            padding-right: 14px;
+            spacing: 14px;
+            if root.number != "": Text {
+                width: 26px;
+                text: root.number;
+                font-family: Fonts.mono;
+                font-size: Typography.caption;
+                color: Tokens.text-faint;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+            VerticalLayout {
+                alignment: center;
+                CoverArt {
+                    width: 40px;
+                    height: 40px;
+                    radius: Metrics.radius-tile;
+                    track-id: root.track-id;
+                    gradient-index: root.gradient-index;
+                }
+            }
+            VerticalLayout {
+                horizontal-stretch: 1;
+                alignment: center;
+                Text {
+                    text: root.title;
+                    font-size: Typography.body-em;
+                    font-weight: Typography.semibold;
+                    color: Tokens.text;
+                    horizontal-alignment: left;
+                    overflow: elide;
+                }
+                Text {
+                    text: root.detail;
+                    font-size: Typography.caption;
+                    color: Tokens.text-muted;
+                    horizontal-alignment: left;
+                    overflow: elide;
+                }
+            }
+            if root.album != "": Text {
+                width: 140px;
+                text: root.album;
+                font-size: Typography.caption;
+                color: Tokens.text-muted;
+                horizontal-alignment: left;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+            if root.duration != "": Text {
+                width: 58px;
+                text: root.duration;
+                font-family: Fonts.mono;
+                font-size: Typography.caption;
+                color: Tokens.text-muted;
+                horizontal-alignment: right;
+                vertical-alignment: center;
+            }
+        }
+    }
+}
+
+// Anonymous catalog search with a window of fixed-height song rows.
+export component YouTubeMusicScreen inherits Rectangle {
+    property <length> side: 44px;
+    property <length> content-width: max(0px, page.content-width - root.side - 32px);
+    property <length> row-height: 64px;
+    property <int> item-count: YouTubeMusic.songs.length;
+    property <int> first: max(0, floor((page.scroll-offset - results.y) / root.row-height));
+    property <int> count: root.width > 0px && page.height > 0px ? min(max(0, root.item-count - root.first), ceil(page.height / root.row-height) + 1) : 0;
+
+    function report-shown() {
+        Covers.in-view(CoverList.youtube-music, root.first, root.count);
+    }
+    function submit-search() {
+        if !YouTubeMusic.loading {
+            page.scroll-to(0px);
+            YouTubeMusic.search-submitted();
+        }
+    }
+    init => { root.report-shown(); }
+    changed first => { root.report-shown(); }
+    changed count => { root.report-shown(); }
+
+    page := ScrollArea {
+        content-height: footer.y + footer.height + 40px;
+
+        header := VerticalLayout {
+            x: root.side;
+            y: 0;
+            width: root.content-width;
+            height: self.preferred-height;
+            padding-top: 36px;
+            ScreenHeader {
+                eyebrow: Strings.youtube-music-eyebrow;
+                title: Strings.youtube-music-title;
+                tone: Accent.ember;
+            }
+        }
+
+        settings-link := HorizontalLayout {
+            x: root.side;
+            y: header.height + 16px;
+            width: root.content-width;
+            height: self.preferred-height;
+            alignment: start;
+            GhostButton {
+                label: Strings.youtube-music-settings;
+                clicked => { Shell.screen = "settings"; }
+            }
+        }
+
+        search := HorizontalLayout {
+            x: root.side;
+            y: settings-link.y + settings-link.height + 16px;
+            width: root.content-width;
+            height: self.preferred-height;
+            spacing: 12px;
+            TextField {
+                horizontal-stretch: 1;
+                label: Strings.youtube-music-search-label;
+                placeholder: Strings.youtube-music-search-placeholder;
+                text <=> YouTubeMusic.query;
+                enabled: !YouTubeMusic.loading;
+                accepted => { root.submit-search(); }
+            }
+            VerticalLayout {
+                alignment: end;
+                PrimaryButton {
+                    label: Strings.youtube-music-search;
+                    icon: Icons.search;
+                    clicked => { root.submit-search(); }
+                }
+            }
+        }
+
+        status := VerticalLayout {
+            x: root.side;
+            y: search.y + search.height + 16px;
+            width: root.content-width;
+            height: self.preferred-height;
+            spacing: 10px;
+            if YouTubeMusic.status != "" && (!YouTubeMusic.loading || YouTubeMusic.status-failed): Text {
+                text: YouTubeMusic.status;
+                font-size: Typography.caption;
+                color: YouTubeMusic.status-failed ? Tokens.error : Tokens.text-soft;
+                horizontal-alignment: left;
+                wrap: word-wrap;
+            }
+            if YouTubeMusic.loading: Text {
+                text: Strings.youtube-music-status-loading;
+                font-size: Typography.caption;
+                color: Tokens.text-muted;
+                horizontal-alignment: left;
+            }
+        }
+
+        results := Rectangle {
+            x: root.side;
+            y: status.y + status.height + 14px;
+            width: root.content-width;
+            height: root.item-count > 0 ? root.item-count * root.row-height : empty.height;
+            border-radius: Metrics.radius-card;
+            border-width: root.item-count > 0 ? 1px : 0px;
+            border-color: Tokens.border;
+            clip: true;
+
+            empty := Text {
+                x: 0;
+                y: 0;
+                width: parent.width;
+                height: root.item-count == 0 && !YouTubeMusic.loading ? self.preferred-height : 0px;
+                visible: root.item-count == 0 && !YouTubeMusic.loading;
+                text: Strings.youtube-music-empty-search;
+                font-size: Typography.body;
+                color: Tokens.text-muted;
+                horizontal-alignment: left;
+                wrap: word-wrap;
+            }
+
+            Rectangle {
+                for offset in root.count: YouTubeMusicRow {
+                    property <int> index: root.first + offset;
+                    y: self.index * root.row-height;
+                    height: root.row-height;
+                    track-id: YouTubeMusic.songs[self.index].track-id;
+                    gradient-index: YouTubeMusic.songs[self.index].gradient-index;
+                    number: YouTubeMusic.songs[self.index].number;
+                    title: YouTubeMusic.songs[self.index].title;
+                    detail: YouTubeMusic.songs[self.index].artist;
+                    album: YouTubeMusic.songs[self.index].album;
+                    duration: YouTubeMusic.songs[self.index].duration;
+                    ruled: self.index > 0;
+                    clicked => { YouTubeMusic.song-clicked(self.index); }
+                }
+            }
+        }
+
+        footer := HorizontalLayout {
+            x: root.side;
+            y: results.y + results.height + 16px;
+            width: root.content-width;
+            height: self.preferred-height;
+            alignment: start;
+            if YouTubeMusic.has-more && !YouTubeMusic.loading: GhostButton {
+                label: Strings.youtube-music-more;
+                clicked => {
+                    if !YouTubeMusic.loading {
+                        YouTubeMusic.more-clicked();
+                    }
+                }
+            }
+        }
+    }
+}

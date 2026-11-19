@@ -1,0 +1,16 @@
+// The persistent YouTube Music library connection, filled by the controller.
+export global YouTubeMusicIntegration {
+    in property <bool> connected;
+    in property <bool> configured;
+    in property <bool> busy;
+    in property <string> status;
+    in property <bool> status-failed;
+    in property <string> summary;
+    in-out property <string> browser: "firefox";
+
+    callback connect-clicked();
+    callback browser-selected(string);
+    callback browser-import-clicked();
+    callback sync-clicked();
+    callback disconnect-clicked();
+}

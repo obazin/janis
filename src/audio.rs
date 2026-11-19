@@ -16,6 +16,8 @@ pub use audio_stack_rs::{
     Store, AUDIO_EXTENSIONS, CENTER_FREQS, EQ_BAND_COUNT, FRAME_BYTES, LOSSLESS_EXTENSIONS,
     OVERVIEW_SLICES_PER_SECOND,
 };
+#[cfg(feature = "youtube-music")]
+pub use audio_stack_rs::{BoundedRange, DeferredSource, SourceResolver};
 
 use crate::library::Track;
 

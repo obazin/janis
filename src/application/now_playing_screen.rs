@@ -171,6 +171,7 @@ impl Application {
         let translations = self.translations.borrow();
         let view = self.window.global::<user_interface::Player>();
 
+        view.set_favourite_available(player.current().is_none_or(|track| track.id > 0));
         view.set_active(player.mode() != Mode::Idle);
         view.set_playing(player.playing());
         view.set_shuffle(player.shuffle());
@@ -392,6 +393,10 @@ impl Application {
     /// Advances the waveform by one frame and hands each view its trace.
     pub(super) fn draw_frame(&self) {
         let now = Instant::now();
+        #[cfg(feature = "youtube-music")]
+        let effects = self.player.borrow_mut().refresh_source(now);
+        #[cfg(feature = "youtube-music")]
+        self.run(effects);
         let elapsed = now.duration_since(self.last_frame.replace(now));
         let player = self.player.borrow();
         let playing = player.playing();

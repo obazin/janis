@@ -25,7 +25,7 @@ run:
     cargo run
 
 # Format check, lints and tests: every quality gate.
-check: fmt-rust-check clippy test-rust check-stations
+check: fmt-rust-check clippy clippy-all-features test-rust test-rust-all-features check-stations
 
 # The cargo arguments of the catalog builder, a package of its own.
 stations_package := "--manifest-path scripts/radio/Cargo.toml"
@@ -44,8 +44,14 @@ check-stations:
 test-rust:
     cargo test
 
+test-rust-all-features:
+    cargo test --all-features
+
 clippy:
     cargo clippy --all-targets -- -D warnings
+
+clippy-all-features:
+    cargo clippy --all-targets --all-features -- -D warnings
 
 # Format the Rust sources (style in rustfmt.toml).
 fmt-rust:

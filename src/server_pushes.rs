@@ -143,6 +143,34 @@ where
             .iter()
             .map(|(key, pending)| (key, &pending.wanted))
     }
+
+    pub fn wanted_for(&self, key: &Key) -> Option<&Value> {
+        self.pending.get(key).map(|pending| &pending.wanted)
+    }
+
+    #[cfg(feature = "youtube-music")]
+    pub fn retain(&mut self, mut keep: impl FnMut(&Key) -> bool) {
+        self.pending.retain(|key, _| keep(key));
+    }
+
+    #[cfg(feature = "youtube-music")]
+    /// Abandons queued intentions without rewinding their sequence numbers.
+    pub fn take_settled(
+        &mut self,
+    ) -> impl Iterator<Item = (Key, Settled<Value>)> + use<Key, Value> {
+        std::mem::take(&mut self.pending)
+            .into_iter()
+            .map(|(key, pending)| {
+                (
+                    key,
+                    Settled {
+                        server_value: pending.server_value,
+                        wanted: pending.wanted,
+                        place: pending.place,
+                    },
+                )
+            })
+    }
 }
 
 #[cfg(test)]
