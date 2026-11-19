@@ -43,6 +43,8 @@ export global Tokens {
     out property <color> mini-player: #0B0614f2;       // bottom bar
     out property <color> toast: #0B0614f2;             // notification surface
     out property <brush> equalizer-sheet: @linear-gradient(180deg, #1B1030 0%, #120A20 100%);
+    out property <brush> dialog: @linear-gradient(180deg, #1B1030 0%, #120A20 100%); // dialogs and the playlist sheet
+    out property <color> menu: #1A1029f7;              // context menu surface
 
     // ── Text ──────────────────────────────────────────────────────────────
     out property <color> text: #F3ECFB;
@@ -108,6 +110,8 @@ export global Tokens {
     out property <Shadow> shadow-tile: { offset-y: 14px, blur: 34px, spread: -14px, color: #000000b3 };   // discover tiles
     out property <Shadow> shadow-art: { offset-y: 24px, blur: 70px, spread: -20px, color: #000000cc };    // hero album art
     out property <Shadow> shadow-sheet: { offset-y: -30px, blur: 80px, spread: -20px, color: #000000cc }; // equalizer sheet
+    out property <Shadow> shadow-menu: { offset-y: 16px, blur: 40px, spread: -6px, color: #000000cc };   // context menus
+    out property <Shadow> shadow-dialog: { offset-y: 24px, blur: 80px, spread: -16px, color: #000000d9 }; // dialogs
     out property <Shadow> shadow-play: { offset-y: 12px, blur: 40px, spread: -8px, color: #FF2D9B99 };    // hero play button
 
     public pure function accent-color(tone: Accent) -> color {
@@ -173,9 +177,11 @@ export global Metrics {
     out property <length> radius-thumb: 10px;   // mini-player art
     out property <length> radius-art: 22px;     // Now Playing album art, equalizer sheet
     out property <length> radius-inset: 12px;   // a card inside a card
-    out property <length> radius-tile: 8px;     // small square tiles, a segmented control
+    out property <length> radius-cover: 12px;   // a cover or a station's art in a card or a grid
+    out property <length> radius-tile: 8px;     // small square tiles, a row's thumbnail, a segmented control
     out property <length> radius-segment: 6px;  // one segment of a segmented control
     out property <length> radius-tag: 2px;      // the outlined format tag
+    out property <length> radius-menu: 10px;    // context menus
     out property <length> sidebar-width: 232px;
     out property <length> titlebar-height: 52px;
     out property <length> mini-player-height: 76px;

@@ -5,6 +5,7 @@ import { Glyph, GlyphMode } from "../../atoms/glyph.slint";
 import { SectionLabel } from "../../atoms/section_label.slint";
 import { ScrollArea } from "../../molecules/scroll_area.slint";
 import { CoverArt } from "../library/cover_art.slint";
+import { Library } from "../library/library.slint";
 import { OpenEqualizerButton } from "../equalizer/open_equalizer_button.slint";
 import { Player, QueueView, QueueRow } from "player.slint";
 
@@ -79,7 +80,7 @@ component QueueRowView inherits Rectangle {
             CoverArt {
                 width: 34px;
                 height: 34px;
-                radius: 8px;
+                radius: Metrics.radius-tile;
                 track-id: root.item.track-id;
                 gradient-index: root.item.gradient-index;
             }
@@ -115,6 +116,11 @@ component QueueRowView inherits Rectangle {
     touch := TouchArea {
         mouse-cursor: pointer;
         clicked => { root.clicked(); }
+        pointer-event(event) => {
+            if event.kind == PointerEventKind.down && event.button == PointerEventButton.right {
+                Library.track-menu-requested(root.item.track-id, self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y, false);
+            }
+        }
     }
 }
 

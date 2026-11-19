@@ -1,0 +1,26 @@
+import { Tokens, Metrics } from "../tokens.slint";
+
+// The surface of a menu: a rounded, nearly opaque panel with a shadow,
+// stacking its items. The caller places it and closes it; a click on the
+// panel stays on it.
+export component MenuPanel inherits Rectangle {
+    width: 240px;
+    height: column.preferred-height;
+    border-radius: Metrics.radius-menu;
+    border-width: 1px;
+    border-color: Tokens.border-emphasis;
+    background: Tokens.menu;
+    drop-shadow-offset-y: Tokens.shadow-menu.offset-y;
+    drop-shadow-blur: Tokens.shadow-menu.blur;
+    drop-shadow-spread: Tokens.shadow-menu.spread;
+    drop-shadow-color: Tokens.shadow-menu.color;
+    accessible-role: list;
+
+    TouchArea { }
+
+    column := VerticalLayout {
+        padding: 6px;
+        spacing: 1px;
+        @children
+    }
+}

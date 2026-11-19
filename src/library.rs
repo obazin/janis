@@ -265,7 +265,7 @@ fn flush_batch(
     if batch.is_empty() {
         return;
     }
-    let conn = db.lock();
+    let conn = db.lock_for_library_change();
     let tx = match conn.unchecked_transaction() {
         Ok(tx) => tx,
         Err(e) => {
@@ -303,7 +303,8 @@ fn flush_batch(
 ///
 /// "Vanished" requires the place the file lived to still be reachable: a track
 /// is only pruned when its watched folder's root (or, for an ad-hoc import, its
-/// parent directory) is a directory right now and the file is not in it.
+/// parent directory) is a directory right now and the file is confirmed absent
+/// from it — a file beneath a folder that cannot be read is kept.
 /// The guard is what keeps a rescan with an external drive ejected from
 /// reading every row as missing and deleting the whole library — along with
 /// the loudness measurements a rescan can never rebuild.
@@ -342,12 +343,14 @@ fn prune_missing(db: &DbState) -> Result<usize, String> {
                 Some(folder_id) => reachable.get(folder_id).copied().unwrap_or(false),
                 None => path.parent().is_some_and(Path::is_dir),
             };
-            root_reachable && !path.exists()
+            // Only a stat that answers "not found" is absence: a directory
+            // denying access, or any other error, says nothing about the file.
+            root_reachable && matches!(path.try_exists(), Ok(false))
         })
         .map(|(id, _, _)| id)
         .collect();
 
-    let conn = db.lock();
+    let conn = db.lock_for_library_change();
     let tx = conn
         .unchecked_transaction()
         .map_err(|e| format!("prune transaction: {}", e))?;
@@ -359,8 +362,48 @@ fn prune_missing(db: &DbState) -> Result<usize, String> {
     Ok(doomed.len())
 }
 
+/// A read of the whole library — songs, folders, the server's libraries,
+/// favourites, playlists and groups — as one state of the database, with
+/// the revision it was read at. Taken off the interface thread.
+#[derive(Debug)]
+pub struct LibrarySnapshot {
+    pub revision: u64,
+    pub tracks: Vec<Track>,
+    pub folders: Vec<WatchedFolder>,
+    pub libraries: Vec<crate::persistence::ServerLibrary>,
+    pub favourite_track_ids: Vec<i64>,
+    pub playlists: Vec<crate::persistence::SavedPlaylist>,
+    pub playlist_groups: Vec<crate::persistence::PlaylistGroup>,
+}
+
+impl LibrarySnapshot {
+    /// Reads every part under one lock, so no change lands between two of
+    /// them, and the revision with them.
+    pub fn read(database: &DbState) -> Result<Self, String> {
+        let connection = database.lock();
+        Ok(Self {
+            revision: database.library_revision(),
+            tracks: list_tracks_in(&connection)?,
+            folders: list_watched_folders_in(&connection)?,
+            libraries: crate::persistence::server_libraries_in(&connection)?,
+            favourite_track_ids: crate::persistence::favourite_track_ids_in(&connection)?,
+            playlists: crate::persistence::playlists_in(&connection)?,
+            playlist_groups: crate::persistence::playlist_groups_in(&connection)?,
+        })
+    }
+
+    /// True while nothing has changed the library since this was read.
+    pub fn is_current(&self, database: &DbState) -> bool {
+        self.revision == database.library_revision()
+    }
+}
+
 pub fn list_tracks(db: &DbState) -> Result<Vec<Track>, String> {
-    let conn = db.lock();
+    list_tracks_in(&db.lock())
+}
+
+/// [`list_tracks`], on a connection the caller holds.
+pub(crate) fn list_tracks_in(conn: &rusqlite::Connection) -> Result<Vec<Track>, String> {
     let mut libraries_of_track: std::collections::HashMap<i64, Vec<i64>> =
         std::collections::HashMap::new();
     conn.prepare("SELECT track_id, library_id FROM track_libraries ORDER BY library_id")
@@ -442,7 +485,13 @@ pub fn list_tracks(db: &DbState) -> Result<Vec<Track>, String> {
 }
 
 pub fn list_watched_folders(db: &DbState) -> Result<Vec<WatchedFolder>, String> {
-    let conn = db.lock();
+    list_watched_folders_in(&db.lock())
+}
+
+/// [`list_watched_folders`], on a connection the caller holds.
+pub(crate) fn list_watched_folders_in(
+    conn: &rusqlite::Connection,
+) -> Result<Vec<WatchedFolder>, String> {
     let mut stmt = conn
         .prepare(
             "SELECT f.id, f.path, COUNT(t.id) FROM watched_folders f
@@ -487,7 +536,7 @@ pub fn add_watched_folder(db: &DbState, path: &str) -> Result<ScanReport, ScanEr
     // The lock covers only the registration; the walk itself runs unlocked
     // (see `scan_folder`).
     let folder_id: i64 = {
-        let connection = db.lock();
+        let connection = db.lock_for_library_change();
         let watched: Vec<(i64, String)> = connection
             .prepare("SELECT id, path FROM watched_folders")
             .and_then(|mut statement| {
@@ -555,7 +604,7 @@ fn strictly_inside(outer: &Path, inner: &Path) -> bool {
 }
 
 pub fn remove_watched_folder(db: &DbState, folder_id: i64) -> Result<(), String> {
-    let conn = db.lock();
+    let conn = db.lock_for_library_change();
     conn.execute("DELETE FROM watched_folders WHERE id = ?1", [folder_id])
         .map_err(|e| format!("remove folder: {}", e))?;
     Ok(())
@@ -609,6 +658,150 @@ pub struct ListedLibrary {
     pub name: String,
 }
 
+/// One playlist of a media server, as its listing gives it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ListedPlaylist {
+    /// The server's own identifier of the playlist.
+    pub item: String,
+    pub name: String,
+    /// The server has a picture of it.
+    pub picture: bool,
+    /// The `jellyfin://<server>/<item>` addresses of its songs, in order.
+    pub songs: Vec<String>,
+}
+
+/// Brings the server's playlists in line with a complete listing of them,
+/// once its songs are: each listed playlist is upserted by its item, which
+/// keeps the group and the picture the listener gave it, and holds the
+/// listed songs Janis has, in order, each once at its first place. A
+/// playlist of this server missing from the listing is removed.
+///
+/// Same lock discipline as a scan: the writes go in bursts of
+/// `PLAYLIST_BURST` rows, one transaction each, so a server with many long
+/// playlists never holds the lock the interface's preference writes and the
+/// engine's loudness reads wait on.
+pub fn sync_server_playlists(
+    database: &DbState,
+    server_id: i64,
+    playlists: &[ListedPlaylist],
+) -> Result<(), String> {
+    let tracks: std::collections::HashMap<String, i64> = database
+        .lock()
+        .prepare("SELECT path, id FROM tracks WHERE server_id = ?1")
+        .and_then(|mut statement| {
+            statement
+                .query_map([server_id], |row| Ok((row.get(0)?, row.get(1)?)))?
+                .collect()
+        })
+        .map_err(|error| format!("list the server's songs: {error}"))?;
+    let writes: Vec<PlaylistWrite> = playlists
+        .iter()
+        .flat_map(|playlist| {
+            std::iter::once(PlaylistWrite::Keep(playlist)).chain(
+                playlist
+                    .songs
+                    .iter()
+                    .filter_map(|address| tracks.get(address).copied())
+                    .map(|track_id| PlaylistWrite::Entry { track_id }),
+            )
+        })
+        .collect();
+
+    let mut kept = std::collections::HashSet::new();
+    // The playlist the entries that follow belong to, and the place of its
+    // next song.
+    let mut filling: Option<(i64, &str, i64)> = None;
+    for burst in writes.chunks(PLAYLIST_BURST) {
+        let connection = database.lock_for_library_change();
+        let transaction = connection
+            .unchecked_transaction()
+            .map_err(|error| format!("playlist sync transaction: {error}"))?;
+        for write in burst {
+            match write {
+                PlaylistWrite::Keep(playlist) => {
+                    let playlist_id: i64 = transaction
+                        .query_row(
+                            "INSERT INTO playlists (name, server_id, server_item, server_picture)
+                             VALUES (?1, ?2, ?3, ?4)
+                             ON CONFLICT(server_id, server_item) DO UPDATE SET
+                                 name = excluded.name,
+                                 server_picture = excluded.server_picture
+                             RETURNING id",
+                            rusqlite::params![
+                                playlist.name,
+                                server_id,
+                                playlist.item,
+                                playlist.picture
+                            ],
+                            |row| row.get(0),
+                        )
+                        .map_err(|error| format!("keep playlist {}: {error}", playlist.name))?;
+                    kept.insert(playlist_id);
+                    transaction
+                        .execute(
+                            "DELETE FROM playlist_entries WHERE playlist_id = ?1",
+                            [playlist_id],
+                        )
+                        .map_err(|error| format!("empty playlist {}: {error}", playlist.name))?;
+                    filling = Some((playlist_id, playlist.name.as_str(), 0));
+                }
+                PlaylistWrite::Entry { track_id } => {
+                    let Some((playlist_id, name, position)) = filling.as_mut() else {
+                        continue;
+                    };
+                    let added = transaction
+                        .execute(
+                            "INSERT OR IGNORE INTO playlist_entries
+                                 (playlist_id, track_id, position)
+                             VALUES (?1, ?2, ?3)",
+                            rusqlite::params![*playlist_id, track_id, *position],
+                        )
+                        .map_err(|error| format!("fill playlist {name}: {error}"))?;
+                    *position += added as i64;
+                }
+            }
+        }
+        transaction
+            .commit()
+            .map_err(|error| format!("playlist sync commit: {error}"))?;
+        drop(connection);
+        database.give_way();
+    }
+
+    let connection = database.lock_for_library_change();
+    let stored: Vec<i64> = connection
+        .prepare("SELECT id FROM playlists WHERE server_id = ?1")
+        .and_then(|mut statement| {
+            statement
+                .query_map([server_id], |row| row.get(0))?
+                .collect()
+        })
+        .map_err(|error| format!("list the server's playlists: {error}"))?;
+    let transaction = connection
+        .unchecked_transaction()
+        .map_err(|error| format!("playlist prune transaction: {error}"))?;
+    for playlist_id in stored {
+        if !kept.contains(&playlist_id) {
+            transaction
+                .execute("DELETE FROM playlists WHERE id = ?1", [playlist_id])
+                .map_err(|error| format!("remove playlist {playlist_id}: {error}"))?;
+        }
+    }
+    transaction
+        .commit()
+        .map_err(|error| format!("playlist prune commit: {error}"))
+}
+
+/// How many rows a burst of the playlist sync writes in one transaction.
+const PLAYLIST_BURST: usize = 512;
+
+/// One row the playlist sync writes: a listed playlist, kept and emptied, or
+/// one of its songs, in order, after it.
+enum PlaylistWrite<'listing> {
+    Keep(&'listing ListedPlaylist),
+    Entry { track_id: i64 },
+}
+
 /// Brings the server's libraries and songs in the library in line with a
 /// complete listing of them: every listed library and song is upserted, and
 /// every library or song of this server missing from the listing is removed
@@ -629,7 +822,7 @@ pub fn sync_server_tracks(
     let listed: std::collections::HashSet<String> =
         songs.iter().map(|song| song.address.clone()).collect();
     for burst in songs.chunks(SCAN_BATCH) {
-        let connection = database.lock();
+        let connection = database.lock_for_library_change();
         let mut transaction = connection
             .unchecked_transaction()
             .map_err(|error| format!("server sync transaction: {error}"))?;
@@ -647,12 +840,14 @@ pub fn sync_server_tracks(
         transaction
             .commit()
             .map_err(|error| format!("server sync commit: {error}"))?;
+        drop(connection);
+        database.give_way();
         report.added += written.added;
         report.updated += written.updated;
         report.skipped += written.skipped;
     }
 
-    let connection = database.lock();
+    let connection = database.lock_for_library_change();
     let stored: Vec<(i64, String)> = connection
         .prepare("SELECT id, path FROM tracks WHERE server_id = ?1")
         .and_then(|mut statement| {
@@ -686,7 +881,7 @@ fn sync_server_libraries(
     server_id: i64,
     libraries: &[ListedLibrary],
 ) -> Result<std::collections::HashMap<String, i64>, String> {
-    let connection = database.lock();
+    let connection = database.lock_for_library_change();
     let transaction = connection
         .unchecked_transaction()
         .map_err(|error| format!("library sync transaction: {error}"))?;
@@ -880,35 +1075,42 @@ pub struct Gains {
     pub track_peak: Option<f64>,
 }
 
-/// The gain a track plays at, in dB.
-///
-/// The album gain first, so the songs of one record keep the loudness
-/// differences their mastering gave them; the track gain when the album has
 /// The gains measured while Janis runs, at most one per local file: a queue
 /// takes a track's from here once it is known, ahead of the gain the library
 /// read before the measurement.
+///
+/// Each gain is kept under the row and the path it was measured for: SQLite
+/// hands a removed row's id to the next file added, and that file must not
+/// play at the gain of the one it replaced.
 #[derive(Debug, Default)]
 pub struct SessionGains {
-    measured: std::collections::HashMap<i64, f64>,
+    measured: std::collections::HashMap<PendingLoudness, f64>,
 }
 
 impl SessionGains {
     /// The gain `track` plays at.
     pub fn gain_of(&self, track: &Track) -> f64 {
         self.measured
-            .get(&track.id)
+            .get(&PendingLoudness {
+                track_id: track.id,
+                path: track.path.clone(),
+            })
             .copied()
             .unwrap_or(track.gain_db)
     }
 
-    /// A measurement of `track_id` ended: the gain it plays at from now on.
-    pub fn measured(&mut self, track_id: i64, lufs: f64, peak: f64) -> f64 {
+    /// A measurement of `file` ended: the gain it plays at from now on.
+    pub fn measured(&mut self, file: PendingLoudness, lufs: f64, peak: f64) -> f64 {
         let gain = resolved_gain(Gains::default(), Some(lufs), Some(peak));
-        self.measured.insert(track_id, gain);
+        self.measured.insert(file, gain);
         gain
     }
 }
 
+/// The gain a track plays at, in dB.
+///
+/// The album gain first, so the songs of one record keep the loudness
+/// differences their mastering gave them; the track gain when the album has
 /// none; the measured loudness when there is no gain at all. Each gain keeps
 /// its own peak, and borrows the other's when it has none, so a boost never
 /// lifts the loudest sample past full scale for want of a figure.
@@ -928,8 +1130,10 @@ pub fn resolved_gain(gains: Gains, lufs: Option<f64>, measured_peak: Option<f64>
     }
 }
 
-/// A file the background measurement still has to read.
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// A file the background measurement still has to read: its row and its path
+/// together, since a row id alone can name another file by the time the
+/// measurement ends.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct PendingLoudness {
     pub track_id: i64,
     pub path: String,
@@ -1004,6 +1208,29 @@ pub fn store_loudness(db: &DbState, track_id: i64, lufs: f64, peak: f64) {
         rusqlite::params![track_id, lufs, peak],
     ) {
         log::warn!("store loudness for track {}: {}", track_id, e);
+    }
+}
+
+/// Records what the background measurement read from `file`, only while its
+/// row still holds that file: one removed during the measurement may have
+/// handed its id to a file added since. Returns whether it was stored.
+pub fn store_measured_loudness(
+    database: &DbState,
+    file: &PendingLoudness,
+    lufs: f64,
+    peak: f64,
+) -> bool {
+    let connection = database.lock();
+    match connection.execute(
+        "UPDATE tracks SET loudness_lufs = ?3, loudness_peak = ?4
+         WHERE id = ?1 AND path = ?2 AND server_id IS NULL",
+        rusqlite::params![file.track_id, file.path, lufs, peak],
+    ) {
+        Ok(changed) => changed > 0,
+        Err(error) => {
+            log::warn!("store loudness for track {}: {error}", file.track_id);
+            false
+        }
     }
 }
 
@@ -1305,6 +1532,129 @@ mod tests {
             crate::persistence::favourite_track_ids(&database),
             Ok(vec![two])
         );
+    }
+
+    #[test]
+    fn a_playlist_sync_keeps_the_listeners_group_and_picture_and_drops_what_the_server_dropped() {
+        let directory = tempfile::tempdir().expect("a temporary directory");
+        let database = crate::persistence::init(directory.path().to_path_buf()).expect("db");
+        let server_id = signed_in(&database);
+        sync_server_tracks(
+            &database,
+            server_id,
+            &[],
+            vec![server_song("a", "One"), server_song("b", "Two")],
+        )
+        .expect("song sync");
+        let identifier_of = |title: &str| {
+            list_tracks(&database)
+                .expect("tracks")
+                .iter()
+                .find(|track| track.title == title)
+                .map(|track| track.id)
+                .expect("a listed song")
+        };
+        let (one, two) = (identifier_of("One"), identifier_of("Two"));
+        let listed = |item: &str, name: &str, songs: &[&str]| ListedPlaylist {
+            item: item.to_owned(),
+            name: name.to_owned(),
+            picture: true,
+            songs: songs
+                .iter()
+                .map(|song| format!("jellyfin://server/{song}"))
+                .collect(),
+        };
+
+        sync_server_playlists(
+            &database,
+            server_id,
+            &[
+                // A duplicate keeps its first place; a video, unknown here, is
+                // left out.
+                listed("road", "Road", &["b", "video", "a", "b"]),
+                listed("gone", "Gone soon", &["a"]),
+            ],
+        )
+        .expect("first playlist sync");
+        let saved = crate::persistence::playlists(&database).expect("read");
+        assert_eq!(saved.len(), 2);
+        assert_eq!(saved[0].track_ids, [two, one]);
+        assert!(saved[0].server_picture);
+        assert_eq!(saved[0].server, Some((server_id, "road".to_owned())));
+
+        let group = crate::persistence::create_playlist_group(&database, "Trips").expect("group");
+        crate::persistence::set_playlist_group(&database, saved[0].id, Some(group)).expect("file");
+        crate::persistence::set_playlist_picture(&database, saved[0].id, Some(&[7]))
+            .expect("picture");
+
+        sync_server_playlists(&database, server_id, &[listed("road", "Road trip", &["a"])])
+            .expect("second playlist sync");
+        let saved_again = crate::persistence::playlists(&database).expect("read");
+        assert_eq!(
+            saved_again.len(),
+            1,
+            "the playlist gone from the server is gone"
+        );
+        assert_eq!(
+            saved_again[0].id, saved[0].id,
+            "a re-listed playlist keeps its row"
+        );
+        assert_eq!(saved_again[0].name, "Road trip");
+        assert_eq!(saved_again[0].track_ids, [one]);
+        assert_eq!(saved_again[0].group_id, Some(group));
+        assert!(saved_again[0].picture);
+
+        // A playlist of Janis's own is not the server's to remove.
+        crate::persistence::create_playlist(&database, "Mine", None, &[]).expect("local");
+        sync_server_playlists(&database, server_id, &[]).expect("third playlist sync");
+        let names: Vec<String> = crate::persistence::playlists(&database)
+            .expect("read")
+            .into_iter()
+            .map(|playlist| playlist.name)
+            .collect();
+        assert_eq!(names, ["Mine"]);
+    }
+
+    #[test]
+    fn a_playlist_longer_than_a_burst_is_synced_whole_and_in_order() {
+        let directory = tempfile::tempdir().expect("a temporary directory");
+        let database = crate::persistence::init(directory.path().to_path_buf()).expect("db");
+        let server_id = signed_in(&database);
+        let count = PLAYLIST_BURST * 2 + 3;
+        let songs: Vec<ServerSong> = (0..count)
+            .map(|index| server_song(&format!("{index:04}"), &format!("{index:04}")))
+            .collect();
+        sync_server_tracks(&database, server_id, &[], songs).expect("song sync");
+        let identifiers: std::collections::HashMap<String, i64> = list_tracks(&database)
+            .expect("tracks")
+            .into_iter()
+            .map(|track| (track.title, track.id))
+            .collect();
+        // Backwards, and the first song again at the end, past a burst.
+        let order: Vec<String> = (0..count)
+            .rev()
+            .map(|index| format!("{index:04}"))
+            .collect();
+        let mut addresses: Vec<String> = order
+            .iter()
+            .map(|item| format!("jellyfin://server/{item}"))
+            .collect();
+        addresses.push(addresses[0].clone());
+        let playlist = |item: &str| ListedPlaylist {
+            item: item.to_owned(),
+            name: item.to_owned(),
+            picture: false,
+            songs: addresses.clone(),
+        };
+
+        sync_server_playlists(&database, server_id, &[playlist("long"), playlist("again")])
+            .expect("playlist sync");
+
+        let expected: Vec<i64> = order.iter().map(|title| identifiers[title]).collect();
+        let saved = crate::persistence::playlists(&database).expect("read");
+        assert_eq!(saved.len(), 2);
+        assert_eq!(saved[0].track_ids, expected);
+        assert_eq!(saved[1].track_ids, expected);
     }
 
     fn signed_in(database: &DbState) -> i64 {
@@ -1906,7 +2256,14 @@ mod tests {
         };
         assert_eq!(gains.gain_of(&tagged), -3.0);
 
-        let gain = gains.measured(1, -12.0, 0.5);
+        let gain = gains.measured(
+            PendingLoudness {
+                track_id: 1,
+                path: tagged.path.clone(),
+            },
+            -12.0,
+            0.5,
+        );
 
         assert_eq!(
             gain,
@@ -1918,6 +2275,43 @@ mod tests {
             0.0,
             "another track keeps its own"
         );
+        assert_eq!(
+            gains.gain_of(&Track {
+                path: "/music/another-file.flac".to_owned(),
+                ..tagged
+            }),
+            -3.0,
+            "another file given the same row keeps the gain the library read"
+        );
+    }
+
+    #[test]
+    fn a_measurement_is_not_stored_on_a_row_now_holding_another_file() {
+        let directory = tempfile::tempdir().expect("a temporary directory");
+        let database = crate::persistence::init(directory.path().join("data")).expect("a database");
+        let first = directory.path().join("first.wav");
+        write_wav(&first);
+        import_files(&database, vec![first.to_string_lossy().into_owned()]);
+        let measuring = tracks_needing_loudness(&database).expect("pending")[0].clone();
+
+        // While it is measured, the file goes and another takes its row.
+        database
+            .lock()
+            .execute("DELETE FROM tracks WHERE id = ?1", [measuring.track_id])
+            .expect("remove the song");
+        let second = directory.path().join("second.wav");
+        write_wav(&second);
+        import_files(&database, vec![second.to_string_lossy().into_owned()]);
+        let replacement = tracks_needing_loudness(&database).expect("pending")[0].clone();
+        assert_eq!(
+            replacement.track_id, measuring.track_id,
+            "SQLite reuses the id"
+        );
+
+        assert!(!store_measured_loudness(&database, &measuring, -20.0, 0.5));
+        assert!(needs_loudness(&database, replacement.track_id));
+        assert!(store_measured_loudness(&database, &replacement, -20.0, 0.5));
+        assert!(!needs_loudness(&database, replacement.track_id));
     }
 
     /// A row of `tracks`, as a scan or a sync would leave it.
@@ -2153,6 +2547,57 @@ mod tests {
 
         assert_eq!(prune_missing(&database), Ok(1));
         assert_eq!(list_tracks(&database).map(|tracks| tracks.len()), Ok(2));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_rescan_keeps_the_songs_of_a_folder_it_cannot_read() {
+        use std::os::unix::fs::PermissionsExt;
+        let directory = tempfile::tempdir().expect("a temporary directory");
+        let database = crate::persistence::init(directory.path().join("data")).expect("a database");
+        let music = directory.path().join("music");
+        let album = music.join("album");
+        write_wav(&album.join("song.wav"));
+        watch(&database, &music).expect("watched");
+        let song = list_tracks(&database).expect("tracks")[0].id;
+        crate::persistence::set_favourite_track(&database, song, true).expect("star the song");
+
+        std::fs::set_permissions(&album, std::fs::Permissions::from_mode(0o000))
+            .expect("lock the album folder");
+        let report = rescan_library(&database);
+        std::fs::set_permissions(&album, std::fs::Permissions::from_mode(0o755))
+            .expect("unlock the album folder");
+
+        assert_eq!(report.map(|report| report.removed), Ok(0));
+        assert_eq!(list_tracks(&database).map(|tracks| tracks.len()), Ok(1));
+        assert_eq!(
+            crate::persistence::favourite_track_ids(&database),
+            Ok(vec![song])
+        );
+    }
+
+    #[test]
+    fn a_snapshot_read_before_a_star_is_overtaken_by_it() {
+        let directory = tempfile::tempdir().expect("a temporary directory");
+        let database = crate::persistence::init(directory.path().join("data")).expect("a database");
+        let music = directory.path().join("music");
+        write_wav(&music.join("song.wav"));
+        watch(&database, &music).expect("watched");
+        let before = LibrarySnapshot::read(&database).expect("a snapshot");
+        let song = before.tracks[0].id;
+        assert!(before.is_current(&database));
+
+        // Neither a measurement nor a preference changes what it read.
+        store_loudness(&database, song, -14.0, 0.9);
+        crate::persistence::set_volume(&database, 0.5).expect("a volume");
+        assert!(before.is_current(&database));
+
+        crate::persistence::set_favourite_track(&database, song, true).expect("star the song");
+        assert!(!before.is_current(&database), "the star is not in it");
+
+        let after = LibrarySnapshot::read(&database).expect("a snapshot");
+        assert!(after.is_current(&database));
+        assert_eq!(after.favourite_track_ids, vec![song]);
     }
 
     #[test]

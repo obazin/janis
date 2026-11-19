@@ -7,6 +7,8 @@ use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 
 use crate::library::Track;
+use crate::persistence::PlaylistGroup;
+use crate::playlists::{Playlist, PlaylistKey};
 use crate::text::{compare_labels, fold, format_time, label_key};
 use crate::translations::Translations;
 
@@ -532,6 +534,7 @@ impl LibraryTab {
 pub enum SelectionKind {
     Album,
     Artist,
+    Playlist,
 }
 
 /// The last scan's report, as the Local Files screen shows it.
@@ -638,7 +641,15 @@ pub fn renewed_selection(
     selection: Selection,
     albums: &[AlbumGroup],
     artists: &[ArtistGroup],
+    playlists: &[Playlist],
+    tracks: &[Track],
 ) -> Option<Selection> {
+    if selection.kind == SelectionKind::Playlist {
+        return playlists
+            .iter()
+            .find(|playlist| playlist_selection_key(playlist.key) == selection.key)
+            .map(|playlist| playlist_selection(playlist, &tracks_by_id(tracks)));
+    }
     let tracks = match selection.kind {
         SelectionKind::Album => albums
             .iter()
@@ -648,11 +659,153 @@ pub fn renewed_selection(
             .iter()
             .find(|artist| artist.artist == selection.key)
             .map(artist_tracks),
+        SelectionKind::Playlist => None,
     }?;
     Some(Selection {
         tracks,
         ..selection
     })
+}
+
+/// The playlists of one heading of the Playlists tab: a group's, or those
+/// in none.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PlaylistSection<'playlists> {
+    /// The group, or none for the playlists filed in none.
+    pub group: Option<PlaylistGroup>,
+    pub playlists: Vec<&'playlists Playlist>,
+}
+
+/// The Playlists tab: a section for each group the search leaves a playlist
+/// in, in the listener's order, then the playlists in none; each section's
+/// playlists by name. The search reads the playlists' names.
+pub fn playlist_sections<'playlists>(
+    playlists: &'playlists [Playlist],
+    groups: &[PlaylistGroup],
+    search: &str,
+) -> Vec<PlaylistSection<'playlists>> {
+    let query = normalized_query(search);
+    let kept: Vec<&Playlist> = playlists
+        .iter()
+        .filter(|playlist| query.is_empty() || fold(&playlist.name).contains(&query))
+        .collect();
+    let mut sections = sections_of(&kept, groups);
+    sections.retain(|section| !section.playlists.is_empty());
+    sections
+}
+
+/// The sheet that manages the playlists: every group in the listener's
+/// order, empty ones included, then the playlists in none when there are
+/// some; each section's playlists by name. A playlist its server is still
+/// making has no row to file or name yet, so it waits.
+pub fn managed_sections<'playlists>(
+    playlists: &'playlists [Playlist],
+    groups: &[PlaylistGroup],
+) -> Vec<PlaylistSection<'playlists>> {
+    let saved: Vec<&Playlist> = playlists
+        .iter()
+        .filter(|playlist| playlist.key.saved().is_some())
+        .collect();
+    let mut sections = sections_of(&saved, groups);
+    sections.retain(|section| section.group.is_some() || !section.playlists.is_empty());
+    sections
+}
+
+/// A section for each group, then one for the playlists in none — a group
+/// that is gone counting as none — each by name.
+fn sections_of<'playlists>(
+    playlists: &[&'playlists Playlist],
+    groups: &[PlaylistGroup],
+) -> Vec<PlaylistSection<'playlists>> {
+    let known: HashSet<i64> = groups.iter().map(|group| group.id).collect();
+    let filed_in = |group: Option<i64>| {
+        let mut filed: Vec<&Playlist> = playlists
+            .iter()
+            .copied()
+            .filter(|playlist| {
+                playlist
+                    .group_id
+                    .filter(|group_id| known.contains(group_id))
+                    == group
+            })
+            .collect();
+        filed.sort_by(|left, right| compare_labels(&left.name, &right.name));
+        filed
+    };
+    let mut sections: Vec<PlaylistSection> = groups
+        .iter()
+        .map(|group| PlaylistSection {
+            group: Some(group.clone()),
+            playlists: filed_in(Some(group.id)),
+        })
+        .collect();
+    sections.push(PlaylistSection {
+        group: None,
+        playlists: filed_in(None),
+    });
+    sections
+}
+
+/// The tracks on show by id, to find a playlist's songs among them.
+pub fn tracks_by_id(tracks: &[Track]) -> HashMap<i64, &Track> {
+    tracks.iter().map(|track| (track.id, track)).collect()
+}
+
+/// A playlist's songs on show, in its order.
+pub fn playlist_tracks(playlist: &Playlist, shown: &HashMap<i64, &Track>) -> Vec<Track> {
+    playlist
+        .track_ids
+        .iter()
+        .filter_map(|track_id| shown.get(track_id).map(|track| (*track).clone()))
+        .collect()
+}
+
+/// What names a playlist as the selection.
+pub fn playlist_selection_key(key: PlaylistKey) -> String {
+    match key {
+        PlaylistKey::Saved(playlist_id) => format!("playlist:{playlist_id}"),
+        PlaylistKey::Creating(creation) => format!("creating:{creation}"),
+    }
+}
+
+/// The selection a click on a playlist's card opens: its songs on show, in
+/// its order, under its name.
+pub fn playlist_selection(playlist: &Playlist, shown: &HashMap<i64, &Track>) -> Selection {
+    Selection {
+        kind: SelectionKind::Playlist,
+        key: playlist_selection_key(playlist.key),
+        label: playlist.name.clone(),
+        tracks: playlist_tracks(playlist, shown),
+    }
+}
+
+/// Where the selected playlist's card sits: its section and its place there.
+pub fn playlist_selection_place(
+    sections: &[PlaylistSection],
+    selection: Option<&Selection>,
+) -> Option<(usize, usize)> {
+    let selection = selection.filter(|selection| selection.kind == SelectionKind::Playlist)?;
+    sections
+        .iter()
+        .enumerate()
+        .find_map(|(section_place, section)| {
+            section
+                .playlists
+                .iter()
+                .position(|playlist| playlist_selection_key(playlist.key) == selection.key)
+                .map(|place| (section_place, place))
+        })
+}
+
+/// The line under a playlist's name: how many of its songs are on show, and
+/// how long they play.
+pub fn playlist_detail(tracks: &[Track], translations: &Translations) -> String {
+    let duration: f64 = tracks.iter().map(|track| track.duration_secs).sum();
+    [
+        translations.count("library.tracks", tracks.len()),
+        format_time(duration),
+    ]
+    .join(" · ")
 }
 
 /// The number a track row shows: its place in the list, or — in an album —
@@ -1350,12 +1503,18 @@ mod tests {
             tracks: before.to_vec(),
         };
 
-        let renewed = renewed_selection(selection.clone(), &albums(&after), &artists(&after))
-            .expect("the album is still there");
+        let renewed = renewed_selection(
+            selection.clone(),
+            &albums(&after),
+            &artists(&after),
+            &[],
+            &after,
+        )
+        .expect("the album is still there");
         assert_eq!(titles(&renewed.tracks), ["One", "Two"]);
         assert_eq!(renewed.label, "A");
 
-        assert_eq!(renewed_selection(selection, &[], &[]), None);
+        assert_eq!(renewed_selection(selection, &[], &[], &[], &[]), None);
     }
 
     #[test]
@@ -1409,8 +1568,9 @@ mod tests {
             tracks: Vec::new(),
         };
 
-        let renewed = renewed_selection(selection, &albums(&tracks), &artists(&tracks))
-            .expect("the artist is still there");
+        let renewed =
+            renewed_selection(selection, &albums(&tracks), &artists(&tracks), &[], &tracks)
+                .expect("the artist is still there");
 
         assert_eq!(titles(&renewed.tracks), ["First", "Second"]);
     }
@@ -1749,7 +1909,7 @@ mod tests {
     fn a_renewed_artist_selection_closes_when_the_artist_is_gone() {
         let tracks = [track(1, "a").artist("Joni")];
         let selection = artist_selection(&artists(&tracks)[0]);
-        assert_eq!(renewed_selection(selection, &[], &[]), None);
+        assert_eq!(renewed_selection(selection, &[], &[], &[], &[]), None);
     }
 
     #[test]
@@ -1869,5 +2029,133 @@ mod tests {
             ["file", "unfiled"],
             "files always show, and so does a song filed in no library yet"
         );
+    }
+
+    fn playlist(id: i64, name: &str, group_id: Option<i64>, track_ids: &[i64]) -> Playlist {
+        Playlist {
+            key: PlaylistKey::Saved(id),
+            name: name.to_owned(),
+            server: None,
+            server_picture: false,
+            group_id,
+            picture: false,
+            track_ids: track_ids.to_vec(),
+        }
+    }
+
+    fn group(id: i64, name: &str) -> PlaylistGroup {
+        PlaylistGroup {
+            id,
+            name: name.to_owned(),
+        }
+    }
+
+    #[test]
+    fn playlists_show_by_group_in_the_listeners_order_then_those_in_none_each_by_name() {
+        let playlists = [
+            playlist(1, "zebra", None, &[]),
+            playlist(2, "Run", Some(8), &[]),
+            playlist(3, "Apple", None, &[]),
+            playlist(4, "Calm", Some(7), &[]),
+            playlist(5, "Lost", Some(99), &[]),
+            playlist(6, "Bike", Some(8), &[]),
+        ];
+        let groups = [group(8, "Sport"), group(7, "Moods"), group(9, "Empty")];
+        let sections = playlist_sections(&playlists, &groups, "");
+        let shape: Vec<(Option<&str>, Vec<&str>)> = sections
+            .iter()
+            .map(|section| {
+                (
+                    section.group.as_ref().map(|group| group.name.as_str()),
+                    section
+                        .playlists
+                        .iter()
+                        .map(|playlist| playlist.name.as_str())
+                        .collect(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            shape,
+            [
+                (Some("Sport"), vec!["Bike", "Run"]),
+                (Some("Moods"), vec!["Calm"]),
+                (None, vec!["Apple", "Lost", "zebra"]),
+            ],
+            "an empty group shows no heading; a playlist of a group gone is in none"
+        );
+
+        let found = playlist_sections(&playlists, &groups, "rün");
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].playlists[0].name, "Run");
+        assert_eq!(
+            playlist_selection_place(
+                &sections,
+                Some(&playlist_selection(&playlists[4], &HashMap::new()))
+            ),
+            Some((2, 1))
+        );
+    }
+
+    #[test]
+    fn the_sheet_lists_every_group_then_the_saved_playlists_in_none() {
+        let mut creating = playlist(9, "New", None, &[]);
+        creating.key = PlaylistKey::Creating(1);
+        let playlists = [
+            playlist(1, "zebra", None, &[]),
+            playlist(2, "Run", Some(8), &[]),
+            playlist(5, "Lost", Some(99), &[]),
+            creating,
+        ];
+        let groups = [group(8, "Sport"), group(9, "Empty")];
+        let sections = managed_sections(&playlists, &groups);
+        let shape: Vec<(Option<&str>, Vec<&str>)> = sections
+            .iter()
+            .map(|section| {
+                (
+                    section.group.as_ref().map(|group| group.name.as_str()),
+                    section
+                        .playlists
+                        .iter()
+                        .map(|playlist| playlist.name.as_str())
+                        .collect(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            shape,
+            [
+                (Some("Sport"), vec!["Run"]),
+                (Some("Empty"), vec![]),
+                (None, vec!["Lost", "zebra"]),
+            ]
+        );
+        assert_eq!(
+            managed_sections(&playlists[1..2], &groups).len(),
+            2,
+            "no section of playlists in none when there is none"
+        );
+    }
+
+    #[test]
+    fn a_playlist_opens_on_its_songs_on_show_in_its_order() {
+        let tracks = [track(1, "One"), track(2, "Two"), track(3, "Three")];
+        let chosen = playlist(4, "Road", None, &[3, 9, 1]);
+        let selection = playlist_selection(&chosen, &tracks_by_id(&tracks));
+        assert_eq!(selection.kind, SelectionKind::Playlist);
+        assert_eq!(selection.label, "Road");
+        let titles: Vec<&str> = selection
+            .tracks
+            .iter()
+            .map(|track| track.title.as_str())
+            .collect();
+        assert_eq!(titles, ["Three", "One"], "a song not on show is left out");
+
+        let renamed = playlist(4, "Road trip", None, &[1]);
+        let renewed = renewed_selection(selection.clone(), &[], &[], &[renamed], &tracks)
+            .expect("the playlist is still there");
+        assert_eq!(renewed.label, "Road trip");
+        assert_eq!(renewed.tracks.len(), 1);
+        assert_eq!(renewed_selection(selection, &[], &[], &[], &tracks), None);
     }
 }

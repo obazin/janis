@@ -1,0 +1,103 @@
+import { Tokens } from "../../tokens.slint";
+import { Icons } from "../../icons.slint";
+import { Strings } from "strings.slint";
+import { MenuItem } from "../../atoms/menu_item.slint";
+import { MenuPanel } from "../../molecules/menu_panel.slint";
+import { Library } from "library.slint";
+
+// The menu a right-click on a song opens where it was clicked: add it to a
+// playlist — one that can take it, or a new one — star it, or, in a
+// playlist's panel, take it out. A click elsewhere or Escape closes it.
+export component TrackMenu inherits Rectangle {
+    property <length> margin: 8px;
+    property <bool> submenu-open: Library.menu-submenu-open;
+
+    public function take-focus() {
+        keys.focus();
+    }
+
+    keys := FocusScope {
+        key-pressed(event) => {
+            if event.text == Key.Escape {
+                Library.menu-closed();
+                return accept;
+            }
+            return reject;
+        }
+
+        TouchArea {
+            clicked => { Library.menu-closed(); }
+            pointer-event(event) => {
+                if event.kind == PointerEventKind.down && event.button == PointerEventButton.right {
+                    Library.menu-closed();
+                }
+            }
+        }
+
+        main := MenuPanel {
+            x: clamp(Library.menu-x, root.margin, root.width - self.width - root.margin);
+            y: clamp(Library.menu-y, root.margin, root.height - self.height - root.margin);
+            accessible-label: Strings.menu-add-to-playlist;
+
+            MenuItem {
+                icon: Icons.playlist;
+                label: Strings.menu-add-to-playlist;
+                opens-submenu: true;
+                highlighted: root.submenu-open;
+                activated => { root.submenu-open = !root.submenu-open; }
+                changed has-hover => {
+                    if self.has-hover {
+                        root.submenu-open = true;
+                    }
+                }
+            }
+            if Library.menu-in-playlist: MenuItem {
+                icon: Icons.playlist-remove;
+                label: Strings.menu-remove-from-playlist;
+                activated => { Library.menu-remove-from-playlist(); }
+                changed has-hover => {
+                    if self.has-hover {
+                        root.submenu-open = false;
+                    }
+                }
+            }
+            MenuItem {
+                icon: Icons.star;
+                label: Library.menu-favourite ? Strings.library-favourite-remove : Strings.library-favourite-add;
+                activated => { Library.menu-favourite-toggled(); }
+                changed has-hover => {
+                    if self.has-hover {
+                        root.submenu-open = false;
+                    }
+                }
+            }
+        }
+
+        // The playlists, beside the menu: on its right, or on its left when
+        // the window ends first.
+        if root.submenu-open: MenuPanel {
+            x: main.x + main.width + 4px + self.width <= root.width - root.margin ? main.x + main.width + 4px : max(root.margin, main.x - self.width - 4px);
+            y: clamp(main.y, root.margin, root.height - self.height - root.margin);
+            accessible-label: Strings.menu-add-to-playlist;
+
+            MenuItem {
+                icon: Icons.plus;
+                label: Strings.menu-new-playlist;
+                activated => { Library.menu-new-playlist(); }
+            }
+            if Library.menu-playlists.length > 0: Rectangle {
+                height: 9px;
+                Rectangle {
+                    height: 1px;
+                    background: Tokens.divider;
+                }
+            }
+            for choice[index] in Library.menu-playlists: MenuItem {
+                label: choice.label;
+                checked: choice.current;
+                enabled: !choice.current;
+                activated => { Library.menu-playlist-chosen(index); }
+            }
+        }
+    }
+}

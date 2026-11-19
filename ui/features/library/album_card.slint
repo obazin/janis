@@ -2,7 +2,7 @@ import { Tokens, Typography, Metrics, Motion } from "../../tokens.slint";
 import { CoverArt } from "cover_art.slint";
 import { LibraryCard } from "library.slint";
 
-// A card of the album and artist grids: the cover, a title and a line or two
+// A card of the album, artist and playlist grids: the cover, a title and a line or two
 // under it. The selected card wears the accent outline.
 export component AlbumCard inherits Rectangle {
     in property <LibraryCard> card;
@@ -33,8 +33,9 @@ export component AlbumCard inherits Rectangle {
             y: root.inset;
             width: root.width - 2 * root.inset;
             height: self.width;
-            radius: 12px;
+            radius: Metrics.radius-cover;
             track-id: root.card.track-id;
+            playlist-id: root.card.playlist-id;
             gradient-index: root.card.gradient-index;
             drop-shadow-offset-y: Tokens.shadow-card.offset-y;
             drop-shadow-blur: Tokens.shadow-card.blur;

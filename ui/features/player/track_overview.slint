@@ -1,4 +1,5 @@
 import { Tokens } from "../../tokens.slint";
+import { SliderKeys } from "../../atoms/slider_keys.slint";
 import { Player } from "player.slint";
 
 // The shape of the whole current track, as a DAW draws an audio clip: a
@@ -6,9 +7,18 @@ import { Player } from "player.slint";
 // on the left to its end on the right. Rust draws it as an alpha mask at this
 // element's size in physical pixels; it is coloured here twice, the part
 // already played in the waveform gradient, the rest muted, cut at the
-// playhead. A middle line stands for what is not read yet. A click seeks.
+// playhead. A middle line stands for what is not read yet. A click seeks;
+// once it has the focus, the arrow keys step through the track.
 export component TrackOverview inherits Rectangle {
     in property <string> seek-label;
+
+    // One step of the keys and of assistive technology: a hundredth of the
+    // track.
+    property <float> step: 0.01;
+
+    function seek-to(fraction: float) {
+        Player.seek(clamp(fraction, 0, 1));
+    }
 
     property <int> physical-width: round(root.width / 1phx);
     property <int> physical-height: round(root.height / 1phx);
@@ -67,13 +77,36 @@ export component TrackOverview inherits Rectangle {
         background: Tokens.text;
     }
 
+    keys := SliderKeys {
+        increment => { root.seek-to(Player.overview-playhead + root.step); }
+        decrement => { root.seek-to(Player.overview-playhead - root.step); }
+        to-minimum => { root.seek-to(0); }
+        to-maximum => { root.seek-to(1); }
+    }
+
+    if keys.focus-visible: Rectangle {
+        border-width: 1px;
+        border-color: Tokens.accent-ring;
+    }
+
     touch := TouchArea {
         mouse-cursor: pointer;
         accessible-role: slider;
         accessible-label: root.seek-label;
         accessible-value-minimum: 0;
         accessible-value-maximum: 1;
+        accessible-value-step: root.step;
         accessible-value: Player.overview-playhead;
-        clicked => { Player.seek(self.mouse-x / self.width); }
+        accessible-action-increment => { root.seek-to(Player.overview-playhead + root.step); }
+        accessible-action-decrement => { root.seek-to(Player.overview-playhead - root.step); }
+        accessible-action-set-value(value) => {
+            if value.is-float() {
+                root.seek-to(value.to-float());
+            }
+        }
+        clicked => {
+            keys.focus();
+            Player.seek(self.mouse-x / self.width);
+        }
     }
 }

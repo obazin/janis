@@ -21,7 +21,7 @@ use crate::covers::{self, CoverKey, CoverRequest, CurrentArtRequests, Pixels};
 use crate::jellyfin::{self, Session};
 use crate::library::{self, CoverSource};
 use crate::media_controls::Artwork;
-use crate::persistence::DbState;
+use crate::persistence::{self, DbState};
 use crate::user_interface::{CoverList, Covers};
 
 /// How often the tiles in view are asked to repeat their requests while
@@ -93,6 +93,12 @@ impl Application {
                     Some(Thumbnail::Failed)
                 )
             })
+        });
+        let weak = Rc::downgrade(self);
+        covers.on_playlist_cover(move |playlist_id, _revision| {
+            weak.upgrade()
+                .map(|application| application.playlist_cover(i64::from(playlist_id)))
+                .unwrap_or_default()
         });
         let weak = Rc::downgrade(self);
         covers.on_in_view(move |list, first, count| {
@@ -288,6 +294,12 @@ impl Application {
             return Image::default();
         }
         let key = self.cover_keys.borrow().key(track_id);
+        self.thumbnail_of(key)
+    }
+
+    /// The thumbnail cached under `key`; asking for one that is not cached
+    /// requests it.
+    pub(super) fn thumbnail_of(&self, key: CoverKey) -> Image {
         if let Some(thumbnail) = self.thumbnails.borrow().get(&key) {
             return match thumbnail {
                 Thumbnail::Ready(image) => image.clone(),
@@ -393,6 +405,11 @@ fn keyed_cover(
     match key {
         CoverKey::Track(track_id) => library_cover(database, session, *track_id, longest_side),
         CoverKey::ServerPicture(item) => server_picture(session, item, longest_side),
+        CoverKey::PlaylistPicture(playlist_id) => {
+            persistence::playlist_picture(database, *playlist_id)?
+                .map(|bytes| covers::picture_cover(bytes, longest_side))
+                .transpose()
+        }
     }
 }
 

@@ -12,12 +12,11 @@ use std::sync::Arc;
 
 use slint::ComponentHandle;
 
-use super::library_screens::LibrarySnapshot;
 use super::{list_place, post, Application};
 use crate::audio::Location;
 use crate::effects::Secret;
 use crate::jellyfin::{self, Failure, Session};
-use crate::library::{self, ScanReport, Track};
+use crate::library::{self, LibrarySnapshot, ScanReport, Track};
 use crate::persistence::{self, MediaServer};
 use crate::user_interface;
 
@@ -92,13 +91,30 @@ impl Application {
                         persistence::save_media_server(&database, &signed_in)
                             .map_err(Failure::Other)
                     });
+            // Another account replaces the one before and takes its songs and
+            // playlists with it: the library is read again at once, not
+            // after a sync that may fail.
+            let snapshot = outcome.is_ok().then(|| LibrarySnapshot::read(&database));
             post(move |application| {
                 let effects = application
                     .media_server
                     .borrow_mut()
                     .sign_in_finished(epoch, outcome);
+                let library_read = snapshot.is_some();
+                match snapshot {
+                    Some(Ok(snapshot)) => application.take_library(snapshot),
+                    Some(Err(error)) => {
+                        log::error!("read the library after a sign-in: {error}");
+                        application.notify_error("error.library", vec![("message", error)], None);
+                    }
+                    None => {}
+                }
                 application.run(effects);
-                application.refresh_jellyfin();
+                if library_read {
+                    application.refresh_everything();
+                } else {
+                    application.refresh_jellyfin();
+                }
             });
         });
     }
@@ -109,13 +125,23 @@ impl Application {
         self.server_worker.run(move || {
             let outcome = jellyfin::listing(&session, &server.server_identifier)
                 .and_then(|listing| {
-                    library::sync_server_tracks(
+                    let report = library::sync_server_tracks(
                         &database,
                         server.id,
                         &listing.libraries,
                         listing.songs,
                     )
-                    .map_err(Failure::Other)
+                    .map_err(Failure::Other)?;
+                    // The songs are in; playlists that could not be written
+                    // stay as the last sync left them.
+                    if let Some(playlists) = &listing.playlists {
+                        if let Err(error) =
+                            library::sync_server_playlists(&database, server.id, playlists)
+                        {
+                            log::warn!("keep the server's playlists: {error}");
+                        }
+                    }
+                    Ok(report)
                 })
                 .and_then(|report| {
                     persistence::set_last_sync(&database, server.id).map_err(Failure::Other)?;
@@ -255,6 +281,7 @@ impl Application {
         let view = self.window.global::<user_interface::Jellyfin>();
 
         view.set_signed_in(card.signed_in);
+        view.set_has_account(card.has_account);
         view.set_busy(card.busy);
         view.set_status(
             card.status_key

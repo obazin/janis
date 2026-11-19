@@ -132,11 +132,11 @@
 
           janis = rustPlatform.buildRustPackage (finalAttrs: {
             pname = "janis";
-            version = "0.3.1";
+            version = "0.3.2";
 
             src = ./.;
 
-            cargoHash = "sha256-5NqBTigRPLfKrKBbDazhWaOMGoNq6qEK02DSXvQ2lZA=";
+            cargoHash = "sha256-V66BYd9IyoffYpB7zheScjzGySuVNpy35LErKzynTJE=";
 
             nativeBuildInputs = [
               pkgs.cmake
@@ -148,6 +148,12 @@
             # The quality gates are the local suites (`just check`); some of
             # them need a loopback socket the build sandbox does not give.
             doCheck = false;
+
+            # The `*-sys` crates build their bundled sources (aws-lc, SQLite),
+            # as `cargo build` does outside Nix. Recent nixpkgs would otherwise
+            # point them at system libraries this package does not provide,
+            # which matters when a consumer swaps in its own nixpkgs.
+            dontCargoUseSystemLibs = true;
 
             # The binary finds the libraries it loads at run time.
             postFixup = pkgs.lib.optionalString pkgs.stdenv.isLinux ''

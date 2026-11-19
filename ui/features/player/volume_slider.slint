@@ -1,9 +1,18 @@
 import { Tokens } from "../../tokens.slint";
+import { SliderKeys } from "../../atoms/slider_keys.slint";
 import { Player } from "player.slint";
 
-// The volume rail: click or drag along it.
+// The volume rail: click or drag along it, or step it with the arrow keys
+// once it has the focus.
 export component VolumeSlider inherits Rectangle {
     in property <string> label;
+
+    // One step of the keys and of assistive technology: 5 %.
+    property <float> step: 0.05;
+
+    function move-by(change: float) {
+        Player.volume-changed(clamp(Player.volume + change, 0, 1));
+    }
 
     width: 110px;
     height: 16px;
@@ -11,7 +20,28 @@ export component VolumeSlider inherits Rectangle {
     accessible-label: root.label;
     accessible-value-minimum: 0;
     accessible-value-maximum: 100;
+    accessible-value-step: root.step * 100;
     accessible-value: round(Player.volume * 100);
+    accessible-action-increment => { root.move-by(root.step); }
+    accessible-action-decrement => { root.move-by(-root.step); }
+    accessible-action-set-value(value) => {
+        if value.is-float() {
+            Player.volume-changed(clamp(value.to-float() / 100, 0, 1));
+        }
+    }
+
+    keys := SliderKeys {
+        increment => { root.move-by(root.step); }
+        decrement => { root.move-by(-root.step); }
+        to-minimum => { Player.volume-changed(0); }
+        to-maximum => { Player.volume-changed(1); }
+    }
+
+    if keys.focus-visible: Rectangle {
+        border-radius: self.height / 2;
+        border-width: 1px;
+        border-color: Tokens.accent-ring;
+    }
 
     Rectangle {
         y: (root.height - self.height) / 2;
@@ -31,6 +61,7 @@ export component VolumeSlider inherits Rectangle {
         mouse-cursor: pointer;
         pointer-event(event) => {
             if event.kind == PointerEventKind.down {
+                keys.focus();
                 Player.volume-changed(self.mouse-x / self.width);
             }
         }

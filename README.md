@@ -8,8 +8,8 @@ A native application written in **Rust**, with a **[Slint](https://slint.dev)** 
 
 - **Mini player** — the bottom bar, on every screen: what plays, the transport, and the shape of the whole track as a DAW draws it (peaks around an RMS body, the played part in colour, click to seek), read in the background for local files and Jellyfin songs alike; a station shows a live oscilloscope.
 - **Now Playing** — hero album art (embedded cover art, or a generated prism gradient), track/artist/composer/album metadata, live waveform with click-to-seek, transport with shuffle/repeat, volume, a queue card (up next / playlist / current album), and an artist spotlight drawn from your library.
-- **Library** — scan folders or import files; albums, artists and songs views grouped from real tags (`lofty`); favourite songs you star from any list or from Now Playing, gathered in a Favourites tab; search from the titlebar.
-- **Jellyfin** — sign in to your Jellyfin server in Settings and its songs join the library, playing the original files from the server through the same engine (EQ, gapless, normalization with the server's own gains, waveform), with the server's cover art; every library of the server is synced, and each can be switched off to keep its songs out of Janis; favourites stay in step with the server both ways.
+- **Library** — scan folders or import files; albums, artists and songs views grouped from real tags (`lofty`); favourite songs you star from any list or from Now Playing, gathered in a Favourites tab; playlists made from a right-click on any song (Add to playlist, or a new one), shown as cards, sorted into groups and given pictures of your own; search from the titlebar.
+- **Jellyfin** — sign in to your Jellyfin server in Settings and its songs join the library, playing the original files from the server through the same engine (EQ, gapless, normalization with the server's own gains, waveform), with the server's cover art; every library of the server is synced, and each can be switched off to keep its songs out of Janis; favourites and playlists stay in step with the server both ways.
 - **Discover** — shelves derived from your own library (recently added albums, artists, rediscoveries).
 - **Web Radio** — curated station list (SomaFM, FIP, Radio Paradise, KEXP, …) with country and genre filters, and favourites you star.
 - **Local Files** — drop zone (real OS drag-and-drop), scanned-library table with format badges, watched-folder management, rescan.
@@ -17,7 +17,7 @@ A native application written in **Rust**, with a **[Slint](https://slint.dev)** 
 - **Settings** — playback switches (gapless, crossfade and normalization are live in the engine and on by default; exclusive output is persisted only), output info, the Jellyfin server, language (English / Français).
 - **Desktop media controls (Linux)** — MPRIS integration for `playerctl`, desktop media widgets and standard media-key routing, with playback controls, metadata, artwork and position reporting. Janis does not grab keys.
 
-Playlists and user-added stations are on the roadmap.
+User-added stations are on the roadmap.
 
 ## Install
 

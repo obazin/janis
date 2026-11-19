@@ -57,7 +57,12 @@ pub struct Player {
     /// Bumped each time the listener starts something else, so the outcome
     /// of a connection they have moved on from is recognised and dropped.
     connection_epoch: u64,
+    /// What played when the listener chose the station still connecting: the
+    /// engine goes on playing it when that connection fails.
+    before_connecting: Option<Playing>,
     station: Option<Station>,
+    /// The picture the station's last metadata pointed at.
+    stream_cover: Option<String>,
     volume: f64,
     shuffle: bool,
     repeat: bool,
@@ -89,7 +94,9 @@ impl Player {
             stream: StreamInfo::default(),
             connecting: false,
             connection_epoch: 0,
+            before_connecting: None,
             station: None,
+            stream_cover: None,
             volume: 0.8,
             shuffle: false,
             repeat: false,
@@ -374,6 +381,7 @@ impl Player {
                     artist,
                     album,
                 };
+                self.stream_cover = cover.clone();
                 vec![Effect::ShowStreamCover(cover)]
             }
             EngineEvent::TrackChanged { index } => {
@@ -455,6 +463,7 @@ impl Player {
         self.station = None;
         // A station still connecting is abandoned: its outcome is not awaited.
         self.connecting = false;
+        self.before_connecting = None;
         self.connection_epoch += 1;
         self.index = index.min(tracks.len() - 1);
         self.queue = tracks;
@@ -479,6 +488,18 @@ impl Player {
     /// [`Player::station_connection_finished`], which is why a station card
     /// can show a connecting state rather than pretending.
     pub fn play_station(&mut self, station: Station) -> Vec<Effect> {
+        // Switching again while connecting, what plays is still what played
+        // before the first of them.
+        if !self.connecting {
+            self.before_connecting = Some(Playing {
+                station: self.station.clone(),
+                stream: self.stream.clone(),
+                stream_cover: self.stream_cover.clone(),
+                position_seconds: self.position_seconds,
+                duration_seconds: self.duration_seconds,
+                position_at: self.position_at,
+            });
+        }
         let mut effects = self.clear_stream_info();
         self.stopped_queue_index = None;
         self.stopped_station = None;
@@ -487,7 +508,6 @@ impl Player {
         self.pending_station = Some(station.clone());
         self.navigation_pending = false;
         self.navigation_paused = false;
-        self.replay_on_resume = false;
         self.station = Some(station.clone());
         self.position_seconds = 0.0;
         self.duration_seconds = 0.0;
@@ -505,7 +525,8 @@ impl Player {
     /// The outcome of the connection `Effect::ConnectStation` asked for:
     /// success once the station is connected and buffered. `epoch` is the one
     /// the effect carried; an outcome from a connection the listener has
-    /// moved on from changes nothing.
+    /// moved on from changes nothing. A failed connection leaves the engine
+    /// playing what it played before, so the mirror shows that again.
     pub fn station_connection_finished(
         &mut self,
         station: &Station,
@@ -517,17 +538,22 @@ impl Player {
             return Vec::new();
         }
         self.connecting = false;
+        let before = self.before_connecting.take();
         match outcome {
             Ok(()) => Vec::new(),
             Err(error) => {
                 log::error!("radio play failed: {error}");
-                self.stopped_station = self.pending_station.take();
-                self.station = None;
-                vec![Effect::NotifyError {
+                let failed_station = self.pending_station.take();
+                let mut effects = self.show_again(before);
+                if self.mode == Mode::Idle {
+                    self.stopped_station = failed_station;
+                }
+                effects.push(Effect::NotifyError {
                     key: "error.radio",
                     parameters: vec![("name", station.name.clone())],
                     dedupe_key: None,
-                }]
+                });
+                effects
             }
         }
     }
@@ -675,6 +701,9 @@ impl Player {
     }
 
     /// Seeks to a fraction of the current local track.
+    ///
+    /// The seek names the track it was meant for, so the engine drops it when
+    /// a skip still on its way has already moved playback to another track.
     pub fn seek_to(&mut self, fraction: f64, now: Instant) -> Vec<Effect> {
         if !self.can_seek() || fraction.is_nan() {
             return Vec::new();
@@ -762,8 +791,41 @@ impl Player {
 
     fn clear_stream_info(&mut self) -> Vec<Effect> {
         self.stream = StreamInfo::default();
+        self.stream_cover = None;
         vec![Effect::ShowStreamCover(None)]
     }
+
+    /// Shows again what played before a station that failed to connect: the
+    /// station before it, with what it said it played, or the local track,
+    /// with its cover and overview.
+    fn show_again(&mut self, before: Option<Playing>) -> Vec<Effect> {
+        let Some(before) = before else {
+            self.station = None;
+            return Vec::new();
+        };
+        self.station = before.station.filter(|_| self.mode == Mode::Radio);
+        self.position_seconds = before.position_seconds;
+        self.duration_seconds = before.duration_seconds;
+        self.position_at = before.position_at;
+        if self.station.is_some() {
+            self.stream = before.stream;
+            self.stream_cover = before.stream_cover.clone();
+            return vec![Effect::ShowStreamCover(before.stream_cover)];
+        }
+        let track_id = self.current().map(|track| track.id);
+        vec![Effect::LoadCover(track_id), Effect::LoadOverview(track_id)]
+    }
+}
+
+/// What the mirror showed of the playback a station connection would replace.
+#[derive(Clone, Debug)]
+struct Playing {
+    station: Option<Station>,
+    stream: StreamInfo,
+    stream_cover: Option<String>,
+    position_seconds: f64,
+    duration_seconds: f64,
+    position_at: Instant,
 }
 
 #[cfg(test)]
@@ -1141,13 +1203,13 @@ mod tests {
 
     fn state(mode: Mode, playing: bool, index: usize, station_id: Option<&str>) -> EngineEvent {
         EngineEvent::State {
-            has_next: false,
             playing,
             mode,
             index,
             queue_len: 0,
             shuffle: false,
             repeat: false,
+            has_next: false,
             station_id: station_id.map(str::to_owned),
         }
     }
@@ -1315,27 +1377,13 @@ mod tests {
         assert!(player.seek_to(0.5, now).is_empty());
 
         player.play_queue(vec![timed_track(1, 200.0)], 0, now);
-        assert_eq!(
-            player.seek_to(0.25, now),
-            [Effect::Seek {
-                track_id: 1,
-                position_seconds: 50.0
-            }]
-        );
-        assert_eq!(
-            player.seek_to(7.0, now),
-            [Effect::Seek {
-                track_id: 1,
-                position_seconds: 200.0
-            }]
-        );
-        assert_eq!(
-            player.seek_to(-1.0, now),
-            [Effect::Seek {
-                track_id: 1,
-                position_seconds: 0.0
-            }]
-        );
+        let seek = |position_seconds| Effect::Seek {
+            track_id: 1,
+            position_seconds,
+        };
+        assert_eq!(player.seek_to(0.25, now), [seek(50.0)]);
+        assert_eq!(player.seek_to(7.0, now), [seek(200.0)]);
+        assert_eq!(player.seek_to(-1.0, now), [seek(0.0)]);
     }
 
     #[test]
@@ -1372,17 +1420,105 @@ mod tests {
         assert!(!player.connecting());
         assert_eq!(player.station(), Some(&jazz));
 
+        // Nothing played before, and nothing plays after a failure.
+        let mut player = Player::new(Instant::now());
         player.play_station(jazz.clone());
-        let effects = player.station_connection_finished(&jazz, 2, Err("refused".to_owned()));
+        let effects = player.station_connection_finished(&jazz, 1, Err("refused".to_owned()));
         assert_eq!(player.station(), None);
         assert_eq!(
-            effects,
-            [Effect::NotifyError {
+            effects.last(),
+            Some(&Effect::NotifyError {
                 key: "error.radio",
                 parameters: vec![("name", "Station jazz".to_owned())],
                 dedupe_key: None,
-            }]
+            })
         );
+    }
+
+    #[test]
+    fn a_station_that_fails_to_connect_leaves_the_one_before_on_show() {
+        let now = Instant::now();
+        let mut player = Player::new(now);
+        let (jazz, rock, pop) = (station("jazz"), station("rock"), station("pop"));
+        player.play_station(jazz.clone());
+        player.station_connection_finished(&jazz, 1, Ok(()));
+        let lookup = |id: &str| (id == "jazz").then(|| jazz.clone());
+        player.apply(state(Mode::Radio, true, 0, Some("jazz")), now, &lookup);
+        player.apply(
+            EngineEvent::StreamMetadata {
+                title: Some("So What".to_owned()),
+                artist: None,
+                album: None,
+                cover: Some("https://cover".to_owned()),
+            },
+            now,
+            &lookup,
+        );
+
+        // Two switches in a row; the last one fails.
+        player.play_station(rock.clone());
+        player.play_station(pop.clone());
+        let effects = player.station_connection_finished(&pop, 3, Err("refused".to_owned()));
+
+        assert!(!player.connecting());
+        assert_eq!(player.station(), Some(&jazz));
+        assert_eq!(player.stream().title.as_deref(), Some("So What"));
+        assert_eq!(
+            effects.first(),
+            Some(&Effect::ShowStreamCover(Some("https://cover".to_owned())))
+        );
+    }
+
+    #[test]
+    fn a_station_that_fails_to_connect_leaves_the_track_before_on_show() {
+        let now = Instant::now();
+        let mut player = Player::new(now);
+        player.play_queue(vec![timed_track(7, 200.0)], 0, now);
+        player.apply(
+            EngineEvent::Position {
+                position_secs: 42.0,
+                duration_secs: 200.0,
+            },
+            now,
+            &no_stations,
+        );
+        let jazz = station("jazz");
+        player.play_station(jazz.clone());
+
+        let effects = player.station_connection_finished(&jazz, 2, Err("refused".to_owned()));
+
+        assert_eq!(player.station(), None);
+        assert_eq!(player.current().map(|track| track.id), Some(7));
+        assert_eq!(
+            (player.position_seconds(), player.duration_seconds()),
+            (42.0, 200.0)
+        );
+        assert_eq!(
+            effects[..2],
+            [Effect::LoadCover(Some(7)), Effect::LoadOverview(Some(7))]
+        );
+    }
+
+    #[test]
+    fn failed_radio_preserves_paused_or_finished_local_playback() {
+        for finished in [false, true] {
+            let now = Instant::now();
+            let mut player = playing(vec![timed_track(1, 100.0)], 42.0, now);
+            if finished {
+                player.apply(state(Mode::Local, false, 0, None), now, &no_stations);
+            } else {
+                player.pause(now);
+            }
+            let selected = station("jazz");
+            player.play_station(selected.clone());
+            let epoch = player.connection_epoch;
+            player.station_connection_finished(&selected, epoch, Err("refused".to_owned()));
+            assert_eq!(player.current().map(|track| track.id), Some(1));
+            assert!(!player.playing());
+            assert_eq!(player.stopped(), finished);
+            assert_eq!(player.can_seek(), !finished);
+            assert_eq!(player.play(now), [Effect::Play]);
+        }
     }
 
     #[test]
@@ -1602,6 +1738,31 @@ mod tests {
     }
 
     #[test]
+    fn a_confirmed_landing_moves_the_playhead_only_for_the_current_track() {
+        let now = Instant::now();
+        let mut player = playing(
+            vec![timed_track(1, 200.0), timed_track(2, 200.0)],
+            20.0,
+            now,
+        );
+        player.toggle(now);
+
+        let landed = |track_id| EngineEvent::Seeked {
+            track_id,
+            position_secs: 150.0,
+        };
+        assert!(player.apply(landed(2), now, &no_stations).is_empty());
+        assert_eq!(
+            player.position_seconds(),
+            20.0,
+            "another track's landing is stale"
+        );
+
+        assert!(player.apply(landed(1), now, &no_stations).is_empty());
+        assert_eq!(player.live_progress(now), 0.75);
+    }
+
+    #[test]
     fn progress_is_zero_for_a_station_nothing_or_a_track_of_unknown_length() {
         let now = Instant::now();
         assert_eq!(Player::new(now).live_progress(now), 0.0);
@@ -1640,13 +1801,13 @@ mod tests {
         assert!(player.shuffle());
         player.apply(
             EngineEvent::State {
-                has_next: false,
                 playing: true,
                 mode: Mode::Local,
                 index: 0,
                 queue_len: 1,
                 shuffle: false,
                 repeat: true,
+                has_next: true,
                 station_id: None,
             },
             now,
@@ -1894,7 +2055,9 @@ mod tests {
             player.connection_epoch,
             Err("connection refused".to_owned()),
         );
-        assert!(matches!(effects.as_slice(), [Effect::NotifyError { .. }]));
+        assert!(effects
+            .iter()
+            .any(|effect| matches!(effect, Effect::NotifyError { .. })));
         assert!(player.can_play());
         assert!(player.play(now).iter().any(|effect| matches!(
             effect,

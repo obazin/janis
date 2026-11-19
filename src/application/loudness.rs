@@ -24,9 +24,10 @@ pub(super) struct LoudnessMeasurement {
     worker: Worker,
     /// The gains measured this session.
     session_gains: std::cell::RefCell<SessionGains>,
-    /// The tracks tried this session, measured or not, so a file that cannot
-    /// be measured is not read again at every scan.
-    tried: Arc<Mutex<HashSet<i64>>>,
+    /// The files tried this session, measured or not, so a file that cannot
+    /// be measured is not read again at every scan. A row and its path, since
+    /// a file added later may be given a removed one's row.
+    tried: Arc<Mutex<HashSet<PendingLoudness>>>,
     /// Raised at shut-down: the measurement stops between two files.
     stopping: Arc<AtomicBool>,
 }
@@ -87,15 +88,14 @@ impl Application {
                 // Each track is tried once a session, whatever comes of it.
                 let first_try = tried
                     .lock()
-                    .map(|mut tried| tried.insert(track.track_id))
+                    .map(|mut tried| tried.insert(track.clone()))
                     .unwrap_or(false);
                 if !first_try {
                     continue;
                 }
                 match audio::measure_file(Path::new(&track.path)) {
                     Ok(measured) => {
-                        let track_id = track.track_id;
-                        post(move |application| application.loudness_measured(track_id, measured));
+                        post(move |application| application.loudness_measured(track, measured));
                     }
                     Err(error) => log::warn!("loudness measurement: {error}"),
                 }
@@ -103,16 +103,23 @@ impl Application {
         });
     }
 
-    /// Plays `track_id` at its measured gain from the next queue on, and
-    /// stores the measurement from the library thread.
-    fn loudness_measured(&self, track_id: i64, measured: audio::Measured) {
-        self.loudness
-            .session_gains
-            .borrow_mut()
-            .measured(track_id, measured.lufs, measured.peak);
+    /// Plays `file` at its measured gain from the next queue on, and stores
+    /// the measurement from the library thread, on its row only while that
+    /// row still holds the file that was read.
+    fn loudness_measured(&self, file: PendingLoudness, measured: audio::Measured) {
+        self.loudness.session_gains.borrow_mut().measured(
+            file.clone(),
+            measured.lufs,
+            measured.peak,
+        );
         let database = Arc::clone(&self.database);
         self.library_worker.run(move || {
-            library::store_loudness(&database, track_id, measured.lufs, measured.peak);
+            if !library::store_measured_loudness(&database, &file, measured.lufs, measured.peak) {
+                log::debug!(
+                    "loudness of {} measured after it left the library",
+                    file.path
+                );
+            }
         });
     }
 }

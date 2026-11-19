@@ -17,6 +17,8 @@ export global Jellyfin {
     in-out property <string> password;
     // Signed in: the card shows the server instead of the form.
     in property <bool> signed-in;
+    // An account is kept, its token working or not: it can be signed out of.
+    in property <bool> has-account;
     // A request is in flight: the buttons wait for it.
     in property <bool> busy;
     // "Home · listener · 1,204 songs", while signed in.

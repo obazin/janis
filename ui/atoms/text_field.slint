@@ -14,6 +14,12 @@ export component TextField inherits VerticalLayout {
     // The listener pressed Return in the field.
     callback accepted();
 
+    // Puts the caret in the field with its text selected, ready to replace.
+    public function take-focus() {
+        input.focus();
+        input.select-all();
+    }
+
     spacing: 6px;
 
     Text {

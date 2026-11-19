@@ -15,6 +15,8 @@ export component TrackList inherits Rectangle {
     in property <CoverList> cover-list;
     // Leaves the top of the box to something else, like a header.
     in property <length> rows-top;
+    // The rows are a playlist's: their menu offers to take them out.
+    in property <bool> in-playlist;
     callback clicked(index: int);
 
     out property <length> row-height: 60px;
@@ -45,6 +47,7 @@ export component TrackList inherits Rectangle {
         visible: self.index < root.tracks.length;
         track: root.tracks[self.index];
         ruled: self.index > 0;
+        in-playlist: root.in-playlist;
         clicked => { root.clicked(self.index); }
     }
 }

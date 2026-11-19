@@ -505,7 +505,7 @@ checksum = "1254ebf6529f3763c491acfb5ab6e960809e3c75a38584cc664f8c5667fb7107"
 [[package]]
 name = "audio-stack-rs"
 version = "0.1.0"
-source = "git+https://github.com/calops/audio-stack-rs?rev=f20c778da51d60484637f6bc62c4f44204c29003#f20c778da51d60484637f6bc62c4f44204c29003"
+source = "git+https://github.com/obazin/audio-stack-rs?tag=seek-track#8d91fc4da5f2fecc707f40e4287058a47edcf3e0"
 dependencies = [
  "base64 0.22.1",
  "biquad",
@@ -2810,7 +2810,7 @@ checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
 
 [[package]]
 name = "janis"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "audio-stack-rs",
  "base64 0.22.1",

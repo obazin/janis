@@ -169,13 +169,13 @@ mod tests {
         player.play_station(station());
         player.apply(
             EngineEvent::State {
-                has_next: false,
                 playing: true,
                 mode: Mode::Radio,
                 index: 0,
                 queue_len: 0,
                 shuffle: false,
                 repeat: false,
+                has_next: false,
                 station_id: Some("fip".to_owned()),
             },
             now,

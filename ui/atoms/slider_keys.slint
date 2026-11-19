@@ -1,0 +1,41 @@
+// The keys of a slider, for the slider that wraps its rail or column in it:
+// the arrows step it (up and right raise it, down and left lower it), Home
+// and End take it to its ends. It takes the focus when the slider is pressed
+// and on tab navigation, and passes on every other key, Escape included.
+// `focus-visible` says when the slider shows its focus: only when Tab brought
+// it there, as a click already shows where the focus went.
+export component SliderKeys inherits FocusScope {
+    out property <bool> focus-visible: self.has-focus && self.reached-by-tab;
+
+    // Kept while the window is away, so the ring comes back with it.
+    property <bool> reached-by-tab;
+
+    focus-gained(reason) => {
+        self.reached-by-tab = reason == FocusReason.tab-navigation || (reason == FocusReason.window-activation && self.reached-by-tab);
+    }
+
+    callback increment();
+    callback decrement();
+    callback to-minimum();
+    callback to-maximum();
+
+    key-pressed(event) => {
+        if event.text == Key.UpArrow || event.text == Key.RightArrow {
+            root.increment();
+            return accept;
+        }
+        if event.text == Key.DownArrow || event.text == Key.LeftArrow {
+            root.decrement();
+            return accept;
+        }
+        if event.text == Key.Home {
+            root.to-minimum();
+            return accept;
+        }
+        if event.text == Key.End {
+            root.to-maximum();
+            return accept;
+        }
+        return reject;
+    }
+}

@@ -20,6 +20,9 @@ use crate::persistence::{MediaServer, ServerLibrary};
 #[derive(Clone, Debug, PartialEq)]
 pub struct Card {
     pub signed_in: bool,
+    /// An account is kept — signed in, or asked to sign in again — and can
+    /// be signed out of, its token working or not.
+    pub has_account: bool,
     pub busy: bool,
     /// The translation key of the line under the card.
     pub status_key: Option<&'static str>,
@@ -173,6 +176,7 @@ impl MediaServerState {
         });
         Card {
             signed_in: matches!(self.phase, Phase::SignedIn | Phase::Syncing),
+            has_account: self.server.is_some(),
             busy: self.busy(),
             status_key: self.message_key,
             // A line that stays once nothing is in flight says what went wrong.
@@ -245,8 +249,8 @@ impl MediaServerState {
         match outcome {
             Ok(server) => {
                 // Another server or user replaces the one before, libraries
-                // included; the read after the sync lists the new ones. The
-                // row's id says nothing here: the replacing row may reuse it.
+                // included; the read after the sign-in lists the new ones.
+                // An account is the server's and the user's identifiers.
                 let same_account = self.server.as_ref().is_some_and(|current| {
                     current.server_identifier == server.server_identifier
                         && current.user_identifier == server.user_identifier
@@ -348,6 +352,10 @@ impl MediaServerState {
     /// The listener pressed Sign out: the server is forgotten at once, and
     /// whatever was in flight for it is dropped when it answers.
     pub fn sign_out(&mut self) -> Vec<Effect> {
+        // A sign-in on its way may yet save another account: it is waited for.
+        if self.phase == Phase::SigningIn {
+            return Vec::new();
+        }
         let Some(server) = self.server.take() else {
             return Vec::new();
         };
@@ -669,6 +677,38 @@ mod tests {
         );
     }
 
+    #[test]
+    fn an_account_whose_token_was_refused_can_still_be_signed_out_of() {
+        let mut state = signed_in();
+        let epoch = sync_epoch(&state.sync());
+        state.sync_finished(epoch, Err(Failure::TokenRejected), 200);
+        assert!(state.card(&[]).has_account);
+
+        let effects = state.sign_out();
+
+        assert!(matches!(
+            effects.as_slice(),
+            [Effect::SignOutMediaServer { .. }]
+        ));
+        assert!(!state.card(&[]).has_account);
+    }
+
+    #[test]
+    fn signing_out_waits_for_a_sign_in_on_its_way() {
+        let mut state = signed_in();
+        let epoch = sign_in_epoch(&state.sign_in("http://other.local", "someone", "pass"));
+
+        // The sign-in will save its account before a sign-out queued behind
+        // it runs: leaving now would leave that account signed in.
+        assert!(state.sign_out().is_empty());
+        assert!(state.card(&[]).has_account);
+        state.sign_in_finished(epoch, Ok(server()));
+        assert!(matches!(
+            state.sign_out().as_slice(),
+            [Effect::SignOutMediaServer { .. }]
+        ));
+    }
+
     fn library(id: i64, name: &str, shown: bool) -> ServerLibrary {
         ServerLibrary {
             id,
@@ -803,17 +843,6 @@ mod tests {
         assert_eq!(card.summary, None);
         assert!(!card.signed_in);
         assert_eq!(card.status_key, None);
-    }
-
-    #[test]
-    fn a_sign_in_answer_after_signing_out_is_dropped() {
-        let mut state = signed_in();
-        let epoch = sign_in_epoch(&state.sign_in("http://other.local", "someone", "pass"));
-        state.sign_out();
-
-        assert!(state.sign_in_finished(epoch, Ok(server())).is_empty());
-        assert_eq!(state.server(), None);
-        assert_eq!(state.phase(), Phase::SignedOut);
     }
 
     #[test]

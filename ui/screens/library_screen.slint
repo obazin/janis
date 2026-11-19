@@ -3,6 +3,7 @@ import { Icons } from "../icons.slint";
 import { Strings } from "strings.slint";
 import { Chip } from "../atoms/chip.slint";
 import { EmptyState } from "../atoms/empty_state.slint";
+import { GhostButton } from "../atoms/ghost_button.slint";
 import { PrimaryButton } from "../atoms/primary_button.slint";
 import { SectionLabel } from "../atoms/section_label.slint";
 import { ScreenHeader } from "../molecules/screen_header.slint";
@@ -12,14 +13,16 @@ import { CoverList } from "../features/library/covers.slint";
 import { CardGrid } from "../features/library/card_grid.slint";
 import { TrackList } from "../features/library/track_list.slint";
 
-// The library: albums and artists as grids that open in place, every song as
-// one list, the starred songs as another, and what was added last.
+// The library: the playlists, by group, and the albums and artists as grids
+// that open in place, every song as one list, the starred songs as another,
+// and what was added last.
 export component LibraryScreen inherits Rectangle {
     property <length> side: 44px;
     property <length> section-gap: 36px;
     property <length> content-width: page.content-width - root.side - 32px;
     property <bool> grid-tab: Library.tab == "albums" || Library.tab == "artists";
     property <bool> list-tab: Library.tab == "songs" || Library.tab == "favourites";
+    property <bool> playlists-tab: Library.tab == "playlists";
     property <bool> shows-recent: !Library.empty && root.grid-tab && !Library.selection-present && Library.recent.length > 0;
 
     page := ScrollArea {
@@ -81,12 +84,20 @@ export component LibraryScreen inherits Rectangle {
                     active: Library.tab == "favourites";
                     clicked => { Library.tab-selected("favourites"); }
                 }
+                Rectangle {
+                    horizontal-stretch: 1;
+                }
+                if root.playlists-tab && !Library.playlists-empty: GhostButton {
+                    icon: Icons.pencil;
+                    label: Strings.library-playlists-manage;
+                    clicked => { Library.manager-opened(); }
+                }
             }
 
-            if !Library.empty && Library.tab == "playlists": EmptyState {
-                icon: Icons.library;
-                title: Strings.library-playlists-soon-title;
-                description: Strings.library-playlists-soon-desc;
+            if !Library.empty && root.playlists-tab && Library.playlists-empty: EmptyState {
+                icon: Icons.playlist;
+                title: Strings.library-playlists-empty-title;
+                description: Strings.library-playlists-empty-desc;
             }
 
             if !Library.empty && Library.tab == "favourites" && Library.favourites-empty: EmptyState {
@@ -100,7 +111,7 @@ export component LibraryScreen inherits Rectangle {
             x: root.side;
             y: top.height + 24px;
             width: root.content-width;
-            height: Library.empty ? 0px : root.grid-tab ? grid.height : root.list-tab ? songs.height : 0px;
+            height: Library.empty ? 0px : root.grid-tab ? grid.height : root.list-tab ? songs.height : root.playlists-tab ? playlist-column.height : 0px;
 
             grid := CardGrid {
                 y: 0;
@@ -122,6 +133,37 @@ export component LibraryScreen inherits Rectangle {
                 // far as the page will reach once its panel has unfolded.
                 opened(line-top, settled-height) => {
                     page.glide-to(min(body.y + line-top, page.content-height - self.height + settled-height - page.height));
+                }
+            }
+
+            // The playlists: a grid under each group's heading, then those in
+            // no group. Each grid draws only its lines in view.
+            playlist-column := VerticalLayout {
+                y: 0;
+                width: parent.width;
+                height: self.preferred-height;
+                visible: !Library.empty && root.playlists-tab;
+                // Each grid ends with the gap under its last line.
+                spacing: root.section-gap - 20px;
+
+                for section[section-index] in Library.playlist-sections: section-box := VerticalLayout {
+                    spacing: 14px;
+                    if section.heading != "": SectionLabel {
+                        label: section.heading;
+                    }
+                    section-grid := CardGrid {
+                        cards: section.cards;
+                        shows-detail: true;
+                        selection-index: section.selection-index;
+                        folding-index: section.folding-index;
+                        cover-list: CoverList.none;
+                        view-top: page.scroll-offset - body.y - section-box.y - self.y;
+                        view-height: page.height;
+                        card-clicked(index) => { Library.playlist-clicked(section-index, index); }
+                        opened(line-top, settled-height) => {
+                            page.glide-to(min(body.y + section-box.y + self.y + line-top, page.content-height - self.height + settled-height - page.height));
+                        }
+                    }
                 }
             }
 

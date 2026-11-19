@@ -14,6 +14,7 @@ mod library_screens;
 mod loudness;
 mod notices;
 mod now_playing_screen;
+mod playlists;
 mod radio_screen;
 mod settings_screen;
 mod track_overview;
@@ -45,6 +46,7 @@ use crate::persistence::{self, DbState, Preferences};
 use crate::platform;
 use crate::playback_options::PlaybackOptions;
 use crate::player::Player;
+use crate::playlists::Playlists;
 use crate::radio::{Catalog, Station};
 use crate::text;
 use crate::translations::{Language, Translations};
@@ -149,6 +151,16 @@ pub struct Application {
     /// The songs the listener starred, and the stars on their way to a
     /// server.
     favourite_tracks: RefCell<FavouriteTracks>,
+    /// The playlists and their groups, and the changes on their way to a
+    /// server.
+    playlists: RefCell<Playlists>,
+    playlist_screen: RefCell<playlists::PlaylistScreen>,
+    playlist_sections: Rc<VecModel<user_interface::PlaylistSection>>,
+    /// Each section's cards, kept so a refresh updates a grid in place.
+    playlist_section_cards: RefCell<Vec<Rc<VecModel<user_interface::LibraryCard>>>>,
+    menu_playlists: Rc<VecModel<user_interface::MenuChoice>>,
+    managed_rows: Rc<VecModel<user_interface::ManagedRow>>,
+    group_menu_choices: Rc<VecModel<user_interface::MenuChoice>>,
     /// The Jellyfin server the listener signed in to, as Settings shows it.
     media_server: RefCell<MediaServerState>,
     /// The Jellyfin card's library rows, and the library each stands for.
@@ -198,6 +210,11 @@ impl Application {
         favourite_stations.restore(persistence::favourite_station_ids(&database)?);
         let mut favourite_tracks = FavouriteTracks::default();
         favourite_tracks.restore(persistence::favourite_track_ids(&database)?);
+        let mut playlists = Playlists::default();
+        playlists.restore(
+            persistence::playlists(&database)?,
+            persistence::playlist_groups(&database)?,
+        );
         let kept_server = persistence::media_server(&database)?;
         let device_identifier = persistence::device_identifier(&database)?;
 
@@ -274,6 +291,13 @@ impl Application {
             track_overview: RefCell::new(OverviewReads::default()),
             favourite_stations: RefCell::new(favourite_stations),
             favourite_tracks: RefCell::new(favourite_tracks),
+            playlists: RefCell::new(playlists),
+            playlist_screen: RefCell::new(playlists::PlaylistScreen::default()),
+            playlist_sections: Rc::new(VecModel::default()),
+            playlist_section_cards: RefCell::new(Vec::new()),
+            menu_playlists: Rc::new(VecModel::default()),
+            managed_rows: Rc::new(VecModel::default()),
+            group_menu_choices: Rc::new(VecModel::default()),
             media_server: RefCell::new(media_server),
             jellyfin_libraries: Rc::new(VecModel::default()),
             jellyfin_library_ids: RefCell::new(Vec::new()),
@@ -411,6 +435,7 @@ impl Application {
             log::debug!("search refresh: {:?}", started.elapsed());
         }));
         self.connect_library();
+        self.connect_playlists();
         self.connect_radio();
         self.connect_settings();
         self.connect_jellyfin();
@@ -614,6 +639,67 @@ impl Application {
                     favourite,
                     sequence,
                 } => self.push_server_favourite(server, track_id, address, favourite, sequence),
+                Effect::SavePlaylist {
+                    creation,
+                    name,
+                    server,
+                    track_ids,
+                } => self.save_playlist(creation, name, server, track_ids),
+                Effect::PersistPlaylistEntry {
+                    playlist_id,
+                    track_id,
+                    present,
+                } => self.saved(
+                    "playlist",
+                    persistence::set_playlist_entry(&self.database, playlist_id, track_id, present),
+                ),
+                Effect::PersistPlaylistName { playlist_id, name } => self.saved(
+                    "playlist",
+                    persistence::rename_playlist(&self.database, playlist_id, &name),
+                ),
+                Effect::RemovePlaylist { playlist_id } => {
+                    self.forget_playlist_picture(playlist_id);
+                    self.saved(
+                        "playlist",
+                        persistence::remove_playlist(&self.database, playlist_id),
+                    );
+                }
+                Effect::RemovePlaylistPicture { playlist_id } => {
+                    self.forget_playlist_picture(playlist_id);
+                    self.saved(
+                        "playlist-picture",
+                        persistence::set_playlist_picture(&self.database, playlist_id, None),
+                    );
+                }
+                Effect::PersistPlaylistGroup {
+                    playlist_id,
+                    group_id,
+                } => self.saved(
+                    "playlist-group",
+                    persistence::set_playlist_group(&self.database, playlist_id, group_id),
+                ),
+                Effect::CreatePlaylistGroup { name, then_file } => {
+                    self.create_playlist_group(name, then_file)
+                }
+                Effect::PersistPlaylistGroupName { group_id, name } => self.saved(
+                    "playlist-group",
+                    persistence::rename_playlist_group(&self.database, group_id, &name),
+                ),
+                Effect::RemovePlaylistGroup { group_id } => self.saved(
+                    "playlist-group",
+                    persistence::remove_playlist_group(&self.database, group_id),
+                ),
+                Effect::PersistPlaylistGroupOrder { group_ids } => self.saved(
+                    "playlist-group",
+                    persistence::set_playlist_group_order(&self.database, &group_ids),
+                ),
+                Effect::PushPlaylistChange {
+                    server,
+                    playlist,
+                    item,
+                    change,
+                    sequence,
+                } => self.push_playlist_change(server, playlist, item, change, sequence),
                 Effect::LoadCover(track_id) => self.load_current_cover(track_id),
                 Effect::LoadOverview(track_id) => self.load_overview(track_id),
                 Effect::ShowStreamCover(url) => self.show_stream_cover(url),

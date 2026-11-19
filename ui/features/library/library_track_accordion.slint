@@ -3,10 +3,10 @@ import { Icons } from "../../icons.slint";
 import { Strings } from "strings.slint";
 import { IconButton, IconButtonIdentifier } from "../../atoms/icon_button.slint";
 import { SectionLabel } from "../../atoms/section_label.slint";
-import { LibraryTrack } from "library.slint";
+import { Library, LibraryTrack } from "library.slint";
 import { TrackList } from "track_list.slint";
 
-// The tracks of the album or artist browsed in the grid, shown in place under
+// The tracks of the album, artist or playlist browsed in the grid, shown in place under
 // its card, with a way to put them away.
 export component LibraryTrackAccordion inherits Rectangle {
     in property <string> heading;
@@ -27,6 +27,7 @@ export component LibraryTrackAccordion inherits Rectangle {
         view-top: root.view-top;
         view-height: root.view-height;
         rows-top: root.header-height;
+        in-playlist: Library.selection-is-playlist;
         clicked(index) => { root.track-clicked(index); }
     }
 

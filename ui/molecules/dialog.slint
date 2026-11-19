@@ -1,0 +1,88 @@
+import { Tokens, Fonts, Typography, Metrics } from "../tokens.slint";
+import { GhostButton } from "../atoms/ghost_button.slint";
+import { PrimaryButton } from "../atoms/primary_button.slint";
+
+// A dialog over a scrim, centred in the window: a title, what the caller
+// puts in it, and its buttons. A click on the scrim, Escape or the cancel
+// button cancels; the confirm button confirms. Leave `cancel-label` empty
+// for a dialog with one button.
+export component Dialog inherits Rectangle {
+    in property <string> title;
+    in property <string> confirm-label;
+    in property <string> cancel-label;
+    in property <length> sheet-width: 440px;
+    callback confirmed();
+    callback cancelled();
+
+    public function take-focus() {
+        keys.focus();
+    }
+
+    background: Tokens.scrim;
+
+    // Escape cancels from anywhere in the dialog, its text fields included.
+    keys := FocusScope {
+        key-pressed(event) => {
+            if event.text == Key.Escape {
+                root.cancelled();
+                return accept;
+            }
+            return reject;
+        }
+
+        TouchArea {
+            clicked => { root.cancelled(); }
+        }
+
+        Rectangle {
+            width: min(root.sheet-width, root.width - 32px);
+            height: min(content.preferred-height, root.height - 64px);
+            border-radius: Metrics.radius-art;
+            border-width: 1px;
+            border-color: Tokens.border-emphasis;
+            background: Tokens.dialog;
+            drop-shadow-offset-y: Tokens.shadow-dialog.offset-y;
+            drop-shadow-blur: Tokens.shadow-dialog.blur;
+            drop-shadow-spread: Tokens.shadow-dialog.spread;
+            drop-shadow-color: Tokens.shadow-dialog.color;
+            accessible-role: groupbox;
+            accessible-label: root.title;
+
+            // Clicks on the sheet stay on the sheet.
+            TouchArea { }
+
+            content := VerticalLayout {
+                padding: 26px;
+                spacing: 18px;
+
+                Text {
+                    text: root.title;
+                    font-family: Fonts.display;
+                    font-weight: Typography.black;
+                    font-size: Typography.heading-lg;
+                    color: Tokens.text;
+                    horizontal-alignment: left;
+                    wrap: word-wrap;
+                }
+
+                @children
+
+                HorizontalLayout {
+                    alignment: end;
+                    spacing: 10px;
+                    if root.cancel-label != "": VerticalLayout {
+                        alignment: center;
+                        GhostButton {
+                            label: root.cancel-label;
+                            clicked => { root.cancelled(); }
+                        }
+                    }
+                    PrimaryButton {
+                        label: root.confirm-label;
+                        clicked => { root.confirmed(); }
+                    }
+                }
+            }
+        }
+    }
+}
