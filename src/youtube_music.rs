@@ -5,6 +5,7 @@
 
 use std::collections::HashSet;
 use std::fmt;
+use std::fmt::Write as _;
 use std::future::Future;
 use std::io::Read;
 use std::path::Path;
@@ -178,6 +179,51 @@ impl fmt::Display for Failure {
 
 impl std::error::Error for Failure {}
 
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LikeResponse {
+    response_context: Option<LikeResponseContext>,
+    error: Option<LikeResponseError>,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LikeResponseContext {
+    main_app_web_response_context: Option<LikeWebResponseContext>,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LikeWebResponseContext {
+    #[serde(default)]
+    logged_out: bool,
+}
+
+#[derive(serde::Deserialize)]
+struct LikeResponseError {
+    code: Option<u16>,
+}
+
+fn like_response(response: &str) -> Result<(), Failure> {
+    let response: LikeResponse =
+        serde_json::from_str(response).map_err(|_| Failure::InvalidResponse)?;
+    if let Some(error) = response.error {
+        return Err(match error.code {
+            Some(401 | 403) => Failure::CredentialsRejected,
+            Some(429 | 500..=599) => Failure::Network,
+            _ => Failure::InvalidResponse,
+        });
+    }
+    let context = response.response_context.ok_or(Failure::InvalidResponse)?;
+    if context
+        .main_app_web_response_context
+        .is_some_and(|context| context.logged_out)
+    {
+        return Err(Failure::CredentialsRejected);
+    }
+    Ok(())
+}
+
 impl Session {
     pub fn anonymous() -> Result<Self, Failure> {
         let client = RustyPipe::builder()
@@ -249,6 +295,7 @@ impl Session {
         let mut library = YouTubeMusicLibrary {
             tracks: Vec::new(),
             playlists: Vec::new(),
+            liked_track_identifiers: Vec::new(),
         };
         let mut track_identifiers = HashSet::new();
         extend_library_tracks(
@@ -257,6 +304,37 @@ impl Session {
             saved_tracks,
             None,
         );
+        let liked_details = self
+            .query(true)
+            .music_liked_tracks()
+            .await
+            .map_err(|error| api_failure("liked music", error))?;
+        let liked_tracks = self
+            .collect_pages(liked_details.tracks, |continuation| {
+                self.continued_items(continuation)
+            })
+            .await?;
+        let mut liked_playlist = YouTubeMusicPlaylist {
+            identifier: liked_details.id,
+            name: liked_details.name,
+            track_identifiers: Vec::new(),
+        };
+        extend_library_tracks(
+            &mut library.tracks,
+            &mut track_identifiers,
+            liked_tracks,
+            Some(&mut liked_playlist.track_identifiers),
+        );
+        library.liked_track_identifiers = {
+            let mut identifiers = HashSet::new();
+            liked_playlist
+                .track_identifiers
+                .iter()
+                .filter(|identifier| identifiers.insert(identifier.as_str()))
+                .cloned()
+                .collect()
+        };
+        let mut liked_playlist = Some(liked_playlist);
 
         let saved_playlists = self
             .query(true)
@@ -271,6 +349,12 @@ impl Session {
         let mut playlist_identifiers = HashSet::new();
         for saved_playlist in saved_playlists.into_iter().filter(is_music_playlist) {
             if !playlist_identifiers.insert(saved_playlist.id.clone()) {
+                continue;
+            }
+            if saved_playlist.id == "LM" {
+                if let Some(playlist) = liked_playlist.take() {
+                    library.playlists.push(playlist);
+                }
                 continue;
             }
             let details = self
@@ -297,6 +381,30 @@ impl Session {
             library.playlists.push(playlist);
         }
         Ok(library)
+    }
+
+    /// Uses the account's Music rating endpoint; removing a star is not a dislike.
+    pub async fn set_favourite(&self, address: &str, favourite: bool) -> Result<(), Failure> {
+        self.require_account()?;
+        let identifier = address
+            .strip_prefix("youtube-music://")
+            .filter(|identifier| is_song_identifier(identifier))
+            .ok_or(Failure::InvalidInput)?;
+        let endpoint = if favourite {
+            "like/like"
+        } else {
+            "like/removelike"
+        };
+        let response = self
+            .query(true)
+            .raw(
+                rustypipe::client::ClientType::DesktopMusic,
+                endpoint,
+                &serde_json::json!({"target": {"videoId": identifier}}),
+            )
+            .await
+            .map_err(|error| api_failure("write song like", error))?;
+        like_response(&response)
     }
 
     async fn saved_songs(&self) -> Result<Paginator<TrackItem>, Failure> {
@@ -356,8 +464,8 @@ impl Session {
 
     /// Downloads encoded bytes; the existing cover decoder applies pixel limits.
     /// This separate client never receives the account's authentication cookies.
-    pub async fn artwork(&self, url: &str) -> Result<Vec<u8>, Failure> {
-        let address = artwork_address(url)?;
+    pub async fn artwork(&self, url: &str, longest_side: u32) -> Result<Vec<u8>, Failure> {
+        let address = sized_artwork_address(artwork_address(url)?, longest_side);
         let mut response = self
             .artwork_client
             .get(address)
@@ -633,6 +741,75 @@ fn artwork_address(address: &str) -> Result<reqwest::Url, Failure> {
     }
 }
 
+fn sized_artwork_address(mut address: reqwest::Url, longest_side: u32) -> reqwest::Url {
+    if longest_side == 0
+        || address.host_str() != Some("lh3.googleusercontent.com")
+        || address.query().is_some()
+        || address.fragment().is_some()
+    {
+        return address;
+    }
+    let Some((base, options)) = address.path().rsplit_once('=') else {
+        return address;
+    };
+    if base
+        .rsplit('/')
+        .next()
+        .is_some_and(|segment| segment.contains('='))
+    {
+        return address;
+    }
+    let mut width = None;
+    let mut height = None;
+    for (index, option) in options.split('-').enumerate() {
+        if option.is_empty() {
+            return address;
+        }
+        let target = if let Some(value) = option.strip_prefix('w') {
+            (&mut width, value)
+        } else if let Some(value) = option.strip_prefix('h') {
+            (&mut height, value)
+        } else {
+            continue;
+        };
+        if target.1.is_empty() || !target.1.bytes().all(|character| character.is_ascii_digit()) {
+            return address;
+        }
+        let Ok(value) = target.1.parse::<u32>() else {
+            return address;
+        };
+        if target.0.replace((index, value)).is_some() {
+            return address;
+        }
+    }
+    let (Some((width_index, width)), Some((height_index, height))) = (width, height) else {
+        return address;
+    };
+    // Only characterized square album renditions are resized; no new crop.
+    if width != height || width == 0 || width == longest_side {
+        return address;
+    }
+    let mut path = String::with_capacity(address.path().len() + 20);
+    path.push_str(base);
+    path.push('=');
+    for (index, option) in options.split('-').enumerate() {
+        if index != 0 {
+            path.push('-');
+        }
+        if index == width_index {
+            write!(&mut path, "w{longest_side}").expect("formatting into a string cannot fail");
+        } else if index == height_index {
+            write!(&mut path, "h{longest_side}").expect("formatting into a string cannot fail");
+        } else {
+            path.push_str(option);
+        }
+    }
+    if path.len() <= LONGEST_ARTWORK_ADDRESS {
+        address.set_path(&path);
+    }
+    address
+}
+
 fn is_artwork_address(address: &reqwest::Url) -> bool {
     address.scheme() == "https"
         && address.port_or_known_default() == Some(443)
@@ -655,6 +832,68 @@ fn is_domain(host: &str, domain: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn like_acknowledgments_do_not_accept_logged_out_or_error_responses() {
+        assert_eq!(like_response(r#"{"responseContext":{}}"#), Ok(()));
+        assert_eq!(
+            like_response(
+                r#"{"responseContext":{"mainAppWebResponseContext":{"loggedOut":true}}}"#
+            ),
+            Err(Failure::CredentialsRejected)
+        );
+        assert_eq!(
+            like_response(r#"{"responseContext":{},"error":{"code":403}}"#),
+            Err(Failure::CredentialsRejected)
+        );
+        assert_eq!(
+            like_response(r#"{"error":{"code":503}}"#),
+            Err(Failure::Network)
+        );
+        for response in [
+            "{}",
+            "[]",
+            "not JSON",
+            r#"{"responseContext":null}"#,
+            r#"{"error":{}}"#,
+        ] {
+            assert_eq!(like_response(response), Err(Failure::InvalidResponse));
+        }
+    }
+
+    #[test]
+    fn album_artwork_requests_the_display_size_without_changing_opaque_identity_or_options() {
+        for side in [256, 800] {
+            let address = artwork_address(
+                "https://lh3.googleusercontent.com/opaque%3Dcover=w120-h120-l90-rj",
+            )
+            .unwrap();
+            assert_eq!(
+                sized_artwork_address(address, side).as_str(),
+                format!("https://lh3.googleusercontent.com/opaque%3Dcover=w{side}-h{side}-l90-rj")
+            );
+        }
+    }
+
+    #[test]
+    fn signed_video_and_uncharacterized_artwork_addresses_stay_unchanged() {
+        for original in [
+            "https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg?sqp=example&rs=signature",
+            "https://lh3.googleusercontent.com/cover=w120-h120-l90-rj?token=signature",
+            "https://lh3.googleusercontent.com/cover=w120-h120-l90-rj#fragment",
+            "https://lh4.googleusercontent.com/cover=w120-h120-l90-rj",
+            "https://lh3.googleusercontent.com/cover=s120-c",
+            "https://lh3.googleusercontent.com/cover=w480-h270-l90-rj",
+            "https://lh3.googleusercontent.com/cover=w120-h120-w544-rj",
+            "https://lh3.googleusercontent.com/cover=w120-hinvalid-rj",
+            "https://lh3.googleusercontent.com/cover=opaque=w120-h120-rj",
+        ] {
+            assert_eq!(
+                sized_artwork_address(artwork_address(original).unwrap(), 800).as_str(),
+                original
+            );
+        }
+    }
 
     #[test]
     fn music_playlist_import_excludes_episodes_and_podcasts_but_keeps_liked_music() {

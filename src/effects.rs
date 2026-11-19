@@ -170,6 +170,17 @@ pub enum Effect {
         favourite: bool,
         sequence: u64,
     },
+    PushYouTubeMusicFavourite {
+        track_id: i64,
+        address: String,
+        favourite: bool,
+        sequence: u64,
+    },
+    PersistYouTubeMusicFavourite {
+        track_id: i64,
+        address: String,
+        favourite: bool,
+    },
     /// Make, change or delete a playlist on its server off the
     /// user-interface thread, then report back through
     /// `Playlists::push_finished` with the same `sequence`. `item` is the

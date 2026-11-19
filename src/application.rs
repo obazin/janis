@@ -679,6 +679,21 @@ impl Application {
                     favourite,
                     sequence,
                 } => self.push_server_favourite(server, track_id, address, favourite, sequence),
+                Effect::PushYouTubeMusicFavourite {
+                    track_id,
+                    address,
+                    favourite,
+                    sequence,
+                } => {
+                    self.push_youtube_favourite(track_id, address, favourite, sequence);
+                }
+                Effect::PersistYouTubeMusicFavourite {
+                    track_id,
+                    address,
+                    favourite,
+                } => {
+                    self.persist_youtube_favourite(track_id, address, favourite);
+                }
                 Effect::SavePlaylist {
                     creation,
                     name,

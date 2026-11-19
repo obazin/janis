@@ -167,6 +167,20 @@ impl YouTubeMusicIntegration {
         self.epoch == epoch
     }
 
+    pub fn replacing_connection(&self) -> bool {
+        self.pending
+            .as_ref()
+            .is_some_and(|pending| pending.replacing_connection)
+    }
+
+    pub fn credentials_rejected(&mut self) -> Vec<Effect> {
+        if self.cookie_file.is_none() {
+            return Vec::new();
+        }
+        self.connected = false;
+        self.failure(Failure::CredentialsRejected)
+    }
+
     /// Called only after the full listing has been imported and the library reloaded.
     pub fn sync_finished(
         &mut self,
@@ -217,6 +231,26 @@ impl YouTubeMusicIntegration {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_refused_like_keeps_cached_account_data_and_requires_reconnection() {
+        let mut state = YouTubeMusicIntegration::default();
+        let request = epoch(
+            &state.restore(Some(PathBuf::from("cookies.txt")), 12, Some(100)),
+            "cookies.txt",
+        );
+        state.sync_finished(request, Ok((12, 100)));
+        assert_eq!(
+            state.credentials_rejected(),
+            notification(Failure::CredentialsRejected)
+        );
+        assert!(!state.connected);
+        assert!(state.failed);
+        assert_eq!(state.cookie_file, Some(PathBuf::from("cookies.txt")));
+        assert_eq!(state.song_count, 12);
+        assert_eq!(state.last_sync, Some(100));
+        assert!(state.sync().is_empty());
+    }
 
     fn epoch(effects: &[Effect], expected_path: &str) -> u64 {
         match effects {

@@ -92,7 +92,162 @@ impl Application {
         });
     }
 
+    fn cancel_youtube_favourites(&self) {
+        self.youtube_music
+            .favourite_generation
+            .fetch_add(1, Ordering::AcqRel);
+        let changed = self.favourite_tracks.borrow_mut().cancel_youtube_pushes();
+        for track_id in changed {
+            self.refresh_favourite(track_id);
+        }
+        self.refresh_player();
+    }
+
+    pub(super) fn push_youtube_favourite(
+        &self,
+        track_id: i64,
+        address: String,
+        favourite: bool,
+        sequence: u64,
+    ) {
+        let epoch = self
+            .youtube_music
+            .favourite_generation
+            .load(Ordering::Acquire);
+        let state = self.youtube_music.integration.borrow();
+        let available = state.connected && !state.replacing_connection();
+        let cookie_file = state.cookie_file.clone();
+        let replacing = state.replacing_connection();
+        drop(state);
+        let Some(cookie_file) = cookie_file.filter(|_| available) else {
+            let failure = if replacing {
+                Failure::Unavailable
+            } else {
+                Failure::CredentialsRejected
+            };
+            self.youtube_favourite_finished(
+                epoch,
+                track_id,
+                address,
+                favourite,
+                sequence,
+                Err(failure),
+            );
+            return;
+        };
+        let runtime = Arc::clone(&self.youtube_music.runtime);
+        let generation = Arc::clone(&self.youtube_music.favourite_generation);
+        self.youtube_music.account_worker.run(move || {
+            if generation.load(Ordering::Acquire) != epoch {
+                return;
+            }
+            let outcome = runtime.block_on(async {
+                tokio::select! {
+                    outcome = async {
+                        Session::from_cookie_file(&cookie_file).await?
+                            .set_favourite(&address, favourite).await
+                    } => Some(outcome),
+                    () = wait_for_sync_cancellation(&generation, epoch) => None,
+                }
+            });
+            if let Some(outcome) = outcome {
+                post(move |application| {
+                    application.youtube_favourite_finished(
+                        epoch, track_id, address, favourite, sequence, outcome,
+                    )
+                });
+            }
+        });
+    }
+
+    fn youtube_favourite_finished(
+        &self,
+        epoch: u64,
+        track_id: i64,
+        address: String,
+        favourite: bool,
+        sequence: u64,
+        outcome: Result<(), Failure>,
+    ) {
+        if self
+            .youtube_music
+            .favourite_generation
+            .load(Ordering::Acquire)
+            != epoch
+        {
+            return;
+        }
+        let rejected = outcome.is_err_and(|failure| failure.credentials_rejected());
+        let effects = self
+            .favourite_tracks
+            .borrow_mut()
+            .youtube_push_finished(track_id, address, sequence, favourite, outcome);
+        if rejected {
+            self.cancel_youtube_favourites();
+            let effects = self
+                .youtube_music
+                .integration
+                .borrow_mut()
+                .credentials_rejected();
+            self.run(effects);
+            self.refresh_youtube_integration();
+        }
+        self.run(effects);
+        self.refresh_favourite(track_id);
+        self.refresh_player();
+    }
+
+    pub(super) fn persist_youtube_favourite(
+        &self,
+        track_id: i64,
+        address: String,
+        favourite: bool,
+    ) {
+        let epoch = self
+            .youtube_music
+            .favourite_generation
+            .load(Ordering::Acquire);
+        let generation = Arc::clone(&self.youtube_music.favourite_generation);
+        let database = Arc::clone(&self.database);
+        self.library_worker.run(move || {
+            if generation.load(Ordering::Acquire) != epoch {
+                return;
+            }
+            let outcome = (|| {
+                if !library::set_youtube_music_favourite(&database, track_id, &address, favourite)?
+                {
+                    return Ok(None);
+                }
+                LibrarySnapshot::read(&database).map(Some)
+            })();
+            post(move |application| {
+                if application
+                    .youtube_music
+                    .favourite_generation
+                    .load(Ordering::Acquire)
+                    != epoch
+                {
+                    return;
+                }
+                match outcome {
+                    Ok(Some(snapshot)) => {
+                        application.take_library(snapshot);
+                        application.refresh_favourite(track_id);
+                        application.refresh_playlists();
+                        application.refresh_player();
+                    }
+                    Ok(None) => {}
+                    Err(error) => {
+                        log::error!("save YouTube Music favourite: {error}");
+                        application.notify_error("error.library", vec![("message", error)], None);
+                    }
+                }
+            });
+        });
+    }
+
     pub(super) fn import_youtube_browser(&self, browser: Browser, epoch: u64) {
+        self.cancel_youtube_favourites();
         self.youtube_music
             .sync_generation
             .store(epoch, Ordering::Release);
@@ -137,6 +292,14 @@ impl Application {
     }
 
     pub(super) fn sync_youtube_library(&self, cookie_file: PathBuf, epoch: u64) {
+        if self
+            .youtube_music
+            .integration
+            .borrow()
+            .replacing_connection()
+        {
+            self.cancel_youtube_favourites();
+        }
         self.youtube_music
             .sync_generation
             .store(epoch, Ordering::Release);
@@ -274,6 +437,7 @@ impl Application {
     }
 
     pub(super) fn remove_youtube_library(&self) {
+        self.cancel_youtube_favourites();
         self.youtube_music
             .sync_generation
             .fetch_add(1, Ordering::AcqRel);

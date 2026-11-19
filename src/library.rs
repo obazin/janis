@@ -1071,6 +1071,8 @@ pub struct YouTubeMusicTrack {
 pub struct YouTubeMusicLibrary {
     pub tracks: Vec<YouTubeMusicTrack>,
     pub playlists: Vec<YouTubeMusicPlaylist>,
+    /// The available liked songs, newest first, all included in `tracks`.
+    pub liked_track_identifiers: Vec<String>,
 }
 
 /// One saved playlist, with the available songs in their provider order.
@@ -1081,12 +1083,12 @@ pub struct YouTubeMusicPlaylist {
     pub track_identifiers: Vec<String>,
 }
 
-/// Imports a complete account listing. Every network page, including playlist
-/// contents, must be read before calling: absent songs and playlists are
-/// removed from this source only. Validation precedes all writes; retained
-/// rows keep their identity, stars, grouping, pictures and measured loudness.
-/// Writes release the mutex between bursts. The kept cookie-file path changes
-/// with the completed listing, never before.
+/// Imports a complete account listing. Every network page, including liked songs
+/// and playlist contents, must be read before calling: absent songs, playlists
+/// and likes are removed from this source only. Validation precedes all writes;
+/// retained rows keep their identity, grouping, pictures and measured loudness,
+/// and retained likes keep their dates. Writes release the mutex between bursts.
+/// The kept cookie-file path changes with the completed listing, never before.
 pub fn sync_youtube_music_library(
     database: &DbState,
     library: &YouTubeMusicLibrary,
@@ -1140,6 +1142,15 @@ pub fn sync_youtube_music_library(
             return Err("YouTube Music playlist references an unlisted song".to_owned());
         }
     }
+    let mut liked = std::collections::HashSet::with_capacity(library.liked_track_identifiers.len());
+    for identifier in &library.liked_track_identifiers {
+        if !listed.contains(identifier.as_str()) {
+            return Err("YouTube Music likes reference an unlisted song".to_owned());
+        }
+        if !liked.insert(identifier.as_str()) {
+            return Err("duplicate YouTube Music liked video identifier".to_owned());
+        }
+    }
 
     let mut report = ScanReport::default();
     for burst in songs.chunks(SCAN_BATCH) {
@@ -1170,6 +1181,7 @@ pub fn sync_youtube_music_library(
     }
 
     let kept_playlists = sync_youtube_music_playlists(database, &library.playlists)?;
+    sync_youtube_music_favourites(database, &library.liked_track_identifiers, &liked)?;
 
     let connection = database.lock_for_library_change();
     let stored: Vec<(i64, String)> = connection
@@ -1218,6 +1230,139 @@ pub fn sync_youtube_music_library(
         .commit()
         .map_err(|error| format!("YouTube Music prune commit: {error}"))?;
     Ok(report)
+}
+
+/// Acknowledges a remote like only while the persistent row still names this song.
+/// The source and stable address guard SQLite's reuse of removed row identifiers.
+/// The imported Liked Music playlist follows the acknowledged membership too,
+/// without changing its identity, customization or the order of other songs.
+pub fn set_youtube_music_favourite(
+    database: &DbState,
+    track_id: i64,
+    address: &str,
+    favourite: bool,
+) -> Result<bool, String> {
+    let connection = database.lock_for_library_change();
+    let matches: bool = connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM tracks
+             WHERE id = ?1 AND source = 'youtube-music' AND path = ?2)",
+            rusqlite::params![track_id, address],
+            |row| row.get(0),
+        )
+        .map_err(|error| format!("check YouTube Music favourite song: {error}"))?;
+    if !matches {
+        return Ok(false);
+    }
+    let transaction = connection
+        .unchecked_transaction()
+        .map_err(|error| format!("YouTube Music favourite transaction: {error}"))?;
+    let statement = if favourite {
+        "INSERT OR IGNORE INTO favourite_tracks (track_id) VALUES (?1)"
+    } else {
+        "DELETE FROM favourite_tracks WHERE track_id = ?1"
+    };
+    transaction
+        .execute(statement, [track_id])
+        .map_err(|error| format!("persist YouTube Music favourite song: {error}"))?;
+    let playlist_statement = if favourite {
+        "INSERT OR IGNORE INTO playlist_entries (playlist_id, track_id, position)
+         SELECT playlists.id, ?1,
+                (SELECT COALESCE(MIN(position) - 1, 0) FROM playlist_entries
+                 WHERE playlist_id = playlists.id)
+         FROM playlists
+         WHERE source = 'youtube-music' AND provider_identifier = 'LM'"
+    } else {
+        "DELETE FROM playlist_entries WHERE track_id = ?1 AND playlist_id IN
+             (SELECT id FROM playlists
+              WHERE source = 'youtube-music' AND provider_identifier = 'LM')"
+    };
+    transaction
+        .execute(playlist_statement, [track_id])
+        .map_err(|error| format!("update YouTube Music liked playlist: {error}"))?;
+    transaction
+        .commit()
+        .map_err(|error| format!("YouTube Music favourite commit: {error}"))?;
+    Ok(true)
+}
+
+fn sync_youtube_music_favourites(
+    database: &DbState,
+    identifiers: &[String],
+    liked: &std::collections::HashSet<&str>,
+) -> Result<(), String> {
+    let (removed, added_at) = {
+        let connection = database.lock();
+        let removed: Vec<i64> = connection
+            .prepare(
+                "SELECT tracks.id, substr(tracks.path, length('youtube-music://') + 1)
+                 FROM favourite_tracks JOIN tracks ON tracks.id = favourite_tracks.track_id
+                 WHERE tracks.source = 'youtube-music'",
+            )
+            .and_then(|mut statement| {
+                let rows = statement.query_map([], |row| {
+                    Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+                })?;
+                rows.filter_map(|row| match row {
+                    Ok((track_id, identifier)) if !liked.contains(identifier.as_str()) => {
+                        Some(Ok(track_id))
+                    }
+                    Ok(_) => None,
+                    Err(error) => Some(Err(error)),
+                })
+                .collect()
+            })
+            .map_err(|error| format!("list YouTube Music favourites: {error}"))?;
+        let added_at: i64 = connection
+            .query_row("SELECT unixepoch()", [], |row| row.get(0))
+            .map_err(|error| format!("date YouTube Music favourites: {error}"))?;
+        (removed, added_at)
+    };
+    for burst in removed.chunks(SCAN_BATCH) {
+        let connection = database.lock_for_library_change();
+        let transaction = connection
+            .unchecked_transaction()
+            .map_err(|error| format!("YouTube Music unlike transaction: {error}"))?;
+        for track_id in burst {
+            transaction
+                .execute(
+                    "DELETE FROM favourite_tracks WHERE track_id = ?1
+                     AND EXISTS(SELECT 1 FROM tracks
+                         WHERE id = ?1 AND source = 'youtube-music')",
+                    [track_id],
+                )
+                .map_err(|error| format!("remove YouTube Music favourite: {error}"))?;
+        }
+        transaction
+            .commit()
+            .map_err(|error| format!("YouTube Music unlike commit: {error}"))?;
+        drop(connection);
+        database.give_way();
+    }
+    // One timestamp and oldest-first insertion preserve provider order even
+    // when the import crosses seconds or write bursts. Existing dates stay put.
+    for burst in identifiers.rchunks(SCAN_BATCH) {
+        let connection = database.lock_for_library_change();
+        let transaction = connection
+            .unchecked_transaction()
+            .map_err(|error| format!("YouTube Music like transaction: {error}"))?;
+        for identifier in burst.iter().rev() {
+            transaction
+                .execute(
+                    "INSERT OR IGNORE INTO favourite_tracks (track_id, added_at)
+                     SELECT id, ?2 FROM tracks
+                     WHERE source = 'youtube-music' AND path = 'youtube-music://' || ?1",
+                    rusqlite::params![identifier, added_at],
+                )
+                .map_err(|error| format!("keep YouTube Music favourite: {error}"))?;
+        }
+        transaction
+            .commit()
+            .map_err(|error| format!("YouTube Music like commit: {error}"))?;
+        drop(connection);
+        database.give_way();
+    }
+    Ok(())
 }
 
 /// Writes imported playlists in bounded bursts, preserving Janis-local
@@ -3166,6 +3311,7 @@ mod tests {
                 ),
                 youtube_music_playlist("dropped-list", "Dropped", &["abcdefghijk"]),
             ],
+            liked_track_identifiers: vec!["lmnopqrstuv".to_owned()],
         };
         let before = LibrarySnapshot::read(&database).expect("snapshot before import");
         sync_youtube_music_library(&database, &listing, Path::new("cookies.txt")).expect("import");
@@ -3197,8 +3343,6 @@ mod tests {
         assert_eq!(imported.source, PlaylistSource::YouTubeMusic);
         assert_eq!(imported.server, None);
         assert_eq!(imported.track_ids, [playlist_only_id, saved_id]);
-        persistence::set_favourite_track(&database, playlist_only_id, true)
-            .expect("star playlist song");
 
         persistence::rename_playlist(&database, imported.id, "Forbidden").expect("name protected");
         persistence::remove_playlist(&database, imported.id).expect("deletion protected");
@@ -3302,6 +3446,7 @@ mod tests {
                 "Kept",
                 &["abcdefghijk"],
             )],
+            liked_track_identifiers: vec!["abcdefghijk".to_owned()],
         };
         sync_youtube_music_library(&database, &original, Path::new("kept-cookies.txt"))
             .expect("saved");
@@ -3325,6 +3470,7 @@ mod tests {
             let invalid = YouTubeMusicLibrary {
                 tracks: tracks.clone(),
                 playlists,
+                ..YouTubeMusicLibrary::default()
             };
             assert!(
                 sync_youtube_music_library(&database, &invalid, Path::new("rejected.txt")).is_err()
@@ -3334,6 +3480,10 @@ mod tests {
             assert_eq!(
                 crate::persistence::playlists(&database),
                 Ok(before.playlists.clone())
+            );
+            assert_eq!(
+                crate::persistence::favourite_track_ids(&database),
+                Ok(before.favourite_track_ids.clone())
             );
             assert_eq!(
                 crate::persistence::youtube_music_last_sync(&database),
@@ -3354,6 +3504,7 @@ mod tests {
                 .map(|index| youtube_music_song(&format!("video{index:06}"), "Song"))
                 .collect(),
             playlists: Vec::new(),
+            ..YouTubeMusicLibrary::default()
         };
         let mut track_identifiers: Vec<_> = listing
             .tracks
@@ -3402,6 +3553,360 @@ mod tests {
     }
 
     #[test]
+    fn youtube_music_likes_keep_provider_order_across_bursts_and_retained_dates_on_resync() {
+        let (_directory, database) = fresh_database();
+        let identifiers: Vec<_> = (0..2 * SCAN_BATCH + 3)
+            .map(|index| format!("video{index:06}"))
+            .collect();
+        let mut listing = YouTubeMusicLibrary {
+            tracks: identifiers
+                .iter()
+                .rev()
+                .map(|identifier| youtube_music_song(identifier, "Song"))
+                .collect(),
+            liked_track_identifiers: identifiers[..2 * SCAN_BATCH + 1].to_vec(),
+            ..YouTubeMusicLibrary::default()
+        };
+        sync_youtube_music_library(&database, &listing, Path::new("cookies.txt"))
+            .expect("initial likes");
+        let tracks = list_tracks(&database).expect("all listed songs");
+        let identifiers_to_rows: std::collections::HashMap<_, _> = tracks
+            .iter()
+            .map(|track| {
+                (
+                    track.path.strip_prefix("youtube-music://").expect("source"),
+                    track.id,
+                )
+            })
+            .collect();
+        let expected: Vec<_> = listing
+            .liked_track_identifiers
+            .iter()
+            .map(|identifier| identifiers_to_rows[identifier.as_str()])
+            .collect();
+        assert_eq!(
+            crate::persistence::favourite_track_ids(&database),
+            Ok(expected)
+        );
+        database
+            .lock()
+            .execute("UPDATE favourite_tracks SET added_at = 123", [])
+            .expect("fixed retained dates");
+        let favourite_rows = || {
+            database
+                .lock()
+                .prepare("SELECT track_id, id, added_at FROM favourite_tracks ORDER BY id")
+                .expect("favourite rows")
+                .query_map([], |row| {
+                    Ok((
+                        row.get::<_, i64>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, i64>(2)?,
+                    ))
+                })
+                .expect("favourite query")
+                .collect::<Result<Vec<_>, _>>()
+                .expect("favourite dates")
+        };
+        let retained_before: Vec<_> = favourite_rows()
+            .into_iter()
+            .filter(|(track_id, _, _)| {
+                *track_id != identifiers_to_rows[identifiers[0].as_str()]
+                    && *track_id != identifiers_to_rows[identifiers[1].as_str()]
+            })
+            .collect();
+        listing.liked_track_identifiers = vec![
+            identifiers[2 * SCAN_BATCH + 2].clone(),
+            identifiers[2 * SCAN_BATCH + 1].clone(),
+        ];
+        listing
+            .liked_track_identifiers
+            .extend_from_slice(&identifiers[2..2 * SCAN_BATCH + 1]);
+        let before = LibrarySnapshot::read(&database).expect("before remote changes");
+        sync_youtube_music_library(&database, &listing, Path::new("cookies.txt"))
+            .expect("new likes and remote unlikes");
+        assert!(!before.is_current(&database));
+        let expected: Vec<_> = listing
+            .liked_track_identifiers
+            .iter()
+            .map(|identifier| identifiers_to_rows[identifier.as_str()])
+            .collect();
+        assert_eq!(
+            crate::persistence::favourite_track_ids(&database),
+            Ok(expected)
+        );
+        let retained_after: Vec<_> = favourite_rows()
+            .into_iter()
+            .filter(|(_, _, added_at)| *added_at == 123)
+            .collect();
+        assert_eq!(retained_after, retained_before);
+        assert_eq!(list_tracks(&database), Ok(tracks));
+        listing.liked_track_identifiers.clear();
+        sync_youtube_music_library(&database, &listing, Path::new("cookies.txt"))
+            .expect("no remote likes");
+        assert!(crate::persistence::favourite_track_ids(&database)
+            .expect("all remote unlikes")
+            .is_empty());
+        assert_eq!(count_youtube_music_tracks(&database), Ok(identifiers.len()));
+    }
+
+    #[test]
+    fn malformed_youtube_music_likes_reject_the_complete_listing_without_changes() {
+        let (_directory, database) = fresh_database();
+        let listing = YouTubeMusicLibrary {
+            tracks: vec![youtube_music_song("abcdefghijk", "Cached")],
+            liked_track_identifiers: vec!["abcdefghijk".to_owned()],
+            ..YouTubeMusicLibrary::default()
+        };
+        sync_youtube_music_library(&database, &listing, Path::new("cookies.txt"))
+            .expect("cached like");
+        let before = LibrarySnapshot::read(&database).expect("saved snapshot");
+        let last_sync = crate::persistence::youtube_music_last_sync(&database).expect("sync time");
+        for liked_track_identifiers in [
+            vec!["".to_owned()],
+            vec!["invalid/id!".to_owned()],
+            vec!["lmnopqrstuv".to_owned()],
+            vec!["abcdefghijk".to_owned(), "abcdefghijk".to_owned()],
+        ] {
+            let invalid = YouTubeMusicLibrary {
+                tracks: std::iter::once(youtube_music_song("abcdefghijk", "Changed"))
+                    .chain(
+                        (0..=SCAN_BATCH)
+                            .map(|index| youtube_music_song(&format!("video{index:06}"), "New")),
+                    )
+                    .collect(),
+                liked_track_identifiers,
+                ..YouTubeMusicLibrary::default()
+            };
+            assert!(
+                sync_youtube_music_library(&database, &invalid, Path::new("rejected.txt")).is_err()
+            );
+            assert!(before.is_current(&database));
+            assert_eq!(list_tracks(&database), Ok(before.tracks.clone()));
+            assert_eq!(
+                crate::persistence::favourite_track_ids(&database),
+                Ok(before.favourite_track_ids.clone())
+            );
+            assert_eq!(
+                crate::persistence::youtube_music_last_sync(&database),
+                Ok(last_sync)
+            );
+            assert_eq!(
+                crate::persistence::youtube_music_cookie_file(&database),
+                Ok(Some(PathBuf::from("cookies.txt")))
+            );
+        }
+    }
+
+    #[test]
+    fn acknowledged_youtube_music_likes_update_liked_music_without_changing_playlist_customization()
+    {
+        use crate::persistence;
+
+        let (_directory, database) = fresh_database();
+        let listing = YouTubeMusicLibrary {
+            tracks: vec![
+                youtube_music_song("abcdefghijk", "First"),
+                youtube_music_song("lmnopqrstuv", "Second"),
+                youtube_music_song("wxyzabcdefg", "New like"),
+            ],
+            playlists: vec![
+                youtube_music_playlist("LM", "Liked Music", &["abcdefghijk", "lmnopqrstuv"]),
+                youtube_music_playlist("other", "Other", &["abcdefghijk", "wxyzabcdefg"]),
+            ],
+            liked_track_identifiers: vec!["abcdefghijk".to_owned(), "lmnopqrstuv".to_owned()],
+        };
+        sync_youtube_music_library(&database, &listing, Path::new("cookies.txt"))
+            .expect("saved playlists");
+        let snapshot = LibrarySnapshot::read(&database).expect("saved snapshot");
+        let track = |identifier: &str| {
+            snapshot
+                .tracks
+                .iter()
+                .find(|track| track.path == format!("youtube-music://{identifier}"))
+                .expect("listed song")
+        };
+        let first = track("abcdefghijk");
+        let second = track("lmnopqrstuv");
+        let added = track("wxyzabcdefg");
+        let playlist_id = snapshot
+            .playlists
+            .iter()
+            .find(|playlist| playlist.name == "Liked Music")
+            .expect("liked playlist")
+            .id;
+        let group_id = persistence::create_playlist_group(&database, "Moods").expect("group");
+        persistence::set_playlist_group(&database, playlist_id, Some(group_id)).expect("grouping");
+        persistence::set_playlist_picture(&database, playlist_id, Some(&[1, 2, 3]))
+            .expect("custom picture");
+        let before = persistence::playlists(&database).expect("customized playlists");
+        database
+            .lock()
+            .execute_batch(
+                "CREATE TRIGGER reject_liked_playlist_insert
+                 BEFORE INSERT ON playlist_entries
+                 BEGIN SELECT RAISE(ABORT, 'rejected playlist update'); END;",
+            )
+            .expect("failing playlist write");
+        assert!(set_youtube_music_favourite(&database, added.id, &added.path, true).is_err());
+        assert_eq!(persistence::playlists(&database), Ok(before.clone()));
+        assert_eq!(
+            persistence::favourite_track_ids(&database),
+            Ok(vec![first.id, second.id])
+        );
+        database
+            .lock()
+            .execute_batch("DROP TRIGGER reject_liked_playlist_insert;")
+            .expect("allow playlist writes");
+        assert_eq!(
+            set_youtube_music_favourite(&database, first.id, &first.path, true),
+            Ok(true)
+        );
+        assert_eq!(persistence::playlists(&database), Ok(before.clone()));
+        let before_like = LibrarySnapshot::read(&database).expect("before new like");
+        assert_eq!(
+            set_youtube_music_favourite(&database, added.id, &added.path, true),
+            Ok(true)
+        );
+        assert!(!before_like.is_current(&database));
+        let mut expected = before;
+        expected
+            .iter_mut()
+            .find(|playlist| playlist.id == playlist_id)
+            .expect("same playlist")
+            .track_ids = vec![added.id, first.id, second.id];
+        assert_eq!(persistence::playlists(&database), Ok(expected.clone()));
+        assert_eq!(
+            set_youtube_music_favourite(&database, first.id, &first.path, false),
+            Ok(true)
+        );
+        expected
+            .iter_mut()
+            .find(|playlist| playlist.id == playlist_id)
+            .expect("same playlist")
+            .track_ids = vec![added.id, second.id];
+        let after_unlike = LibrarySnapshot::read(&database).expect("updated snapshot");
+        assert_eq!(after_unlike.playlists, expected);
+        assert!(!after_unlike.favourite_track_ids.contains(&first.id));
+        assert_eq!(
+            persistence::playlist_picture(&database, playlist_id),
+            Ok(Some(vec![1, 2, 3]))
+        );
+        assert_eq!(
+            set_youtube_music_favourite(&database, first.id, &first.path, true),
+            Ok(true)
+        );
+        expected
+            .iter_mut()
+            .find(|playlist| playlist.id == playlist_id)
+            .expect("same playlist")
+            .track_ids = vec![first.id, added.id, second.id];
+        assert_eq!(persistence::playlists(&database), Ok(expected));
+    }
+
+    #[test]
+    fn acknowledged_youtube_music_likes_guard_source_address_and_reused_rows() {
+        let (_directory, database) = fresh_database();
+        let listing = YouTubeMusicLibrary {
+            tracks: vec![youtube_music_song("abcdefghijk", "Saved")],
+            ..YouTubeMusicLibrary::default()
+        };
+        sync_youtube_music_library(&database, &listing, Path::new("cookies.txt"))
+            .expect("saved song");
+        let track = list_tracks(&database).expect("track").remove(0);
+        let before = LibrarySnapshot::read(&database).expect("before like");
+        assert_eq!(
+            set_youtube_music_favourite(&database, track.id, &track.path, true),
+            Ok(true)
+        );
+        assert!(!before.is_current(&database));
+        assert!(LibrarySnapshot::read(&database)
+            .expect("no synthetic liked playlist")
+            .playlists
+            .is_empty());
+        database
+            .lock()
+            .execute("UPDATE favourite_tracks SET added_at = 123", [])
+            .expect("fixed like date");
+        assert_eq!(
+            set_youtube_music_favourite(&database, track.id, &track.path, true),
+            Ok(true)
+        );
+        assert_eq!(
+            database.lock().query_row(
+                "SELECT added_at FROM favourite_tracks WHERE track_id = ?1",
+                [track.id],
+                |row| row.get::<_, i64>(0)
+            ),
+            Ok(123)
+        );
+        for favourite in [false, true] {
+            assert_eq!(
+                set_youtube_music_favourite(
+                    &database,
+                    track.id,
+                    "youtube-music://lmnopqrstuv",
+                    favourite
+                ),
+                Ok(false)
+            );
+            assert_eq!(
+                set_youtube_music_favourite(&database, -1, &track.path, favourite),
+                Ok(false)
+            );
+        }
+        assert_eq!(
+            crate::persistence::favourite_track_ids(&database),
+            Ok(vec![track.id])
+        );
+        assert_eq!(
+            set_youtube_music_favourite(&database, track.id, &track.path, false),
+            Ok(true)
+        );
+        database
+            .lock()
+            .execute("DELETE FROM tracks WHERE id = ?1", [track.id])
+            .expect("removed song");
+        assert_eq!(
+            set_youtube_music_favourite(&database, track.id, &track.path, true),
+            Ok(false)
+        );
+        sync_youtube_music_library(
+            &database,
+            &YouTubeMusicLibrary {
+                tracks: vec![youtube_music_song("lmnopqrstuv", "Replacement")],
+                ..YouTubeMusicLibrary::default()
+            },
+            Path::new("cookies.txt"),
+        )
+        .expect("replacement song");
+        let replacement = list_tracks(&database).expect("replacement").remove(0);
+        assert_eq!(replacement.id, track.id);
+        assert_eq!(
+            set_youtube_music_favourite(&database, track.id, &track.path, true),
+            Ok(false)
+        );
+        database
+            .lock()
+            .execute(
+                "UPDATE tracks SET source = 'file' WHERE id = ?1",
+                [track.id],
+            )
+            .expect("foreign row with provider-shaped address");
+        crate::persistence::set_favourite_track(&database, track.id, true).expect("foreign star");
+        for favourite in [false, true] {
+            assert_eq!(
+                set_youtube_music_favourite(&database, track.id, &replacement.path, favourite),
+                Ok(false)
+            );
+        }
+        assert_eq!(
+            crate::persistence::favourite_track_ids(&database),
+            Ok(vec![track.id])
+        );
+    }
+
+    #[test]
     fn youtube_music_sync_updates_metadata_and_preserves_retained_track_state() {
         let (directory, database) = fresh_database();
         let first = YouTubeMusicLibrary {
@@ -3409,6 +3914,7 @@ mod tests {
                 youtube_music_song("abcdefghijk", "Kept"),
                 youtube_music_song("lmnopqrstuv", "Removed"),
             ],
+            liked_track_identifiers: vec!["abcdefghijk".to_owned(), "lmnopqrstuv".to_owned()],
             ..YouTubeMusicLibrary::default()
         };
         let report =
@@ -3421,13 +3927,7 @@ mod tests {
             .iter()
             .find(|track| track.title == "Kept")
             .expect("kept");
-        let removed = tracks
-            .iter()
-            .find(|track| track.title == "Removed")
-            .expect("removed");
         let kept_id = kept.id;
-        crate::persistence::set_favourite_track(&database, kept_id, true).expect("star kept");
-        crate::persistence::set_favourite_track(&database, removed.id, true).expect("star removed");
         store_loudness(&database, kept_id, -14.0, 0.9);
         database
             .lock()
@@ -3451,6 +3951,7 @@ mod tests {
             &database,
             &YouTubeMusicLibrary {
                 tracks: vec![changed],
+                liked_track_identifiers: vec!["abcdefghijk".to_owned()],
                 ..YouTubeMusicLibrary::default()
             },
             Path::new("replacement-cookies.txt"),
@@ -3551,6 +4052,7 @@ mod tests {
             &database,
             &YouTubeMusicLibrary {
                 tracks: vec![youtube_music_song("abcdefghijk", "YouTube")],
+                liked_track_identifiers: vec!["abcdefghijk".to_owned()],
                 ..YouTubeMusicLibrary::default()
             },
             Path::new("fixture-cookies.txt"),
@@ -3584,13 +4086,31 @@ mod tests {
             .find(|track| track.source == TrackSource::YouTubeMusic)
             .expect("YouTube track")
             .id;
-        crate::persistence::set_favourite_track(&database, youtube_id, true).expect("star YouTube");
+        assert!(crate::persistence::favourite_track_ids(&database)
+            .expect("provider like")
+            .contains(&youtube_id));
         let server_track = tracks
             .iter()
             .find(|track| track.source == TrackSource::Jellyfin)
             .expect("server track")
             .clone();
         let server_libraries = crate::persistence::server_libraries(&database).expect("libraries");
+        sync_youtube_music_library(
+            &database,
+            &YouTubeMusicLibrary {
+                tracks: vec![youtube_music_song("abcdefghijk", "YouTube")],
+                ..YouTubeMusicLibrary::default()
+            },
+            Path::new("fixture-cookies.txt"),
+        )
+        .expect("remote unlike");
+        let favourites = crate::persistence::favourite_track_ids(&database).expect("other stars");
+        assert_eq!(favourites.len(), 2);
+        assert!(favourites.contains(&file_id) && favourites.contains(&server_track.id));
+        assert_eq!(
+            set_youtube_music_favourite(&database, youtube_id, "youtube-music://abcdefghijk", true),
+            Ok(true)
+        );
 
         remove_youtube_music_tracks(&database).expect("disconnect YouTube");
         assert_eq!(count_youtube_music_tracks(&database), Ok(0));
@@ -3806,6 +4326,7 @@ mod tests {
                     "Cached",
                     &["abcdefghijk"],
                 )],
+                ..YouTubeMusicLibrary::default()
             },
             Path::new("kept-cookies.txt"),
         )

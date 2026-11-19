@@ -27,6 +27,7 @@ pub(super) struct YouTubeMusicController {
     pub(super) account_cookie_file: Arc<RwLock<Option<PathBuf>>>,
     pub(super) generation: Arc<AtomicU64>,
     pub(super) sync_generation: Arc<AtomicU64>,
+    pub(super) favourite_generation: Arc<AtomicU64>,
     pub(super) browser_activity: Arc<BrowserImportActivity>,
     pub(super) runtime: Arc<tokio::runtime::Runtime>,
     pub(super) account_worker: Worker,
@@ -49,6 +50,7 @@ impl YouTubeMusicController {
             account_cookie_file: Arc::new(RwLock::new(cookie_file)),
             generation: Arc::new(AtomicU64::new(0)),
             sync_generation: Arc::new(AtomicU64::new(0)),
+            favourite_generation: Arc::new(AtomicU64::new(0)),
             browser_activity: Arc::new(BrowserImportActivity::default()),
             runtime: Arc::new(runtime),
             account_worker: Worker::new("janis youtube account")?,
@@ -291,7 +293,7 @@ pub(super) fn source_picture(
     address
         .map(|address| {
             let bytes = runtime
-                .block_on(session.artwork(address))
+                .block_on(session.artwork(address, longest_side))
                 .map_err(|error| error.to_string())?;
             covers::picture_cover(bytes, longest_side)
         })
